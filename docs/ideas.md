@@ -10,3 +10,7 @@ A running dump of ideas. Add freely; nothing here is decided unless it's in the 
   - Possible borrow: a rolling "Munda Strike" jackpot funded by a slice of each round's fees, on top of the six-crowns payout.
   - Possible borrow: points for every bet, spent on weekly draws.
   - Possible borrow: shared one-minute rounds and a public check-any-round fairness page.
+- Reference: Papertrade (https://docs.papertrade.xyz/). A 1000x perps venue on Hyperliquid where every trade faces one LP. The LP is not seeded: it starts at $0 and grows only from user losses (the "Martingaler" mechanism). If the LP can't pay a win, the win goes into a first-in-first-out payout queue, paid as future losses come in. Losers are minted PAPER, a token that is the only way to own the LP's economics (it earns 1% of PnL plus overflow above $5M). The house takes its cut from winners only, through a haircut plus a 2% win fee.
+  - Possible borrow: Martingaler-style pool, so there's no seed capital and no hard bet cap, and the queue absorbs variance.
+  - Possible borrow: "lose and you own the house" tokens, minted to losing bettors.
+  - Possible borrow: take the fee from wins only.
