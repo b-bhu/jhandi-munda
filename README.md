@@ -27,3 +27,9 @@ It should be the mela street game: a flashy dealer, a worn cloth board, the bowl
 - Tech choices (not decided yet)
 
 All ideas go in `docs/ideas.md`.
+
+## Plan (three phases)
+
+1. **Plan (steps 2–5), no building:** a Q&A grilling to lock game design, tech choices, pool program logic and game round logic. Answers go to `docs/decisions.md`.
+2. **Build and test (steps 6–7):** the UI and end-to-end devnet testing.
+3. **Demo and submit:** website, repo, pitch video, Explorer links. Bibhu handles Luma registration.
