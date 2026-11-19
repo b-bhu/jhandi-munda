@@ -1,0 +1,13 @@
+{
+  "name": "jhandi-munda-casino",
+  "version": "1.0.0",
+  "description": "Jhandi Munda Casino: the street dice game, onchain.",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "packageManager": "pnpm@10.34.6",
+  "private": true
+}
