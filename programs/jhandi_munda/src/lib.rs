@@ -88,6 +88,10 @@ pub mod jhandi_munda {
         fees::handle_claim_stake_rewards(ctx)
     }
 
+    pub fn delegate_round<'info>(ctx: Context<'info, DelegateRound<'info>>) -> Result<()> {
+        er_delegate::handle_delegate_round(ctx)
+    }
+
     pub fn init_munda(ctx: Context<InitMunda>) -> Result<()> {
         claim_redeem::handle_init_munda(ctx)
     }

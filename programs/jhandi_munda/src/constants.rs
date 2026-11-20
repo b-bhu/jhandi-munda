@@ -113,6 +113,12 @@ pub const TREASURY_AUTHORITY_SEED: &[u8] = b"treasury_authority";
 /// holds this, the 20% slice fills it. After that, the 20% slice goes to treasury.
 pub const INSURANCE_TARGET: u64 = 1_000_000_000;
 
+/// MagicBlock Ephemeral Rollup validator, Asia region, devnet (validator 1.1.1).
+/// From docs/reference/magicblock/notes.md, section 2 (the devnet table). The
+/// other public regions are EU and US (US runs validator 2.0, which SDK 0.18 does
+/// not target).
+pub const ER_VALIDATOR_ASIA: Pubkey = pubkey!("MAS1Dt9qreoRMQ14YQuhg8UTZMMzDdKhmkZMECCzk57");
+
 /// Minimum bet: $1 MUSD in base units (D3).
 pub const MIN_BET: u64 = 1_000_000;
 

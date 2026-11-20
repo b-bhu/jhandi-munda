@@ -1642,3 +1642,68 @@ fn test_stakers_slice_leaves_pool_nav() {
     assert_eq!(token_amount(&t.svm, &b_ata), 50_000_000 + 140_000);
     assert_eq!(token_amount(&t.svm, &rewards), 0, "the rewards vault pays out in full");
 }
+
+// Delegation program (DLP) id from the SDK. The tests load the no-op stub here,
+// so the SDK's CPIs succeed and the instruction's own checks run for real.
+fn dlp_id() -> Pubkey {
+    Pubkey::new_from_array(ephemeral_rollups_sdk::id().to_bytes())
+}
+
+#[test]
+fn test_delegate_round_size_under_er_cap() {
+    let mut t = setup();
+    stub_vrf(&mut t);
+    t.svm.add_program(dlp_id(), include_bytes!("fixtures/vrf_stub.so")).unwrap();
+
+    // A live round with an open bet: this is what gets delegated.
+    let alice = new_player(&mut t);
+    assert!(place(&mut t, &alice, 2, 10_000_000).is_ok());
+    let round = t.round;
+
+    // Size budget (D20, notes section 2): the delegated round must stay under the
+    // 10,240-byte ER commit cap.
+    let size = t.svm.get_account(&round).unwrap().data.len();
+    assert_eq!(size, 392, "measured round size, as recorded in docs/er-design.md");
+    assert!(size <= 10_240, "round is {size} bytes, over the 10,240-byte cap");
+
+    let program = jhandi_munda::id();
+    let buffer = Pubkey::find_program_address(
+        &[ephemeral_rollups_sdk::pda::DELEGATE_BUFFER_TAG, round.as_ref()],
+        &program,
+    )
+    .0;
+    let record = Pubkey::find_program_address(
+        &[ephemeral_rollups_sdk::pda::DELEGATION_RECORD_TAG, round.as_ref()],
+        &dlp_id(),
+    )
+    .0;
+    let metadata = Pubkey::find_program_address(
+        &[ephemeral_rollups_sdk::pda::DELEGATION_METADATA_TAG, round.as_ref()],
+        &dlp_id(),
+    )
+    .0;
+    let res = send(
+        &mut t.svm,
+        &alice,
+        ix(
+            jhandi_munda::accounts::DelegateRound {
+                payer: alice.pubkey(),
+                round,
+                buffer_round: buffer,
+                delegation_record_round: record,
+                delegation_metadata_round: metadata,
+                owner_program: program,
+                delegation_program: dlp_id(),
+                system_program: SYS,
+            },
+            jhandi_munda::instruction::DelegateRound {},
+        ),
+    );
+    assert!(res.is_ok(), "delegate_round failed: {:?}", res.err());
+
+    // The SDK hands the round to the delegation program; the data stays at the same size.
+    let after = t.svm.get_account(&round).unwrap();
+    assert_eq!(after.owner, dlp_id(), "the round is now owned by the delegation program");
+    assert_eq!(after.data.len(), size, "delegated round keeps its size");
+    assert!(after.data.len() <= 10_240);
+}

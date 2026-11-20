@@ -126,3 +126,7 @@ node scripts/devnet-vrf-roll.mjs keys/dev-wallet.json
 
 
 Devnet and local only. Keypairs go in `keys/` or `~/.config/solana` and are never committed.
+
+## Ephemeral Rollup design
+
+Which tokens move on the rollup and which stay on Solana, the account size budget, and the open points: see [docs/er-design.md](docs/er-design.md).
