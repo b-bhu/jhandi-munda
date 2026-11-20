@@ -18,4 +18,8 @@ pub mod jhandi_munda {
     pub fn initialize(ctx: Context<Initialize>) -> Result<()> {
         initialize::handler(ctx)
     }
+
+    pub fn musd_faucet(ctx: Context<MusdFaucet>) -> Result<()> {
+        faucet::handler(ctx)
+    }
 }
