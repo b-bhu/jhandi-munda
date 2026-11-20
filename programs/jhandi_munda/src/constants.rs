@@ -69,6 +69,13 @@ pub const LOSS_UNLOCK_SECS: i64 = 24 * 60 * 60;
 /// A loss claim's "Take now" tax: 1000 BPS, so 90% now and 10% never minted (D23).
 pub const LOSS_EARLY_EXIT_BPS: u16 = 1_000;
 
+/// Payout queue PDA seed (D4, D30): one queue for the whole table, on Solana.
+pub const QUEUE_SEED: &[u8] = b"payout_queue";
+
+/// Queue capacity in entries: 100 unpaid wins. At 40 bytes an entry the account
+/// is about 4 KB, well under the 10,240-byte ER commit cap.
+pub const QUEUE_CAPACITY: usize = 100;
+
 /// Minimum bet: $1 MUSD in base units (D3).
 pub const MIN_BET: u64 = 1_000_000;
 

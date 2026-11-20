@@ -12,8 +12,8 @@ use anchor_lang::solana_program::{
 };
 
 use crate::{
-    error::ErrorCode, state::PoolState, POOL_SEED, POOL_VAULT_SEED, SHARE_MINT_SEED,
-    SPL_TOKEN_PROGRAM_ID,
+    error::ErrorCode, state::{PayoutQueue, PoolState}, POOL_SEED, POOL_VAULT_SEED, QUEUE_SEED,
+    SHARE_MINT_SEED, SPL_TOKEN_PROGRAM_ID,
 };
 
 /// SPL token `Burn` (8) and `Transfer` (3) discriminators, hand built like the
@@ -61,6 +61,11 @@ pub struct Withdraw<'info> {
     #[account(mut)]
     pub withdrawer_ata: UncheckedAccount<'info>,
 
+    /// The payout queue (Step 8). Read only: LPs cannot withdraw while winners
+    /// are queued for payment, so they cannot jump the line (D30).
+    #[account(seeds = [QUEUE_SEED], bump)]
+    pub queue: AccountLoader<'info, PayoutQueue>,
+
     /// CHECK: verified against SPL_TOKEN_PROGRAM_ID in the handler.
     pub token_program: UncheckedAccount<'info>,
 }
@@ -101,6 +106,11 @@ pub fn handler(ctx: Context<Withdraw>, amount: u64) -> Result<()> {
         SPL_TOKEN_PROGRAM_ID,
         ErrorCode::InvalidTokenProgram
     );
+    // Winners queued for payment come before any LP withdraw (D30).
+    {
+        let queue = ctx.accounts.queue.load()?;
+        require!(queue.head == queue.tail, ErrorCode::QueueNotEmpty);
+    }
     // Zero-amount withdraws are rejected, like zero-amount deposits.
     require!(amount > 0, ErrorCode::ZeroWithdraw);
     // Shares only burn from the canonical share ATA; MUSD only lands in the

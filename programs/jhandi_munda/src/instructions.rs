@@ -6,6 +6,7 @@ pub mod place_bet;
 pub mod callback_roll;
 pub mod claim_open;
 pub mod claim_redeem;
+pub mod payout_queue;
 pub mod request_roll;
 pub mod settle;
 pub mod pool_withdraw;
@@ -31,6 +32,8 @@ pub use callback_roll::*;
 pub use claim_open::*;
 #[allow(ambiguous_glob_reexports)]
 pub use claim_redeem::*;
+#[allow(ambiguous_glob_reexports)]
+pub use payout_queue::*;
 #[allow(ambiguous_glob_reexports)]
 pub use request_roll::*;
 #[allow(ambiguous_glob_reexports)]

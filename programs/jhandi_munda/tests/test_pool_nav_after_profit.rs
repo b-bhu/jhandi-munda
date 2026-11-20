@@ -21,7 +21,7 @@ use {
     },
     jhandi_munda::{
         CONFIG_SEED, FAUCET_AMOUNT, FAUCET_COOLDOWN_SECS, FAUCET_RECORD_SEED,
-        MUSD_MINT_AUTHORITY_SEED, MUSD_MINT_SEED, POOL_SEED, POOL_VAULT_SEED, SHARE_MINT_SEED,
+        MUSD_MINT_AUTHORITY_SEED, MUSD_MINT_SEED, POOL_SEED, POOL_VAULT_SEED, QUEUE_SEED, SHARE_MINT_SEED,
         SPL_TOKEN_PROGRAM_ID,
     },
     litesvm::{types::TransactionResult, LiteSVM},
@@ -131,6 +131,21 @@ fn setup() -> (
     let res = send(&mut svm, &payer, &instruction);
     assert!(res.is_ok(), "initialize_pool failed: {:?}", res.err());
 
+    // The payout queue (Step 8): an LP withdraw is refused while winners queue.
+    let queue = Pubkey::find_program_address(&[QUEUE_SEED], &jhandi_munda::id()).0;
+    let instruction = Instruction::new_with_bytes(
+        jhandi_munda::id(),
+        &jhandi_munda::instruction::InitQueue {}.data(),
+        jhandi_munda::accounts::InitQueue {
+            queue,
+            payer: payer.pubkey(),
+            system_program: anchor_lang::solana_program::system_program::ID,
+        }
+        .to_account_metas(None),
+    );
+    let res = send(&mut svm, &payer, &instruction);
+    assert!(res.is_ok(), "init_queue failed: {:?}", res.err());
+
     (svm, payer, config, musd_mint, musd_mint_authority, pool, vault, share_mint)
 }
 
@@ -221,6 +236,7 @@ fn try_withdraw(svm: &mut LiteSVM, wallet: &Keypair, pool: &Pubkey, musd_mint: &
             withdrawer,
             withdrawer_shares,
             withdrawer_ata,
+            queue: Pubkey::find_program_address(&[QUEUE_SEED], &jhandi_munda::id()).0,
             token_program: SPL_TOKEN_PROGRAM_ID,
         }
         .to_account_metas(None),

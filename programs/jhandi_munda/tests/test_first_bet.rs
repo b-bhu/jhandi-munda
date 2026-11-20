@@ -8,7 +8,7 @@ use {
         state::{Bet, Claim, ClaimAsset, Round, RoundStatus, TableConfig},
         BET_SEED, CLAIM_SEED, CONFIG_SEED, INSURANCE_SEED, INSURANCE_VAULT_SEED, MUNDA_MINT_AUTHORITY_SEED,
         MUNDA_MINT_SEED, FAUCET_RECORD_SEED, MUSD_MINT_AUTHORITY_SEED, MUSD_MINT_SEED,
-        POOL_SEED, POOL_VAULT_SEED, ROUND_SEED, SHARE_MINT_SEED, SPL_TOKEN_PROGRAM_ID, TABLE_SEED,
+        POOL_SEED, POOL_VAULT_SEED, QUEUE_SEED, ROUND_SEED, SHARE_MINT_SEED, SPL_TOKEN_PROGRAM_ID, TABLE_SEED,
     },
     litesvm::{types::TransactionResult, LiteSVM},
     solana_keypair::Keypair,
@@ -115,6 +115,14 @@ fn setup() -> Table {
             },
             jhandi_munda::instruction::InitializeTable {},
         ),
+        ix(
+            jhandi_munda::accounts::InitQueue {
+                queue: pda(&[QUEUE_SEED]),
+                payer: a.pubkey(),
+                system_program: SYS,
+            },
+            jhandi_munda::instruction::InitQueue {},
+        ),
     ];
     for step in steps {
         let res = send(&mut svm, a, step);
@@ -153,7 +161,7 @@ fn new_player(t: &mut Table) -> Keypair {
 
 // Places one bet on die face `symbol` for `wallet` in round 0.
 fn place(t: &mut Table, wallet: &Keypair, symbol: u8, amount: u64) -> TransactionResult {
-    let bet = pda(&[BET_SEED, &0u64.to_le_bytes(), wallet.pubkey().as_ref(), &[symbol]]);
+    let bet = bet_pda_r(round(t).round_id, wallet, symbol);
     let ata = jhandi_munda::musd_ata(&wallet.pubkey(), &t.musd_mint);
     send(
         &mut t.svm,
@@ -453,7 +461,12 @@ fn finish_round(t: &mut Table, signer: &Keypair) -> TransactionResult {
 }
 
 fn bet_pda(wallet: &Keypair, symbol: u8) -> Pubkey {
-    pda(&[BET_SEED, &0u64.to_le_bytes(), wallet.pubkey().as_ref(), &[symbol]])
+    bet_pda_r(0, wallet, symbol)
+}
+
+// A bet's PDA in a given round.
+fn bet_pda_r(round_id: u64, wallet: &Keypair, symbol: u8) -> Pubkey {
+    pda(&[BET_SEED, &round_id.to_le_bytes(), wallet.pubkey().as_ref(), &[symbol]])
 }
 
 #[test]
@@ -732,6 +745,7 @@ fn redeem_accounts(t: &Table, player: &Keypair, bet: &Pubkey) -> jhandi_munda::a
         insurance_vault: pda(&[INSURANCE_VAULT_SEED]),
         insurance_authority: pda(&[INSURANCE_SEED]),
         player_ata: jhandi_munda::musd_ata(&player.pubkey(), &t.musd_mint),
+        queue: pda(&[QUEUE_SEED]),
         munda_mint,
         munda_mint_authority: pda(&[MUNDA_MINT_AUTHORITY_SEED]),
         player_munda_ata: jhandi_munda::musd_ata(&player.pubkey(), &munda_mint),
@@ -901,4 +915,240 @@ fn test_loss_redeem_now_10_percent_tax() {
     assert_eq!(munda_supply(&t), 900_000, "only the 90% is ever minted");
     assert!(claim(&t, &bet).redeemed);
     assert!(take_now(&mut t, &bob, &bet).is_err(), "a claim redeems once");
+}
+
+#[test]
+fn test_queue_init_empty() {
+    let t = setup();
+    let acc = t.svm.get_account(&pda(&[QUEUE_SEED])).expect("queue PDA must exist");
+    assert_eq!(acc.owner, jhandi_munda::id(), "queue belongs to the program");
+    // Layout: 8-byte discriminator, then head (u64) and tail (u64).
+    let head = u64::from_le_bytes(acc.data[8..16].try_into().unwrap());
+    let tail = u64::from_le_bytes(acc.data[16..24].try_into().unwrap());
+    assert_eq!(head, 0, "an empty queue has head 0");
+    assert_eq!(tail, head, "an empty queue has tail == head");
+    assert_eq!(tail - head, 0, "length is 0");
+    assert!(acc.data.len() < 10_240, "the queue fits the 10,240-byte ER cap");
+}
+
+// The queue as (head, tail, entries): entry i is (claim, amount), 40 bytes each
+// after the 24-byte header (8-byte discriminator, head, tail).
+fn queue_state(t: &Table) -> (u64, u64, Vec<(Pubkey, u64)>) {
+    let data = t.svm.get_account(&pda(&[QUEUE_SEED])).unwrap().data;
+    let head = u64::from_le_bytes(data[8..16].try_into().unwrap());
+    let tail = u64::from_le_bytes(data[16..24].try_into().unwrap());
+    let entries = (head..tail)
+        .map(|i| {
+            let at = 24 + (i as usize % 100) * 40;
+            let claim = Pubkey::from(<[u8; 32]>::try_from(&data[at..at + 32]).unwrap());
+            let amount = u64::from_le_bytes(data[at + 32..at + 40].try_into().unwrap());
+            (claim, amount)
+        })
+        .collect();
+    (head, tail, entries)
+}
+
+#[test]
+fn test_enqueue_win_when_pool_short() {
+    let mut t = setup();
+    stub_vrf(&mut t);
+    // A tiny pool: 5 MUSD from a deposit.
+    let funder = new_player(&mut t);
+    deposit(&mut t, &funder, 5_000_000);
+
+    // Two $10 wins on face 2: each is owed $29.60, more than the whole pool.
+    let alice = new_player(&mut t);
+    let bob = new_player(&mut t);
+    assert!(place(&mut t, &alice, 2, 10_000_000).is_ok());
+    assert!(place(&mut t, &bob, 2, 10_000_000).is_ok());
+    set_time(&mut t, BASE_TIME + 90);
+    assert!(request_roll(&mut t, &alice).is_ok());
+    let mut randomness = [0u8; 32];
+    randomness[..6].copy_from_slice(&[1, 1, 4, 5, 0, 2]);
+    let request_id = round(&t).request_id;
+    assert!(send_callback(&mut t, &alice, randomness, request_id).is_ok());
+    set_time(&mut t, BASE_TIME + 100);
+    let (ab, bb) = (bet_pda(&alice, 2), bet_pda(&bob, 2));
+    assert!(settle_bets(&mut t, &alice, &[ab, bb]).is_ok());
+    assert!(finish_round(&mut t, &alice).is_ok(), "the round still settles");
+    assert!(open_claim(&mut t, &alice, &ab).is_ok());
+    assert!(open_claim(&mut t, &bob, &bb).is_ok());
+
+    // At unlock, the pool holds 5 + 20 = 25 MUSD, so neither $29.60 win can be paid.
+    set_time(&mut t, BASE_TIME + 190);
+    let (ac, bc) = (pda(&[CLAIM_SEED, ab.as_ref()]), pda(&[CLAIM_SEED, bb.as_ref()]));
+    assert!(wait(&mut t, &alice, &ab).is_ok(), "a short pool queues the win, it does not fail");
+    assert!(claim(&t, &ab).queued && !claim(&t, &ab).redeemed);
+    let (head, tail, entries) = queue_state(&t);
+    assert_eq!((head, tail), (0, 1));
+    assert_eq!(entries, vec![(ac, 29_600_000)], "Alice is at the head, owed $29.60");
+
+    // Bob's win goes behind Alice, even though he asks second.
+    assert!(wait(&mut t, &bob, &bb).is_ok());
+    let (head, tail, entries) = queue_state(&t);
+    assert_eq!((head, tail), (0, 2));
+    assert_eq!(entries, vec![(ac, 29_600_000), (bc, 29_600_000)], "FIFO: Alice, then Bob");
+
+    // Nothing was paid: the pool still holds 25 MUSD and each queued claim waits.
+    assert_eq!(token_amount(&t.svm, &t.vault), 25_000_000);
+    assert!(wait(&mut t, &alice, &ab).is_err(), "a queued claim cannot be queued twice");
+    assert!(take_now(&mut t, &alice, &ab).is_err(), "a queued claim cannot take now");
+}
+
+// Cranks the payout queue: `pairs` are (player, claim) in queue order. Each
+// claim is followed by the player's MUSD ATA, as the instruction expects.
+fn pay_queue(t: &mut Table, signer: &Keypair, pairs: &[(&Keypair, Pubkey)]) -> TransactionResult {
+    let mut instruction = ix(
+        jhandi_munda::accounts::PayQueue {
+            queue: pda(&[QUEUE_SEED]),
+            pool: t.pool,
+            pool_vault: t.vault,
+            token_program: SPL_TOKEN_PROGRAM_ID,
+        },
+        jhandi_munda::instruction::PayQueue {},
+    );
+    for (player, claim_key) in pairs {
+        instruction.accounts.push(AccountMeta::new(*claim_key, false));
+        instruction
+            .accounts
+            .push(AccountMeta::new(jhandi_munda::musd_ata(&player.pubkey(), &t.musd_mint), false));
+    }
+    send(&mut t.svm, signer, instruction)
+}
+
+#[test]
+fn test_queue_pays_head_not_newer_winner() {
+    let mut t = setup();
+    stub_vrf(&mut t);
+    let funder = new_player(&mut t);
+    deposit(&mut t, &funder, 5_000_000);
+
+    // Round 1: Alice and Bob each win $29.60 on face 2; the pool holds 25 MUSD.
+    let alice = new_player(&mut t);
+    let bob = new_player(&mut t);
+    assert!(place(&mut t, &alice, 2, 10_000_000).is_ok());
+    assert!(place(&mut t, &bob, 2, 10_000_000).is_ok());
+    set_time(&mut t, BASE_TIME + 90);
+    assert!(request_roll(&mut t, &alice).is_ok());
+    let mut randomness = [0u8; 32];
+    randomness[..6].copy_from_slice(&[1, 1, 4, 5, 0, 2]);
+    let request_id = round(&t).request_id;
+    assert!(send_callback(&mut t, &alice, randomness, request_id).is_ok());
+    set_time(&mut t, BASE_TIME + 100);
+    let (ab, bb) = (bet_pda(&alice, 2), bet_pda(&bob, 2));
+    assert!(settle_bets(&mut t, &alice, &[ab, bb]).is_ok());
+    assert!(finish_round(&mut t, &alice).is_ok());
+    assert!(open_claim(&mut t, &alice, &ab).is_ok());
+    assert!(open_claim(&mut t, &bob, &bb).is_ok());
+    set_time(&mut t, BASE_TIME + 190);
+    assert!(wait(&mut t, &alice, &ab).is_ok(), "Alice queues first");
+    assert!(wait(&mut t, &bob, &bb).is_ok(), "Bob queues behind her");
+    let (ac, bc) = (pda(&[CLAIM_SEED, ab.as_ref()]), pda(&[CLAIM_SEED, bb.as_ref()]));
+    assert_eq!(queue_state(&t).2, vec![(ac, 29_600_000), (bc, 29_600_000)]);
+
+    // Round 2: Carol loses $10 on face 4. Her stake flows into the pool: 35 MUSD.
+    set_time(&mut t, BASE_TIME + 200);
+    let carol = new_player(&mut t);
+    assert!(place(&mut t, &carol, 4, 10_000_000).is_ok());
+    assert_eq!(token_amount(&t.svm, &t.vault), 35_000_000);
+    set_time(&mut t, BASE_TIME + 290);
+    assert!(request_roll(&mut t, &carol).is_ok());
+    let request_id = round(&t).request_id;
+    assert!(send_callback(&mut t, &carol, randomness, request_id).is_ok());
+    set_time(&mut t, BASE_TIME + 300);
+    assert!(settle_bets(&mut t, &carol, &[bet_pda_r(1, &carol, 4)]).is_ok());
+    assert!(finish_round(&mut t, &carol).is_ok());
+
+    // Bob cannot jump the queue: passing his claim first is refused.
+    assert!(pay_queue(&mut t, &carol, &[(&bob, bc)]).is_err(), "no skipping the head");
+
+    // The crank pays Alice (the head) in full. Bob's $29.60 is more than the
+    // $5.40 left, so the crank stops there: Bob stays in the queue.
+    assert!(pay_queue(&mut t, &carol, &[(&alice, ac), (&bob, bc)]).is_ok());
+    let alice_ata = jhandi_munda::musd_ata(&alice.pubkey(), &t.musd_mint);
+    let bob_ata = jhandi_munda::musd_ata(&bob.pubkey(), &t.musd_mint);
+    assert_eq!(token_amount(&t.svm, &alice_ata), 90_000_000 + 29_600_000, "Alice paid in full");
+    assert_eq!(token_amount(&t.svm, &bob_ata), 90_000_000, "Bob not paid yet");
+    assert_eq!(token_amount(&t.svm, &t.vault), 5_400_000);
+    assert!(claim(&t, &ab).redeemed && !claim(&t, &ab).queued);
+    assert!(claim(&t, &bb).queued && !claim(&t, &bb).redeemed);
+    let (head, tail, entries) = queue_state(&t);
+    assert_eq!((head, tail), (1, 2), "one paid, one waiting");
+    assert_eq!(entries, vec![(bc, 29_600_000)]);
+}
+
+// An LP withdraws `amount` shares for MUSD (the program's withdraw instruction).
+fn lp_withdraw(t: &mut Table, lp: &Keypair, amount: u64) -> TransactionResult {
+    let share_mint = pda(&[SHARE_MINT_SEED]);
+    send(
+        &mut t.svm,
+        lp,
+        ix(
+            jhandi_munda::accounts::Withdraw {
+                pool: t.pool,
+                share_mint,
+                vault: t.vault,
+                withdrawer: lp.pubkey(),
+                withdrawer_shares: jhandi_munda::share_ata(&lp.pubkey(), &share_mint),
+                withdrawer_ata: jhandi_munda::musd_ata(&lp.pubkey(), &t.musd_mint),
+                queue: pda(&[QUEUE_SEED]),
+                token_program: SPL_TOKEN_PROGRAM_ID,
+            },
+            jhandi_munda::instruction::Withdraw { amount },
+        ),
+    )
+}
+
+#[test]
+fn test_lp_withdraw_waits_for_queue() {
+    let mut t = setup();
+    stub_vrf(&mut t);
+    // An LP deposits 5 MUSD (5,000,000 shares at NAV $1).
+    let lp = new_player(&mut t);
+    deposit(&mut t, &lp, 5_000_000);
+
+    // Alice wins $29.60 on a $10 bet, but the pool holds only $15: she queues.
+    let alice = new_player(&mut t);
+    assert!(place(&mut t, &alice, 2, 10_000_000).is_ok());
+    set_time(&mut t, BASE_TIME + 90);
+    assert!(request_roll(&mut t, &alice).is_ok());
+    let mut randomness = [0u8; 32];
+    randomness[..6].copy_from_slice(&[1, 1, 4, 5, 0, 2]);
+    let request_id = round(&t).request_id;
+    assert!(send_callback(&mut t, &alice, randomness, request_id).is_ok());
+    set_time(&mut t, BASE_TIME + 100);
+    let ab = bet_pda(&alice, 2);
+    assert!(settle_bets(&mut t, &alice, &[ab]).is_ok());
+    assert!(finish_round(&mut t, &alice).is_ok());
+    assert!(open_claim(&mut t, &alice, &ab).is_ok());
+    set_time(&mut t, BASE_TIME + 190);
+    assert!(wait(&mut t, &alice, &ab).is_ok());
+    let ac = pda(&[CLAIM_SEED, ab.as_ref()]);
+    assert_eq!(queue_state(&t).2, vec![(ac, 29_600_000)], "Alice is queued");
+
+    // The LP cannot take MUSD out while Alice waits.
+    assert!(lp_withdraw(&mut t, &lp, 1_000_000).is_err(), "LP withdraw refused while queued");
+
+    // Round 2: Carol loses $10 on face 4 and $10 on face 6, so the pool holds $35.
+    set_time(&mut t, BASE_TIME + 200);
+    let carol = new_player(&mut t);
+    assert!(place(&mut t, &carol, 4, 10_000_000).is_ok());
+    assert!(place(&mut t, &carol, 6, 10_000_000).is_ok());
+    set_time(&mut t, BASE_TIME + 290);
+    assert!(request_roll(&mut t, &carol).is_ok());
+    let request_id = round(&t).request_id;
+    assert!(send_callback(&mut t, &carol, randomness, request_id).is_ok());
+    set_time(&mut t, BASE_TIME + 300);
+    assert!(settle_bets(&mut t, &carol, &[bet_pda_r(1, &carol, 4), bet_pda_r(1, &carol, 6)]).is_ok());
+    assert!(finish_round(&mut t, &carol).is_ok());
+    assert!(lp_withdraw(&mut t, &lp, 1_000_000).is_err(), "still refused: Alice is not paid yet");
+
+    // The crank pays Alice, the queue empties, and now the LP can withdraw.
+    assert!(pay_queue(&mut t, &carol, &[(&alice, ac)]).is_ok());
+    assert!(lp_withdraw(&mut t, &lp, 1_000_000).is_ok(), "LP withdraw after the queue is paid");
+    // Vault: 35 - 29.60 paid = 5.40. Supply 5,000,000 shares, so 1,000,000 shares
+    // are worth 1,000,000 x 5.40 / 5 = $1.08.
+    let lp_ata = jhandi_munda::musd_ata(&lp.pubkey(), &t.musd_mint);
+    assert_eq!(token_amount(&t.svm, &lp_ata), 95_000_000 + 1_080_000);
+    assert_eq!(token_amount(&t.svm, &t.vault), 4_320_000);
 }

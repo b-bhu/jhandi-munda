@@ -1,5 +1,7 @@
 use anchor_lang::prelude::*;
 
+use crate::QUEUE_CAPACITY;
+
 /// Program-wide settings, first written by `initialize`. Later steps (pool,
 /// table, faucet) read or extend this account.
 #[account]
@@ -171,11 +173,33 @@ pub struct Claim {
     pub early_exit_bps: u16,
     /// Set once the claim is paid out, by Wait or by Take now (one redeem only).
     pub redeemed: bool,
+    /// True while a win waits in the payout queue for the pool to fund it (D4).
+    pub queued: bool,
     /// After a "Take now" win: the full amount the insurance fund advanced at
     /// 95%, which the pool owes back in full (D7). Zero once collected.
     pub insurance_owed: u64,
     /// Bump seed for the claim PDA.
     pub bump: u8,
+}
+
+/// One unpaid win waiting in the payout queue: the claim, and what it is owed.
+/// Plain fixed-size data (40 bytes, no padding), so it can be stored zero-copy.
+#[zero_copy(unsafe)]
+pub struct QueueEntry {
+    pub claim: Pubkey,
+    pub amount: u64,
+}
+
+/// FIFO payout queue (D4, D30). A ring buffer: `head` is the oldest entry and
+/// `tail` the next free slot, both counted up forever and taken modulo
+/// `QUEUE_CAPACITY`. Length is `tail - head`. It is zero-copy because it is
+/// too big to deserialize onto the BPF stack.
+#[account(zero_copy(unsafe))]
+#[repr(C)]
+pub struct PayoutQueue {
+    pub head: u64,
+    pub tail: u64,
+    pub entries: [QueueEntry; QUEUE_CAPACITY],
 }
 
 /// The MUSD faucet cooldown record for one wallet (D33): a small PDA at
