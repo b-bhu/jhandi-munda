@@ -92,6 +92,22 @@ pub mod jhandi_munda {
         er_delegate::handle_delegate_round(ctx)
     }
 
+    pub fn buy_chips(ctx: Context<BuyChips>, amount: u64) -> Result<()> {
+        chips::handle_buy_chips(ctx, amount)
+    }
+
+    pub fn cash_out(ctx: Context<CashOut>, amount: u64) -> Result<()> {
+        chips::handle_cash_out(ctx, amount)
+    }
+
+    pub fn place_bet_chips(ctx: Context<PlaceBetChips>, symbol: u8, amount: u64) -> Result<()> {
+        chips::handle_place_bet_chips(ctx, symbol, amount)
+    }
+
+    pub fn delegate_chip_stack<'info>(ctx: Context<'info, DelegateChipStack<'info>>) -> Result<()> {
+        chips::handle_delegate_chip_stack(ctx)
+    }
+
     pub fn init_munda(ctx: Context<InitMunda>) -> Result<()> {
         claim_redeem::handle_init_munda(ctx)
     }

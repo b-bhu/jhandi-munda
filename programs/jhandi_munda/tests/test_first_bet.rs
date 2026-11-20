@@ -307,8 +307,13 @@ fn stub_vrf(t: &mut Table) {
     t.svm.add_program(VRF_PROGRAM.parse::<Pubkey>().unwrap(), bytes).unwrap();
 }
 
-// Requests a VRF roll for the open round, signed by `payer`.
+// Requests a VRF roll for the open round, signed by `payer`, on the base-layer queue.
 fn request_roll(t: &mut Table, payer: &Keypair) -> TransactionResult {
+    request_roll_on(t, payer, DEFAULT_QUEUE_ID.parse().unwrap())
+}
+
+// Requests a VRF roll on the given queue (Step 11.3 accepts the ephemeral queue).
+fn request_roll_on(t: &mut Table, payer: &Keypair, queue: Pubkey) -> TransactionResult {
     send(
         &mut t.svm,
         payer,
@@ -317,7 +322,7 @@ fn request_roll(t: &mut Table, payer: &Keypair) -> TransactionResult {
                 table: t.table,
                 round: t.round,
                 payer: payer.pubkey(),
-                oracle_queue: DEFAULT_QUEUE_ID.parse().unwrap(),
+                oracle_queue: queue,
                 program_identity: pda(&[b"identity"]),
                 vrf_program: VRF_PROGRAM.parse().unwrap(),
                 slot_hashes: SLOT_HASHES.parse().unwrap(),
@@ -1741,4 +1746,166 @@ fn test_delegate_rejects_stranger() {
     );
     assert!(send(&mut t.svm, &alice, stranger_ix()).is_err(), "a stranger is rejected");
     assert_eq!(t.svm.get_account(&round).unwrap().owner, owner_before, "the round did not move");
+}
+
+// --- Chips at the cage (Step 11.3) ---
+
+fn chip_stack(owner: &Keypair) -> Pubkey {
+    pda(&[jhandi_munda::CHIPS_SEED, owner.pubkey().as_ref()])
+}
+
+fn chip_balance(t: &Table, owner: &Keypair) -> u64 {
+    let data = t.svm.get_account(&chip_stack(owner)).unwrap().data;
+    jhandi_munda::state::ChipStack::try_deserialize(&mut data.as_slice()).unwrap().balance
+}
+
+fn buy_chips(t: &mut Table, owner: &Keypair, amount: u64) -> TransactionResult {
+    send(
+        &mut t.svm,
+        owner,
+        ix(
+            jhandi_munda::accounts::BuyChips {
+                pool: t.pool,
+                pool_vault: t.vault,
+                chips: chip_stack(owner),
+                owner: owner.pubkey(),
+                owner_musd_ata: jhandi_munda::musd_ata(&owner.pubkey(), &t.musd_mint),
+                token_program: SPL_TOKEN_PROGRAM_ID,
+                system_program: SYS,
+            },
+            jhandi_munda::instruction::BuyChips { amount },
+        ),
+    )
+}
+
+fn cash_out(t: &mut Table, owner: &Keypair, amount: u64) -> TransactionResult {
+    send(
+        &mut t.svm,
+        owner,
+        ix(
+            jhandi_munda::accounts::CashOut {
+                pool: t.pool,
+                pool_vault: t.vault,
+                queue: pda(&[QUEUE_SEED]),
+                chips: chip_stack(owner),
+                owner: owner.pubkey(),
+                owner_musd_ata: jhandi_munda::musd_ata(&owner.pubkey(), &t.musd_mint),
+                token_program: SPL_TOKEN_PROGRAM_ID,
+            },
+            jhandi_munda::instruction::CashOut { amount },
+        ),
+    )
+}
+
+// A bet paid from chips: no token transfer, the round is the only thing that changes.
+fn place_chip_bet(t: &mut Table, bettor: &Keypair, symbol: u8, amount: u64) -> TransactionResult {
+    let bet = bet_pda_r(round(t).round_id, bettor, symbol);
+    send(
+        &mut t.svm,
+        bettor,
+        ix(
+            jhandi_munda::accounts::PlaceBetChips {
+                table: t.table,
+                round: t.round,
+                bet,
+                chips: chip_stack(bettor),
+                bettor: bettor.pubkey(),
+                system_program: SYS,
+            },
+            jhandi_munda::instruction::PlaceBetChips { symbol, amount },
+        ),
+    )
+}
+
+#[test]
+fn test_er_bets_on_chips() {
+    let mut t = setup();
+    stub_vrf(&mut t);
+    let a = new_player(&mut t);
+    let b = new_player(&mut t);
+
+    // Chips are bought once on Solana: the MUSD moves into the pool vault.
+    assert!(buy_chips(&mut t, &a, 20_000_000).is_ok());
+    assert_eq!(chip_balance(&t, &a), 20_000_000);
+    assert_eq!(token_amount(&t.svm, &t.vault), 20_000_000);
+    assert!(buy_chips(&mut t, &b, 5_000_000).is_ok());
+    let vault_before = token_amount(&t.svm, &t.vault);
+
+    // Chip bets subtract from chips and move no tokens.
+    assert!(place_chip_bet(&mut t, &a, 2, 10_000_000).is_ok(), "a chip bet opens the round");
+    assert_eq!(chip_balance(&t, &a), 10_000_000);
+    assert_eq!(token_amount(&t.svm, &t.vault), vault_before, "no token transfer for a chip bet");
+    assert!(place_chip_bet(&mut t, &a, 4, 11_000_000).is_err(), "more than the chips held is refused");
+    assert!(place_chip_bet(&mut t, &b, 4, 1_000_000).is_ok(), "a second player joins");
+    assert_eq!(round(&t).players, vec![a.pubkey(), b.pubkey()]);
+
+    // The VRF request goes on the ephemeral queue (D11, D20); any other queue is refused.
+    set_time(&mut t, BASE_TIME + 90);
+    let ephemeral_queue: Pubkey = "5hBR571xnXppuCPveTrctfTU7tJLSN94nq7kv7FRK5Tc".parse().unwrap();
+    assert!(request_roll_on(&mut t, &a, pda(&[b"not_a_queue"])).is_err(), "a foreign queue is refused");
+    assert!(request_roll_on(&mut t, &a, ephemeral_queue).is_ok(), "the ephemeral queue is accepted");
+    assert_eq!(round(&t).status, RoundStatus::Rolling);
+    let mut randomness = [0u8; 32];
+    randomness[..6].copy_from_slice(&[1, 1, 4, 5, 0, 2]);
+    let request_id = round(&t).request_id;
+    assert!(send_callback(&mut t, &a, randomness, request_id).is_ok());
+    assert_eq!(round(&t).faces, [2, 2, 5, 6, 1, 3]);
+
+    // Settle as before. Alice's face-2 bet wins (2 matches) and opens a claim.
+    set_time(&mut t, BASE_TIME + 100);
+    let (ab, bb) = (bet_pda_r(0, &a, 2), bet_pda_r(0, &b, 4));
+    assert!(settle_bets(&mut t, &a, &[ab, bb]).is_ok());
+    assert!(finish_round(&mut t, &a).is_ok());
+    assert!(open_claim(&mut t, &a, &ab).is_ok());
+
+    // Cash-out turns chips back into MUSD (queue empty, D30).
+    let ata = jhandi_munda::musd_ata(&a.pubkey(), &t.musd_mint);
+    let ata_before = token_amount(&t.svm, &ata);
+    assert!(cash_out(&mut t, &a, 5_000_000).is_ok());
+    assert_eq!(chip_balance(&t, &a), 5_000_000);
+    assert_eq!(token_amount(&t.svm, &ata), ata_before + 5_000_000);
+    assert!(cash_out(&mut t, &a, 50_000_000).is_err(), "cannot cash out more chips than held");
+}
+
+#[test]
+fn test_delegated_chips_cannot_cash_out() {
+    let mut t = setup();
+    stub_vrf(&mut t);
+    t.svm.add_program(dlp_id(), include_bytes!("fixtures/vrf_stub.so")).unwrap();
+    let a = new_player(&mut t);
+    assert!(buy_chips(&mut t, &a, 10_000_000).is_ok());
+
+    // Delegate the chip stack with the owner's signature; it is tiny (49 bytes).
+    let chips = chip_stack(&a);
+    let size = t.svm.get_account(&chips).unwrap().data.len();
+    assert!(size <= 10_240, "chip stack is {size} bytes");
+    let buffer = pda_with(&[ephemeral_rollups_sdk::pda::DELEGATE_BUFFER_TAG, chips.as_ref()], &jhandi_munda::id());
+    let record = pda_with(&[ephemeral_rollups_sdk::pda::DELEGATION_RECORD_TAG, chips.as_ref()], &dlp_id());
+    let metadata = pda_with(&[ephemeral_rollups_sdk::pda::DELEGATION_METADATA_TAG, chips.as_ref()], &dlp_id());
+    let res = send(
+        &mut t.svm,
+        &a,
+        ix(
+            jhandi_munda::accounts::DelegateChipStack {
+                owner: a.pubkey(),
+                chips,
+                buffer_chips: buffer,
+                delegation_record_chips: record,
+                delegation_metadata_chips: metadata,
+                owner_program: jhandi_munda::id(),
+                delegation_program: dlp_id(),
+                system_program: SYS,
+            },
+            jhandi_munda::instruction::DelegateChipStack {},
+        ),
+    );
+    assert!(res.is_ok(), "delegate_chip_stack failed: {:?}", res.err());
+    assert_eq!(t.svm.get_account(&chips).unwrap().owner, dlp_id(), "the chips moved to the rollup");
+
+    // Cash-out needs Solana: a delegated stack is refused.
+    assert!(cash_out(&mut t, &a, 1_000_000).is_err(), "no cash-out while delegated");
+}
+
+fn pda_with(seeds: &[&[u8]], program: &Pubkey) -> Pubkey {
+    Pubkey::find_program_address(seeds, program).0
 }

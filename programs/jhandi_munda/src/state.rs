@@ -257,6 +257,19 @@ impl Stake {
     }
 }
 
+/// A player's chips at the cage (D39): MUSD bought on Solana and spent on the
+/// rollup without token transfers. One per wallet, at `["chips", owner]`.
+#[account]
+#[derive(InitSpace)]
+pub struct ChipStack {
+    /// The wallet the chips belong to.
+    pub owner: Pubkey,
+    /// Chips held, in MUSD base units.
+    pub balance: u64,
+    /// Bump seed for the chip stack PDA.
+    pub bump: u8,
+}
+
 /// The MUSD faucet cooldown record for one wallet (D33): a small PDA at
 /// `["faucet", user_pubkey]`, created by the wallet's first faucet call, that
 /// stores when that wallet last claimed. One record per wallet, so every

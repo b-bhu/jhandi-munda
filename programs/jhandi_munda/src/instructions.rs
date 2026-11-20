@@ -12,6 +12,7 @@ pub mod settle;
 pub mod staking;
 pub mod fees;
 pub mod er_delegate;
+pub mod chips;
 pub mod pool_withdraw;
 pub mod table_init;
 
@@ -47,6 +48,8 @@ pub use staking::*;
 pub use fees::*;
 #[allow(ambiguous_glob_reexports)]
 pub use er_delegate::*;
+#[allow(ambiguous_glob_reexports)]
+pub use chips::*;
 #[allow(ambiguous_glob_reexports)]
 pub use pool_withdraw::*;
 #[allow(ambiguous_glob_reexports)]

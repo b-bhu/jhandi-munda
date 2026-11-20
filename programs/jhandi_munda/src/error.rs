@@ -58,6 +58,14 @@ pub enum ErrorCode {
     InsufficientInsuranceFunds,
     #[msg("There is nothing to collect from the pool for this claim")]
     NothingToCollect,
+    #[msg("A chip purchase or cash-out must be greater than zero")]
+    ZeroChips,
+    #[msg("The VRF queue must be the base-layer or the ephemeral queue")]
+    InvalidQueue,
+    #[msg("Only the owner of this chip stack can delegate it")]
+    NotChipOwner,
+    #[msg("Not enough chips for this bet or cash-out")]
+    InsufficientChips,
     #[msg("Only the table authority (the config admin) can delegate the round")]
     NotTableAuthority,
     #[msg("A token account does not have the expected layout")]

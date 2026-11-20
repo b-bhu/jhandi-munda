@@ -119,6 +119,9 @@ pub const INSURANCE_TARGET: u64 = 1_000_000_000;
 /// not target).
 pub const ER_VALIDATOR_ASIA: Pubkey = pubkey!("MAS1Dt9qreoRMQ14YQuhg8UTZMMzDdKhmkZMECCzk57");
 
+/// Chip stack PDA seed: ["chips", owner] (D39).
+pub const CHIPS_SEED: &[u8] = b"chips";
+
 /// Minimum bet: $1 MUSD in base units (D3).
 pub const MIN_BET: u64 = 1_000_000;
 

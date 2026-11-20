@@ -7,7 +7,7 @@
 use anchor_lang::prelude::*;
 use ephemeral_rollups_sdk::anchor::vrf;
 use ephemeral_rollups_sdk::vrf::{
-    consts::{program_identity_pubkey, DEFAULT_QUEUE},
+    consts::{program_identity_pubkey, DEFAULT_EPHEMERAL_QUEUE, DEFAULT_QUEUE},
     instructions::{create_request_randomness_ix_const, RequestRandomnessParams},
     types::SerializableAccountMeta,
 };
@@ -37,8 +37,14 @@ pub struct RequestRoll<'info> {
     #[account(mut)]
     pub payer: Signer<'info>,
 
-    /// CHECK: the base-layer VRF queue (D11). Pinned to `DEFAULT_QUEUE`.
-    #[account(mut, address = DEFAULT_QUEUE)]
+    /// CHECK: the VRF queue (D11). `DEFAULT_QUEUE` on Solana, or
+    /// `DEFAULT_EPHEMERAL_QUEUE` on the rollup (Step 11.3). Nothing else.
+    #[account(
+        mut,
+        constraint = oracle_queue.key() == DEFAULT_QUEUE
+            || oracle_queue.key() == DEFAULT_EPHEMERAL_QUEUE
+            @ ErrorCode::InvalidQueue
+    )]
     pub oracle_queue: UncheckedAccount<'info>,
 }
 
