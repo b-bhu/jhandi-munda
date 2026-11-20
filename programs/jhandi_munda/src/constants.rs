@@ -11,6 +11,19 @@ pub const MUSD_MINT_SEED: &[u8] = b"musd_mint";
 /// program can sign as it (never print or commit a mint authority keypair).
 pub const MUSD_MINT_AUTHORITY_SEED: &[u8] = b"musd_mint_authority";
 
+/// House pool (D4, D27) PDA seed. One pool per program: the house everything
+/// else settles against. Created by `initialize_pool`, starts empty.
+pub const POOL_SEED: &[u8] = b"pool";
+
+/// MUSD vault token account PDA seed. The vault is a plain SPL token account
+/// owned by the pool PDA (`initialize_account3` in the pool handler), so only
+/// pool instructions ever move its MUSD.
+pub const POOL_VAULT_SEED: &[u8] = b"pool_vault";
+
+/// Pool share (LP) mint PDA seed (D27). Deposits mint shares, withdraws burn
+/// them; its mint authority is the pool PDA, not the MUSD mint authority.
+pub const SHARE_MINT_SEED: &[u8] = b"pool_share_mint";
+
 /// Faucet cooldown record PDA, second seed: one record per wallet, so the
 /// full derivation is `["faucet", wallet_pubkey]` (D33).
 pub const FAUCET_RECORD_SEED: &[u8] = b"faucet";
@@ -36,5 +49,11 @@ pub const ATA_PROGRAM_ID: Pubkey = pubkey!("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTN
 /// SPL Token (non-2022) program id.
 pub const SPL_TOKEN_PROGRAM_ID: Pubkey = pubkey!("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
 
-/// Bytes reserved for an SPL token mint account (spl Mint::LEN).
+/// Bytes reserved for an SPL token mint account (spl Mint::LEN). Used by the
+/// MUSD mint in `initialize` and by the pool-share (LP) mint, same layout.
+/// (Kept under the MUSD name for continuity with the Step 2 scaffolding.)
 pub const MUSD_MINT_SPACE: usize = 82;
+
+/// Bytes reserved for an SPL token account (spl state::Account::LEN) — the
+/// pool's MUSD vault.
+pub const TOKEN_ACCOUNT_SPACE: usize = 165;
