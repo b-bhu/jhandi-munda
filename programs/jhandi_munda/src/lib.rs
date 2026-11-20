@@ -76,6 +76,18 @@ pub mod jhandi_munda {
         staking::handle_unstake(ctx, amount)
     }
 
+    pub fn init_fee_vaults(ctx: Context<InitFeeVaults>) -> Result<()> {
+        fees::handle_init_fee_vaults(ctx)
+    }
+
+    pub fn distribute_fees<'info>(ctx: Context<'info, DistributeFees<'info>>) -> Result<()> {
+        fees::handle_distribute_fees(ctx)
+    }
+
+    pub fn claim_stake_rewards(ctx: Context<ClaimStakeRewards>) -> Result<()> {
+        fees::handle_claim_stake_rewards(ctx)
+    }
+
     pub fn init_munda(ctx: Context<InitMunda>) -> Result<()> {
         claim_redeem::handle_init_munda(ctx)
     }

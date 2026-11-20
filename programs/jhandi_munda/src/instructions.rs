@@ -10,6 +10,7 @@ pub mod payout_queue;
 pub mod request_roll;
 pub mod settle;
 pub mod staking;
+pub mod fees;
 pub mod pool_withdraw;
 pub mod table_init;
 
@@ -41,6 +42,8 @@ pub use request_roll::*;
 pub use settle::*;
 #[allow(ambiguous_glob_reexports)]
 pub use staking::*;
+#[allow(ambiguous_glob_reexports)]
+pub use fees::*;
 #[allow(ambiguous_glob_reexports)]
 pub use pool_withdraw::*;
 #[allow(ambiguous_glob_reexports)]

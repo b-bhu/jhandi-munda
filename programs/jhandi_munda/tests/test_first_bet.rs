@@ -1305,3 +1305,159 @@ fn test_unstake_munda_principal() {
     assert!(unstake(&mut t, &a, 10_000_000).is_ok());
     assert_eq!(token_amount(&t.svm, &munda_ata(&a)), 70_000_000);
 }
+
+// --- Fee distribution helpers (Step 9.3) ---
+
+fn init_fee_vaults(t: &mut Table, payer: &Keypair) {
+    let res = send(
+        &mut t.svm,
+        payer,
+        ix(
+            jhandi_munda::accounts::InitFeeVaults {
+                config: t.config,
+                dev_vault: pda(&[jhandi_munda::DEV_VAULT_SEED]),
+                treasury_vault: pda(&[jhandi_munda::TREASURY_VAULT_SEED]),
+                musd_mint: t.musd_mint,
+                treasury_authority: pda(&[jhandi_munda::TREASURY_AUTHORITY_SEED]),
+                payer: payer.pubkey(),
+                token_program: SPL_TOKEN_PROGRAM_ID,
+                system_program: SYS,
+            },
+            jhandi_munda::instruction::InitFeeVaults {},
+        ),
+    );
+    assert!(res.is_ok(), "init_fee_vaults failed: {:?}", res.err());
+}
+
+// Distributes the accrued fee pots. `stakers` are the Stake accounts passed.
+fn distribute(t: &mut Table, signer: &Keypair, stakers: &[&Keypair]) -> TransactionResult {
+    let mut instruction = ix(
+        jhandi_munda::accounts::DistributeFees {
+            table: t.table,
+            stake_pool: pda(&[jhandi_munda::STAKE_POOL_SEED]),
+            pool: t.pool,
+            pool_vault: t.vault,
+            queue: pda(&[QUEUE_SEED]),
+            dev_vault: pda(&[jhandi_munda::DEV_VAULT_SEED]),
+            insurance_vault: pda(&[INSURANCE_VAULT_SEED]),
+            treasury_vault: pda(&[jhandi_munda::TREASURY_VAULT_SEED]),
+            token_program: SPL_TOKEN_PROGRAM_ID,
+        },
+        jhandi_munda::instruction::DistributeFees {},
+    );
+    for s in stakers {
+        instruction.accounts.push(AccountMeta::new(pda(&[jhandi_munda::STAKE_SEED, s.pubkey().as_ref()]), false));
+    }
+    send(&mut t.svm, signer, instruction)
+}
+
+fn claim_rewards(t: &mut Table, owner: &Keypair) -> TransactionResult {
+    send(
+        &mut t.svm,
+        owner,
+        ix(
+            jhandi_munda::accounts::ClaimStakeRewards {
+                stake: pda(&[jhandi_munda::STAKE_SEED, owner.pubkey().as_ref()]),
+                owner: owner.pubkey(),
+                pool: t.pool,
+                pool_vault: t.vault,
+                queue: pda(&[QUEUE_SEED]),
+                owner_musd_ata: jhandi_munda::musd_ata(&owner.pubkey(), &t.musd_mint),
+                token_program: SPL_TOKEN_PROGRAM_ID,
+            },
+            jhandi_munda::instruction::ClaimStakeRewards {},
+        ),
+    )
+}
+
+// One win on face 2 by a fresh wallet: its $10 stake earns the fee pots
+// (treasury 80,000, devs 40,000, stakers 280,000).
+fn earn_win_fee(t: &mut Table) {
+    let now = clock_now(t);
+    let winner = new_player(t);
+    let rid = round(t).round_id;
+    assert!(place(t, &winner, 2, 10_000_000).is_ok());
+    set_time(t, now + 90);
+    assert!(request_roll(t, &winner).is_ok());
+    let mut randomness = [0u8; 32];
+    randomness[..6].copy_from_slice(&[1, 1, 4, 5, 0, 2]);
+    let request_id = round(t).request_id;
+    assert!(send_callback(t, &winner, randomness, request_id).is_ok());
+    set_time(t, now + 100);
+    assert!(settle_bets(t, &winner, &[bet_pda_r(rid, &winner, 2)]).is_ok());
+    assert!(finish_round(t, &winner).is_ok());
+}
+
+#[test]
+fn test_fee_split_two_stakers() {
+    let mut t = setup();
+    stub_vrf(&mut t);
+    let a = new_player(&mut t);
+    let b = new_player(&mut t);
+    let c = new_player(&mut t);
+    mint_munda(&mut t, &[(&a, 70_000_000), (&b, 30_000_000), (&c, 5_000_000)]);
+    init_staking(&mut t, &a);
+    init_fee_vaults(&mut t, &a);
+    init_insurance(&mut t, &a);
+    assert!(stake(&mut t, &a, 70_000_000).is_ok());
+    assert!(stake(&mut t, &b, 30_000_000).is_ok());
+    // C holds 5 MUNDA but never stakes it.
+
+    earn_win_fee(&mut t);
+    // The crank must be given every staker: leaving B out is refused.
+    assert!(distribute(&mut t, &a, &[&a]).is_err(), "an incomplete staker set is refused");
+
+    assert!(distribute(&mut t, &a, &[&a, &b]).is_ok());
+    // 10% of the win fee goes to the dev vault; 20% goes to insurance (not yet full).
+    assert_eq!(token_amount(&t.svm, &pda(&[jhandi_munda::DEV_VAULT_SEED])), 40_000);
+    assert_eq!(token_amount(&t.svm, &pda(&[INSURANCE_VAULT_SEED])), 80_000);
+    // The 70% slice, 280,000, splits 70 : 30 by stake.
+    assert_eq!(stake_account(&t, &a).pending, 196_000);
+    assert_eq!(stake_account(&t, &b).pending, 84_000);
+
+    // Claims pay each staker's slice.
+    let a_ata = jhandi_munda::musd_ata(&a.pubkey(), &t.musd_mint);
+    let b_ata = jhandi_munda::musd_ata(&b.pubkey(), &t.musd_mint);
+    assert!(claim_rewards(&mut t, &a).is_ok());
+    assert!(claim_rewards(&mut t, &b).is_ok());
+    assert_eq!(token_amount(&t.svm, &a_ata), 30_000_000 + 196_000, "A: 70 of the 100 staked");
+    assert_eq!(token_amount(&t.svm, &b_ata), 70_000_000 + 84_000, "B: 30 of the 100 staked");
+
+    // The unstaked holder (C) has no stake, so no reward and no claim.
+    assert!(claim_rewards(&mut t, &c).is_err(), "unstaked MUNDA earns nothing");
+    assert_eq!(token_amount(&t.svm, &jhandi_munda::musd_ata(&c.pubkey(), &t.musd_mint)), 95_000_000);
+}
+
+#[test]
+fn test_insurance_fills_then_treasury() {
+    let mut t = setup();
+    stub_vrf(&mut t);
+    let admin = new_player(&mut t);
+    init_insurance(&mut t, &admin);
+    init_fee_vaults(&mut t, &admin);
+    init_munda(&mut t, &admin);
+    init_staking(&mut t, &admin);
+
+    // Fill insurance to $999.96, $0.04 short of the $1,000 demo target (D18).
+    let feeders: Vec<Keypair> = (0..10).map(|_| new_player(&mut t)).collect();
+    let insurance = pda(&[INSURANCE_VAULT_SEED]);
+    for f in &feeders[..9] {
+        transfer_musd(&mut t, f, &insurance, 100_000_000);
+    }
+    transfer_musd(&mut t, &feeders[9], &insurance, 99_960_000);
+    assert_eq!(token_amount(&t.svm, &insurance), 999_960_000);
+
+    // The first win's 20% slice (80,000) fills the last $0.04 of insurance; the
+    // rest, 40,000, goes to treasury.
+    earn_win_fee(&mut t);
+    assert!(distribute(&mut t, &admin, &[]).is_ok());
+    assert_eq!(token_amount(&t.svm, &insurance), jhandi_munda::INSURANCE_TARGET);
+    assert_eq!(token_amount(&t.svm, &pda(&[jhandi_munda::TREASURY_VAULT_SEED])), 40_000);
+
+    // Insurance is full, so the next 20% slice goes all to treasury.
+    earn_win_fee(&mut t);
+    assert!(distribute(&mut t, &admin, &[]).is_ok());
+    assert_eq!(token_amount(&t.svm, &insurance), jhandi_munda::INSURANCE_TARGET, "insurance stays at target");
+    assert_eq!(token_amount(&t.svm, &pda(&[jhandi_munda::TREASURY_VAULT_SEED])), 40_000 + 80_000);
+    assert_eq!(token_amount(&t.svm, &pda(&[jhandi_munda::DEV_VAULT_SEED])), 80_000, "10% each win");
+}
