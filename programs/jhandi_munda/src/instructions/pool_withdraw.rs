@@ -14,11 +14,11 @@ use crate::{
     SPL_TOKEN_PROGRAM_ID,
 };
 
-/// SPL token `Burn` (9) and `Transfer` (3) discriminators, hand built like the
+/// SPL token `Burn` (8) and `Transfer` (3) discriminators, hand built like the
 /// deposit's CPIs so the pinned dependency set stays untouched. Burn data ends
 /// with the amount u64, transfer likewise; the holder signs the burn of their
 /// own shares and the pool PDA signs the vault payout.
-const TOKEN_IX_BURN: u8 = 9;
+const TOKEN_IX_BURN: u8 = 8;
 const TOKEN_IX_TRANSFER: u8 = 3;
 
 /// Offsets inside SPL token accounts: a token account stores its balance in
