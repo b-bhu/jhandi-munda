@@ -30,4 +30,8 @@ pub mod jhandi_munda {
     pub fn deposit(ctx: Context<Deposit>, amount: u64) -> Result<()> {
         pool_deposit::handler(ctx, amount)
     }
+
+    pub fn withdraw(ctx: Context<Withdraw>, amount: u64) -> Result<()> {
+        pool_withdraw::handler(ctx, amount)
+    }
 }
