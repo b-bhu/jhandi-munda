@@ -40,6 +40,12 @@ pub const BET_SEED: &[u8] = b"bet";
 /// Soft cap on distinct players per round (D25). Matches `#[max_len]` on `Round::players`.
 pub const MAX_PLAYERS: usize = 10;
 
+/// Claim PDA seed: `["claim", bet_pubkey]`, one claim per settled bet (D13).
+pub const CLAIM_SEED: &[u8] = b"claim";
+
+/// Win "Take now" cut: 500 BPS, so the player gets 95% now (D7).
+pub const WIN_EARLY_EXIT_BPS: u16 = 500;
+
 /// Minimum bet: $1 MUSD in base units (D3).
 pub const MIN_BET: u64 = 1_000_000;
 

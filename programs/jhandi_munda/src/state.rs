@@ -138,7 +138,38 @@ pub struct Bet {
     pub owed: u64,
     /// Set once settle has processed the bet, so it cannot be counted twice.
     pub settled: bool,
+    /// Clock time the bet was settled. Claims unlock from here (D7, D8).
+    pub settled_at: i64,
     /// Bump seed for the bet PDA.
+    pub bump: u8,
+}
+
+/// Which asset a claim pays: MUSD for a win, MUNDA for a loss (D13).
+#[derive(AnchorSerialize, AnchorDeserialize, InitSpace, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ClaimAsset {
+    Musd,
+    Munda,
+}
+
+/// One settled result turned into a claim (D13): what it pays, when it unlocks,
+/// and the early-exit cut for "Take now". One claim per bet, at the PDA
+/// `["claim", bet]`. Created by `open_claim`; redeemed in Step 7.2 and 7.3.
+#[account]
+#[derive(InitSpace)]
+pub struct Claim {
+    /// The bet this claim settles.
+    pub bet: Pubkey,
+    /// The wallet the claim pays.
+    pub player: Pubkey,
+    /// What it pays: MUSD for a win, MUNDA for a loss.
+    pub asset: ClaimAsset,
+    /// The amount in the asset's base units: owed MUSD for a win.
+    pub amount: u64,
+    /// Clock time from which "Wait" pays in full: settled_at + 90 s for a win (D7, D8).
+    pub unlock_at: i64,
+    /// The "Take now" cut in basis points (D7: 500 = 5% for a win).
+    pub early_exit_bps: u16,
+    /// Bump seed for the claim PDA.
     pub bump: u8,
 }
 

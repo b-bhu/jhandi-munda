@@ -46,6 +46,10 @@ pub enum ErrorCode {
     IncompleteSettle,
     #[msg("This bet is already settled")]
     BetAlreadySettled,
+    #[msg("A claim can only be opened for a settled bet")]
+    BetNotSettled,
+    #[msg("Loss claims are not open yet (Step 7.3)")]
+    NoLossClaimYet,
     #[msg("A payout or fee amount overflowed")]
     MathOverflow,
 }

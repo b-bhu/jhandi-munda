@@ -48,6 +48,10 @@ pub mod jhandi_munda {
         request_roll::handler(ctx)
     }
 
+    pub fn open_claim(ctx: Context<OpenClaim>) -> Result<()> {
+        claim_open::handle_open_claim(ctx)
+    }
+
     pub fn settle_bets(ctx: Context<SettleBets>) -> Result<()> {
         settle::handle_settle_bets(ctx)
     }

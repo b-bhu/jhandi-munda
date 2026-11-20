@@ -35,6 +35,7 @@ pub fn handle_settle_bets(ctx: Context<SettleBets>) -> Result<()> {
     require!(round.status == RoundStatus::Rolled, ErrorCode::RoundNotRolled);
     let round_id = round.round_id;
     let faces = round.faces;
+    let now = Clock::get()?.unix_timestamp;
 
     let mut processed: u16 = 0;
     let (mut treasury, mut devs, mut stakers) = (0u64, 0u64, 0u64);
@@ -73,6 +74,7 @@ pub fn handle_settle_bets(ctx: Context<SettleBets>) -> Result<()> {
 
         bet.owed = settled.owed;
         bet.settled = true;
+        bet.settled_at = now;
         let mut bytes = Vec::new();
         bet.try_serialize(&mut bytes)?;
         let mut data = info.try_borrow_mut_data()?;

@@ -5,8 +5,8 @@ use {
         InstructionData, ToAccountMetas,
     },
     jhandi_munda::{
-        state::{Bet, Round, RoundStatus, TableConfig},
-        BET_SEED, CONFIG_SEED, FAUCET_RECORD_SEED, MUSD_MINT_AUTHORITY_SEED, MUSD_MINT_SEED,
+        state::{Bet, Claim, ClaimAsset, Round, RoundStatus, TableConfig},
+        BET_SEED, CLAIM_SEED, CONFIG_SEED, FAUCET_RECORD_SEED, MUSD_MINT_AUTHORITY_SEED, MUSD_MINT_SEED,
         POOL_SEED, POOL_VAULT_SEED, ROUND_SEED, SHARE_MINT_SEED, SPL_TOKEN_PROGRAM_ID, TABLE_SEED,
     },
     litesvm::{types::TransactionResult, LiteSVM},
@@ -565,4 +565,62 @@ fn test_settle_full_table_in_chunks() {
     assert_eq!(r.round_id, 1);
     assert_eq!(r.bet_count, 0);
     assert_eq!(r.settled_count, 0);
+}
+
+fn claim(t: &Table, bet: &Pubkey) -> Claim {
+    let data = t.svm.get_account(&pda(&[CLAIM_SEED, bet.as_ref()])).expect("claim must exist").data;
+    Claim::try_deserialize(&mut data.as_slice()).unwrap()
+}
+
+fn open_claim(t: &mut Table, payer: &Keypair, bet: &Pubkey) -> TransactionResult {
+    send(
+        &mut t.svm,
+        payer,
+        ix(
+            jhandi_munda::accounts::OpenClaim {
+                bet: *bet,
+                claim: pda(&[CLAIM_SEED, bet.as_ref()]),
+                payer: payer.pubkey(),
+                system_program: SYS,
+            },
+            jhandi_munda::instruction::OpenClaim {},
+        ),
+    )
+}
+
+#[test]
+fn test_open_claim_from_settled_bet() {
+    let mut t = setup();
+    stub_vrf(&mut t);
+    let alice = new_player(&mut t);
+    let bob = new_player(&mut t);
+    assert!(place(&mut t, &alice, 2, 10_000_000).is_ok());
+    assert!(place(&mut t, &bob, 4, 1_000_000).is_ok());
+    set_time(&mut t, BASE_TIME + 90);
+    assert!(request_roll(&mut t, &bob).is_ok());
+    let mut randomness = [0u8; 32];
+    randomness[..6].copy_from_slice(&[1, 1, 4, 5, 0, 2]);
+    let request_id = round(&t).request_id;
+    assert!(send_callback(&mut t, &bob, randomness, request_id).is_ok());
+
+    // Settle at +100 s: settled_at is the settle time, so unlock is +190 s.
+    set_time(&mut t, BASE_TIME + 100);
+    let alice_bet = bet_pda(&alice, 2);
+    let bob_bet = bet_pda(&bob, 4);
+    assert!(settle_bets(&mut t, &bob, &[alice_bet, bob_bet]).is_ok());
+
+    // Alice's win opens a claim: $29.60 MUSD, unlock 90 s after settle, 5% take-now cut.
+    assert!(open_claim(&mut t, &bob, &alice_bet).is_ok());
+    let c = claim(&t, &alice_bet);
+    assert_eq!(c.bet, alice_bet);
+    assert_eq!(c.player, alice.pubkey());
+    assert_eq!(c.asset, ClaimAsset::Musd);
+    assert_eq!(c.amount, 29_600_000);
+    assert_eq!(c.unlock_at, BASE_TIME + 190);
+    assert_eq!(c.early_exit_bps, 500);
+
+    // A second claim for the same bet is rejected.
+    assert!(open_claim(&mut t, &bob, &alice_bet).is_err(), "one claim per bet");
+    // Bob's loss has no claim until Step 7.3.
+    assert!(open_claim(&mut t, &bob, &bob_bet).is_err(), "no loss claim yet");
 }
