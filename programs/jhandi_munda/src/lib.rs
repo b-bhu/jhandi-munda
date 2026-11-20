@@ -46,4 +46,12 @@ pub mod jhandi_munda {
     pub fn request_roll(ctx: Context<RequestRoll>) -> Result<()> {
         request_roll::handler(ctx)
     }
+
+    pub fn callback_roll_dice(
+        ctx: Context<CallbackRollDice>,
+        randomness: [u8; 32],
+        request_id: [u8; 32],
+    ) -> Result<()> {
+        callback_roll::handler(ctx, randomness, request_id)
+    }
 }
