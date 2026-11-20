@@ -14,4 +14,8 @@ pub enum ErrorCode {
     ZeroDeposit,
     #[msg("The pool is in a state its own instructions cannot create (shares without vaulted MUSD, or the reverse)")]
     InvalidPoolState,
+    #[msg("A pool withdraw must pay out a non-zero amount of MUSD")]
+    ZeroWithdraw,
+    #[msg("The withdrawer does not hold that many pool shares")]
+    InsufficientShares,
 }
