@@ -102,6 +102,10 @@ pub const DEV_VAULT_SEED: &[u8] = b"dev_vault";
 /// Treasury vault PDA seed: the 20% fee slice once insurance is full (D18).
 pub const TREASURY_VAULT_SEED: &[u8] = b"treasury_vault";
 
+/// Rewards vault PDA seed: holds the stakers' 70% slice from distribution until
+/// claimed, so the pool vault (and LP NAV) counts only pool money (Step 9.5).
+pub const REWARDS_VAULT_SEED: &[u8] = b"rewards_vault";
+
 /// Treasury authority PDA seed: owns the dev and treasury vaults.
 pub const TREASURY_AUTHORITY_SEED: &[u8] = b"treasury_authority";
 

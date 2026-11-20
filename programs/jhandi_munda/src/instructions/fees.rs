@@ -24,7 +24,8 @@ use crate::{
     instructions::claim_redeem::{spl_transfer, token_balance},
     state::{PayoutQueue, PoolState, ProgramConfig, Stake, StakePool, TableConfig},
     CONFIG_SEED, DEV_VAULT_SEED, INSURANCE_TARGET, INSURANCE_VAULT_SEED, MUSD_MINT_SEED,
-    POOL_SEED, POOL_VAULT_SEED, QUEUE_SEED, SPL_TOKEN_PROGRAM_ID, STAKE_POOL_SEED, STAKE_SEED,
+    POOL_SEED, POOL_VAULT_SEED, QUEUE_SEED, REWARDS_VAULT_SEED, SPL_TOKEN_PROGRAM_ID,
+    STAKE_POOL_SEED, STAKE_SEED,
     TABLE_SEED, TOKEN_ACCOUNT_SPACE, TREASURY_AUTHORITY_SEED, TREASURY_VAULT_SEED,
 };
 
@@ -89,7 +90,18 @@ pub struct InitFeeVaults<'info> {
     )]
     pub musd_mint: UncheckedAccount<'info>,
 
-    /// CHECK: the treasury authority PDA, owner of the dev and treasury vaults.
+    /// CHECK: the rewards vault (stakers' 70% slice), created here.
+    #[account(
+        init,
+        payer = payer,
+        space = TOKEN_ACCOUNT_SPACE,
+        owner = SPL_TOKEN_PROGRAM_ID,
+        seeds = [REWARDS_VAULT_SEED],
+        bump
+    )]
+    pub rewards_vault: UncheckedAccount<'info>,
+
+    /// CHECK: the treasury authority PDA, owner of the dev, treasury and rewards vaults.
     #[account(seeds = [TREASURY_AUTHORITY_SEED], bump)]
     pub treasury_authority: UncheckedAccount<'info>,
 
@@ -119,7 +131,12 @@ pub fn handle_init_fee_vaults(ctx: Context<InitFeeVaults>) -> Result<()> {
         &ctx.accounts.musd_mint.to_account_info(),
         &authority,
     )?;
-    msg!("Dev and treasury vaults initialized");
+    init_token_account(
+        &ctx.accounts.rewards_vault.to_account_info(),
+        &ctx.accounts.musd_mint.to_account_info(),
+        &authority,
+    )?;
+    msg!("Dev, treasury and rewards vaults initialized");
     Ok(())
 }
 
@@ -156,6 +173,10 @@ pub struct DistributeFees<'info> {
     /// CHECK: the treasury vault, seeds pin it.
     #[account(mut, seeds = [TREASURY_VAULT_SEED], bump)]
     pub treasury_vault: UncheckedAccount<'info>,
+
+    /// CHECK: the rewards vault (stakers' slice), seeds pin it.
+    #[account(mut, seeds = [REWARDS_VAULT_SEED], bump)]
+    pub rewards_vault: UncheckedAccount<'info>,
 
     /// CHECK: verified against SPL_TOKEN_PROGRAM_ID in the handler.
     pub token_program: UncheckedAccount<'info>,
@@ -228,6 +249,11 @@ pub fn handle_distribute_fees<'info>(ctx: Context<'info, DistributeFees<'info>>)
     }
     require!(staked_total == ctx.accounts.stake_pool.total_staked, ErrorCode::StakerSetMismatch);
 
+    // The whole staker slice leaves the pool vault for the rewards vault, so pool
+    // NAV no longer counts money owed to stakers (Step 9.5).
+    if staker_pot > 0 {
+        spl_transfer(&vault, &ctx.accounts.rewards_vault.to_account_info(), &pool_info, staker_pot, &[seeds])?;
+    }
     let now = Clock::get()?.unix_timestamp;
     let eligible_total: u64 = stakes.iter().map(|s| eligible_amount(s, now)).sum();
     if eligible_total > 0 && staker_pot > 0 {
@@ -258,16 +284,17 @@ pub struct ClaimStakeRewards<'info> {
     #[account(mut)]
     pub owner: Signer<'info>,
 
+    /// The house pool: read for the MUSD mint.
     #[account(seeds = [POOL_SEED], bump)]
     pub pool: Account<'info, PoolState>,
 
-    /// CHECK: the pool MUSD vault, seeds pin it.
-    #[account(mut, seeds = [POOL_VAULT_SEED], bump)]
-    pub pool_vault: UncheckedAccount<'info>,
+    /// CHECK: the rewards vault, seeds pin it. Pays only staker rewards.
+    #[account(mut, seeds = [REWARDS_VAULT_SEED], bump)]
+    pub rewards_vault: UncheckedAccount<'info>,
 
-    /// The payout queue: rewards wait until every queued winner is paid (D30).
-    #[account(seeds = [QUEUE_SEED], bump)]
-    pub queue: AccountLoader<'info, PayoutQueue>,
+    /// CHECK: the treasury authority PDA, owner of the rewards vault; signs the payout.
+    #[account(seeds = [TREASURY_AUTHORITY_SEED], bump)]
+    pub treasury_authority: UncheckedAccount<'info>,
 
     /// CHECK: the staker's MUSD ATA, checked against the canonical address.
     #[account(mut)]
@@ -283,10 +310,6 @@ pub fn handle_claim_stake_rewards(ctx: Context<ClaimStakeRewards>) -> Result<()>
         SPL_TOKEN_PROGRAM_ID,
         ErrorCode::InvalidTokenProgram
     );
-    {
-        let queue = ctx.accounts.queue.load()?;
-        require!(queue.head == queue.tail, ErrorCode::QueueNotEmpty);
-    }
     let amount = ctx.accounts.stake.pending;
     require!(amount > 0, ErrorCode::NothingToClaim);
     require_keys_eq!(
@@ -296,11 +319,11 @@ pub fn handle_claim_stake_rewards(ctx: Context<ClaimStakeRewards>) -> Result<()>
     );
 
     ctx.accounts.stake.pending = 0;
-    let seeds: &[&[u8]] = &[POOL_SEED, &[ctx.accounts.pool.bump]];
+    let seeds: &[&[u8]] = &[TREASURY_AUTHORITY_SEED, &[ctx.bumps.treasury_authority]];
     spl_transfer(
-        &ctx.accounts.pool_vault.to_account_info(),
+        &ctx.accounts.rewards_vault.to_account_info(),
         &ctx.accounts.owner_musd_ata.to_account_info(),
-        &ctx.accounts.pool.to_account_info(),
+        &ctx.accounts.treasury_authority.to_account_info(),
         amount,
         &[seeds],
     )?;

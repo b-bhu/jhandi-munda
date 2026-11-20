@@ -1317,6 +1317,7 @@ fn init_fee_vaults(t: &mut Table, payer: &Keypair) {
                 config: t.config,
                 dev_vault: pda(&[jhandi_munda::DEV_VAULT_SEED]),
                 treasury_vault: pda(&[jhandi_munda::TREASURY_VAULT_SEED]),
+                rewards_vault: pda(&[jhandi_munda::REWARDS_VAULT_SEED]),
                 musd_mint: t.musd_mint,
                 treasury_authority: pda(&[jhandi_munda::TREASURY_AUTHORITY_SEED]),
                 payer: payer.pubkey(),
@@ -1341,6 +1342,7 @@ fn distribute(t: &mut Table, signer: &Keypair, stakers: &[&Keypair]) -> Transact
             dev_vault: pda(&[jhandi_munda::DEV_VAULT_SEED]),
             insurance_vault: pda(&[INSURANCE_VAULT_SEED]),
             treasury_vault: pda(&[jhandi_munda::TREASURY_VAULT_SEED]),
+            rewards_vault: pda(&[jhandi_munda::REWARDS_VAULT_SEED]),
             token_program: SPL_TOKEN_PROGRAM_ID,
         },
         jhandi_munda::instruction::DistributeFees {},
@@ -1360,8 +1362,8 @@ fn claim_rewards(t: &mut Table, owner: &Keypair) -> TransactionResult {
                 stake: pda(&[jhandi_munda::STAKE_SEED, owner.pubkey().as_ref()]),
                 owner: owner.pubkey(),
                 pool: t.pool,
-                pool_vault: t.vault,
-                queue: pda(&[QUEUE_SEED]),
+                rewards_vault: pda(&[jhandi_munda::REWARDS_VAULT_SEED]),
+                treasury_authority: pda(&[jhandi_munda::TREASURY_AUTHORITY_SEED]),
                 owner_musd_ata: jhandi_munda::musd_ata(&owner.pubkey(), &t.musd_mint),
                 token_program: SPL_TOKEN_PROGRAM_ID,
             },
@@ -1588,4 +1590,55 @@ fn test_distribute_rejects_duplicate_staker() {
     assert!(distribute(&mut t, &a, &[&a, &b]).is_ok());
     assert_eq!(stake_account(&t, &a).pending, 140_000);
     assert_eq!(stake_account(&t, &b).pending, 140_000);
+}
+
+#[test]
+fn test_stakers_slice_leaves_pool_nav() {
+    let mut t = setup();
+    stub_vrf(&mut t);
+    // An LP deposits 5 MUSD: 5,000,000 shares at NAV $1.
+    let lp = new_player(&mut t);
+    deposit(&mut t, &lp, 5_000_000);
+    // Two stakers: losses of 50 MUNDA each flow into the pool vault as LP profit.
+    let a = new_player(&mut t);
+    let b = new_player(&mut t);
+    mint_munda(&mut t, &[(&a, 50_000_000), (&b, 50_000_000)]);
+    init_fee_vaults(&mut t, &a);
+    init_insurance(&mut t, &a);
+    init_staking(&mut t, &a);
+    assert!(stake(&mut t, &a, 50_000_000).is_ok());
+    assert!(stake(&mut t, &b, 50_000_000).is_ok());
+    let now = clock_now(&t);
+    set_time(&mut t, now + 86_400);
+    earn_win_fee(&mut t);
+
+    let vault = pda(&[POOL_VAULT_SEED]);
+    let rewards = pda(&[jhandi_munda::REWARDS_VAULT_SEED]);
+    let share_mint = pda(&[SHARE_MINT_SEED]);
+    let before = token_amount(&t.svm, &vault);
+    let supply = u64::from_le_bytes(t.svm.get_account(&share_mint).unwrap().data[36..44].try_into().unwrap());
+    assert!(distribute(&mut t, &a, &[&a, &b]).is_ok());
+
+    // The pool vault gives up the dev (40,000), insurance (80,000) and staker
+    // (280,000) slices. The staker slice sits in the rewards vault, not the pool.
+    let after = token_amount(&t.svm, &vault);
+    assert_eq!(before - after, 400_000);
+    assert_eq!(token_amount(&t.svm, &rewards), 280_000);
+
+    // An LP withdraws at NAV = pool vault / supply. The rewards vault is not in NAV.
+    let expected = (1_000_000u128 * after as u128 / supply as u128) as u64;
+    let lp_ata = jhandi_munda::musd_ata(&lp.pubkey(), &t.musd_mint);
+    let lp_before = token_amount(&t.svm, &lp_ata);
+    assert!(lp_withdraw(&mut t, &lp, 1_000_000).is_ok());
+    assert_eq!(token_amount(&t.svm, &lp_ata) - lp_before, expected, "LP paid at pool-only NAV");
+
+    // Stakers can still claim their full rewards, from the rewards vault.
+    let a_ata = jhandi_munda::musd_ata(&a.pubkey(), &t.musd_mint);
+    let b_ata = jhandi_munda::musd_ata(&b.pubkey(), &t.musd_mint);
+    assert!(claim_rewards(&mut t, &a).is_ok());
+    assert!(claim_rewards(&mut t, &b).is_ok());
+    // Each staker lost 50 MUSD in the mint round, so holds 50 MUSD before the 140,000 reward.
+    assert_eq!(token_amount(&t.svm, &a_ata), 50_000_000 + 140_000);
+    assert_eq!(token_amount(&t.svm, &b_ata), 50_000_000 + 140_000);
+    assert_eq!(token_amount(&t.svm, &rewards), 0, "the rewards vault pays out in full");
 }
