@@ -34,4 +34,8 @@ pub mod jhandi_munda {
     pub fn withdraw(ctx: Context<Withdraw>, amount: u64) -> Result<()> {
         pool_withdraw::handler(ctx, amount)
     }
+
+    pub fn initialize_table(ctx: Context<InitializeTable>) -> Result<()> {
+        table_init::handler(ctx)
+    }
 }

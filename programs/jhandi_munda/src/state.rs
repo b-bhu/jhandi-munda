@@ -56,6 +56,48 @@ pub fn nav_per_share(vault_amount: u64, share_supply: u64) -> u64 {
     u64::try_from(nav).unwrap_or(u64::MAX)
 }
 
+/// Table settings (D3, D6, D8, D25), created once by `initialize_table`. The
+/// round clock and bet limits live here so later steps read one place.
+#[account]
+#[derive(InitSpace)]
+pub struct TableConfig {
+    /// Round length in seconds, start to finish (D8): 90.
+    pub round_length_secs: i64,
+    /// Minimum bet in MUSD base units (D3): $1 = 1_000_000.
+    pub min_bet: u64,
+    /// Maximum bet in MUSD base units. Only enforced when `max_bet_enabled`.
+    pub max_bet: u64,
+    /// Off by default on devnet (D6). A cap that exists but is switched off.
+    pub max_bet_enabled: bool,
+    /// Bump seed for the table config PDA.
+    pub bump: u8,
+}
+
+/// Where the table's one round is in its life. Only `Idle` (no round running)
+/// and `Open` (a round is running) are used now; later steps add the rest.
+#[derive(AnchorSerialize, AnchorDeserialize, InitSpace, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RoundStatus {
+    /// No round running; any player's first bet will open one (D5).
+    Idle,
+    /// A round is running and its 90 s timer has started (D31).
+    Open,
+}
+
+/// The table's round account (D5, D25): one per table, reused round after
+/// round. Created vacant (`Idle`) by `initialize_table`.
+#[account]
+#[derive(InitSpace)]
+pub struct Round {
+    /// Current round status.
+    pub status: RoundStatus,
+    /// Unix timestamp the round opened (Clock, not slots). 0 while idle.
+    pub opened_at: i64,
+    /// Number of players in the current round. 0 while idle.
+    pub player_count: u16,
+    /// Bump seed for the round PDA.
+    pub bump: u8,
+}
+
 /// The MUSD faucet cooldown record for one wallet (D33): a small PDA at
 /// `["faucet", user_pubkey]`, created by the wallet's first faucet call, that
 /// stores when that wallet last claimed. One record per wallet, so every
