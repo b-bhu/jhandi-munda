@@ -83,6 +83,8 @@ pub enum RoundStatus {
     Open,
     /// The join window has closed and a VRF roll is pending (D11, Step 5.1).
     Rolling,
+    /// The six faces are written; waiting for settle (Step 6).
+    Rolled,
 }
 
 /// The table's round account (D5, D25): one per table, reused round after
@@ -104,6 +106,8 @@ pub struct Round {
     /// The caller seed of the pending VRF request, which is its id. Zero when
     /// no roll is pending.
     pub request_id: [u8; 32],
+    /// The six dice faces (1 to 6) of the last roll. Zero until a roll lands.
+    pub faces: [u8; 6],
     /// Bump seed for the round PDA.
     pub bump: u8,
 }

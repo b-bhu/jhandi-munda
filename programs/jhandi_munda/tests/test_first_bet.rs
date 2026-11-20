@@ -56,7 +56,8 @@ fn token_amount(svm: &LiteSVM, account: &Pubkey) -> u64 {
 fn setup() -> Table {
     let program_id = jhandi_munda::id();
     let admin = Keypair::new();
-    let mut svm = LiteSVM::new();
+    // Signature checks off: the VRF oracle's signature is mocked (see send_callback).
+    let mut svm = LiteSVM::new().with_sigverify(false);
     let bytes = include_bytes!("../../../target/deploy/jhandi_munda.so");
     svm.add_program(program_id, bytes).unwrap();
     svm.airdrop(&admin.pubkey(), 10_000_000_000).unwrap();
@@ -343,4 +344,83 @@ fn test_request_vrf_after_window() {
     // A second request while one is pending is rejected, and so is a bet.
     assert!(request_roll(&mut t, &alice).is_err(), "a second pending roll must be rejected");
     assert!(place(&mut t, &bob, 5, 1_000_000).is_err(), "no bets once the roll is pending");
+}
+
+// Sends the oracle's callback. The scoped VRF identity is a PDA, so it cannot
+// sign here: its signature slot is left empty, and the setup turns signature
+// checks off so the program sees it as a signer. That is the only thing mocked.
+// The accounts, the `#[vrf_callback]` check and the handler are real.
+fn send_callback(t: &mut Table, payer: &Keypair, randomness: [u8; 32], request_id: [u8; 32]) -> TransactionResult {
+    let identity = Pubkey::find_program_address(
+        &[b"identity", jhandi_munda::id().as_ref()],
+        &VRF_PROGRAM.parse().unwrap(),
+    )
+    .0;
+    let instruction = ix(
+        jhandi_munda::accounts::CallbackRollDice { vrf_program_identity: identity, round: t.round },
+        jhandi_munda::instruction::CallbackRollDice { randomness, request_id },
+    );
+    t.svm.expire_blockhash();
+    let blockhash = t.svm.latest_blockhash();
+    let msg = Message::new_with_blockhash(&[instruction], Some(&payer.pubkey()), &blockhash);
+    let signature = payer.sign_message(&msg.serialize());
+    let tx = VersionedTransaction {
+        signatures: vec![signature, Default::default()],
+        message: VersionedMessage::Legacy(msg),
+    };
+    t.svm.send_transaction(tx)
+}
+
+// Counting bytes 0..=31: the six faces 1..=6 come from the first six bytes.
+fn counting_randomness() -> [u8; 32] {
+    core::array::from_fn(|i| i as u8)
+}
+
+// Opens a round with Alice, closes the window and requests the roll.
+fn open_and_request(t: &mut Table) -> (Keypair, Keypair) {
+    let alice = new_player(t);
+    let bob = new_player(t);
+    assert!(place(t, &alice, 3, 10_000_000).is_ok());
+    set_time(t, BASE_TIME + 90);
+    assert!(request_roll(t, &bob).is_ok());
+    (alice, bob)
+}
+
+#[test]
+fn test_vrf_callback_six_faces() {
+    let mut t = setup();
+    stub_vrf(&mut t);
+    let (_alice, bob) = open_and_request(&mut t);
+    let request_id = round(&t).request_id;
+
+    let res = send_callback(&mut t, &bob, counting_randomness(), request_id);
+    assert!(res.is_ok(), "callback failed: {:?}", res.err());
+
+    let r = round(&t);
+    assert_eq!(r.status, RoundStatus::Rolled);
+    assert_eq!(r.faces, [1, 2, 3, 4, 5, 6], "six independent faces from six bytes");
+    assert_eq!(r.request_id, [0u8; 32], "the pending request is cleared");
+}
+
+#[test]
+fn test_unexpected_vrf_callback_rejected() {
+    // No roll requested yet: a callback has nothing to answer.
+    let mut fresh = setup();
+    stub_vrf(&mut fresh);
+    let player = new_player(&mut fresh);
+    assert!(send_callback(&mut fresh, &player, counting_randomness(), [0u8; 32]).is_err());
+
+    let mut t = setup();
+    stub_vrf(&mut t);
+    let (_alice, bob) = open_and_request(&mut t);
+    let request_id = round(&t).request_id;
+
+    // A callback for some other request (another round) is rejected.
+    assert!(send_callback(&mut t, &bob, counting_randomness(), [9u8; 32]).is_err());
+    assert_eq!(round(&t).status, RoundStatus::Rolling, "a rejected callback changes nothing");
+
+    // The right callback lands once; a repeat after fulfilment is rejected.
+    assert!(send_callback(&mut t, &bob, counting_randomness(), request_id).is_ok());
+    assert!(send_callback(&mut t, &bob, counting_randomness(), request_id).is_err());
+    assert_eq!(round(&t).status, RoundStatus::Rolled);
 }

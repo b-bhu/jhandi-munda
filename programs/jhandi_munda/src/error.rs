@@ -34,4 +34,8 @@ pub enum ErrorCode {
     NoRoundToRoll,
     #[msg("A VRF roll is already pending for this round")]
     RollAlreadyPending,
+    #[msg("The VRF callback does not match a pending roll (none pending, already fulfilled, or another round)")]
+    UnexpectedCallback,
+    #[msg("Too few usable VRF bytes to make six faces")]
+    RollExhausted,
 }

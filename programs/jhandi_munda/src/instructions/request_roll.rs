@@ -73,7 +73,9 @@ pub fn handler(ctx: Context<RequestRoll>) -> Result<()> {
             is_signer: false,
             is_writable: true,
         }]),
-        callback_args: None,
+        // The request id comes back as the callback's argument, so the callback
+        // can tell which roll it answers.
+        callback_args: Some(caller_seed.to_vec()),
     };
     let ix = create_request_randomness_ix_const(params, PROGRAM_IDENTITY);
     ctx.accounts
