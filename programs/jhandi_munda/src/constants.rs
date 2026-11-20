@@ -52,6 +52,23 @@ pub const INSURANCE_SEED: &[u8] = b"insurance";
 /// Insurance fund MUSD vault PDA seed: a token account owned by the insurance PDA.
 pub const INSURANCE_VAULT_SEED: &[u8] = b"insurance_vault";
 
+/// MUNDA mint PDA seed (D22, placeholder name). Minted only on a loss-claim
+/// redeem, never up front (D26).
+pub const MUNDA_MINT_SEED: &[u8] = b"munda_mint";
+
+/// MUNDA mint authority PDA seed: only the program signs MUNDA mints.
+pub const MUNDA_MINT_AUTHORITY_SEED: &[u8] = b"munda_mint_authority";
+
+/// MUNDA uses 6 decimals, like MUSD, so 1 MUNDA = 1_000_000 base units and one
+/// base unit of a loss mints one base unit of MUNDA (D26).
+pub const MUNDA_DECIMALS: u8 = 6;
+
+/// A loss claim's "Wait" unlocks 24 hours after settle (D23).
+pub const LOSS_UNLOCK_SECS: i64 = 24 * 60 * 60;
+
+/// A loss claim's "Take now" tax: 1000 BPS, so 90% now and 10% never minted (D23).
+pub const LOSS_EARLY_EXIT_BPS: u16 = 1_000;
+
 /// Minimum bet: $1 MUSD in base units (D3).
 pub const MIN_BET: u64 = 1_000_000;
 

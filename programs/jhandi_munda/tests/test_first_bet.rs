@@ -6,7 +6,8 @@ use {
     },
     jhandi_munda::{
         state::{Bet, Claim, ClaimAsset, Round, RoundStatus, TableConfig},
-        BET_SEED, CLAIM_SEED, CONFIG_SEED, INSURANCE_SEED, INSURANCE_VAULT_SEED, FAUCET_RECORD_SEED, MUSD_MINT_AUTHORITY_SEED, MUSD_MINT_SEED,
+        BET_SEED, CLAIM_SEED, CONFIG_SEED, INSURANCE_SEED, INSURANCE_VAULT_SEED, MUNDA_MINT_AUTHORITY_SEED,
+        MUNDA_MINT_SEED, FAUCET_RECORD_SEED, MUSD_MINT_AUTHORITY_SEED, MUSD_MINT_SEED,
         POOL_SEED, POOL_VAULT_SEED, ROUND_SEED, SHARE_MINT_SEED, SPL_TOKEN_PROGRAM_ID, TABLE_SEED,
     },
     litesvm::{types::TransactionResult, LiteSVM},
@@ -621,8 +622,13 @@ fn test_open_claim_from_settled_bet() {
 
     // A second claim for the same bet is rejected.
     assert!(open_claim(&mut t, &bob, &alice_bet).is_err(), "one claim per bet");
-    // Bob's loss has no claim until Step 7.3.
-    assert!(open_claim(&mut t, &bob, &bob_bet).is_err(), "no loss claim yet");
+    // Bob's loss opens a MUNDA claim: 1 MUNDA per 1 MUSD lost, unlock 24 h after settle.
+    assert!(open_claim(&mut t, &bob, &bob_bet).is_ok());
+    let l = claim(&t, &bob_bet);
+    assert_eq!(l.asset, ClaimAsset::Munda);
+    assert_eq!(l.amount, 1_000_000);
+    assert_eq!(l.unlock_at, BASE_TIME + 100 + 86_400);
+    assert_eq!(l.early_exit_bps, 1000);
 }
 
 // Pool deposit (the existing `deposit`): the pool needs MUSD to pay winners.
@@ -716,6 +722,7 @@ fn winning_claim(t: &mut Table) -> (Keypair, Pubkey) {
 
 // Redeem accounts for a claim, signed by its player.
 fn redeem_accounts(t: &Table, player: &Keypair, bet: &Pubkey) -> jhandi_munda::accounts::RedeemClaim {
+    let munda_mint = pda(&[MUNDA_MINT_SEED]);
     jhandi_munda::accounts::RedeemClaim {
         bet: *bet,
         claim: pda(&[CLAIM_SEED, bet.as_ref()]),
@@ -725,7 +732,12 @@ fn redeem_accounts(t: &Table, player: &Keypair, bet: &Pubkey) -> jhandi_munda::a
         insurance_vault: pda(&[INSURANCE_VAULT_SEED]),
         insurance_authority: pda(&[INSURANCE_SEED]),
         player_ata: jhandi_munda::musd_ata(&player.pubkey(), &t.musd_mint),
+        munda_mint,
+        munda_mint_authority: pda(&[MUNDA_MINT_AUTHORITY_SEED]),
+        player_munda_ata: jhandi_munda::musd_ata(&player.pubkey(), &munda_mint),
         token_program: SPL_TOKEN_PROGRAM_ID,
+        associated_token_program: jhandi_munda::ATA_PROGRAM_ID,
+        system_program: SYS,
     }
 }
 
@@ -807,4 +819,86 @@ fn test_win_redeem_take_now_95() {
     assert_eq!(token_amount(&t.svm, &insurance), 51_480_000, "insurance keeps its 5%");
     assert_eq!(claim(&t, &bet).insurance_owed, 0);
     assert!(collect(&mut t, &alice, &bet).is_err(), "nothing left to collect");
+}
+
+// Creates the MUNDA mint (the program's own mint authority PDA).
+fn init_munda(t: &mut Table, payer: &Keypair) {
+    let res = send(
+        &mut t.svm,
+        payer,
+        ix(
+            jhandi_munda::accounts::InitMunda {
+                munda_mint: pda(&[MUNDA_MINT_SEED]),
+                munda_mint_authority: pda(&[MUNDA_MINT_AUTHORITY_SEED]),
+                payer: payer.pubkey(),
+                token_program: SPL_TOKEN_PROGRAM_ID,
+                system_program: SYS,
+            },
+            jhandi_munda::instruction::InitMunda {},
+        ),
+    );
+    assert!(res.is_ok(), "init_munda failed: {:?}", res.err());
+}
+
+fn munda_supply(t: &Table) -> u64 {
+    let data = t.svm.get_account(&pda(&[MUNDA_MINT_SEED])).unwrap().data;
+    u64::from_le_bytes(data[36..44].try_into().unwrap())
+}
+
+// Shared start for the loss tests: MUNDA mint created, and Bob loses a $1 bet
+// on face 4 (the dice are 2,2,5,6,1,3). His loss claim unlocks at +24 h.
+fn losing_claim(t: &mut Table) -> (Keypair, Pubkey) {
+    let deployer = new_player(t);
+    init_munda(t, &deployer);
+    let bob = new_player(t);
+    assert!(place(t, &bob, 4, 1_000_000).is_ok());
+    set_time(t, BASE_TIME + 90);
+    assert!(request_roll(t, &bob).is_ok());
+    let mut randomness = [0u8; 32];
+    randomness[..6].copy_from_slice(&[1, 1, 4, 5, 0, 2]);
+    let request_id = round(t).request_id;
+    assert!(send_callback(t, &bob, randomness, request_id).is_ok());
+    set_time(t, BASE_TIME + 100);
+    let bob_bet = bet_pda(&bob, 4);
+    assert!(settle_bets(t, &bob, &[bob_bet]).is_ok());
+    assert!(open_claim(t, &bob, &bob_bet).is_ok());
+    // MUNDA is minted only on redeem, never at settle (D26).
+    assert_eq!(munda_supply(t), 0, "no MUNDA before a redeem");
+    (bob, bob_bet)
+}
+
+#[test]
+fn test_loss_redeem_full_after_24h() {
+    let mut t = setup();
+    stub_vrf(&mut t);
+    let (bob, bet) = losing_claim(&mut t);
+    let bob_munda_ata = jhandi_munda::musd_ata(&bob.pubkey(), &pda(&[MUNDA_MINT_SEED]));
+
+    // Wait is locked for 24 hours after the settle at +100 s.
+    assert!(wait(&mut t, &bob, &bet).is_err(), "Wait before 24 h must be rejected");
+    set_time(&mut t, BASE_TIME + 100 + 86_399);
+    assert!(wait(&mut t, &bob, &bet).is_err(), "one second early is still locked");
+
+    // At 24 h, Wait mints the full 1 MUNDA for the 1 MUSD lost.
+    set_time(&mut t, BASE_TIME + 100 + 86_400);
+    assert!(wait(&mut t, &bob, &bet).is_ok());
+    assert_eq!(token_amount(&t.svm, &bob_munda_ata), 1_000_000);
+    assert_eq!(munda_supply(&t), 1_000_000, "supply rises on redeem only");
+    assert!(claim(&t, &bet).redeemed);
+    assert!(wait(&mut t, &bob, &bet).is_err(), "a claim redeems once");
+}
+
+#[test]
+fn test_loss_redeem_now_10_percent_tax() {
+    let mut t = setup();
+    stub_vrf(&mut t);
+    let (bob, bet) = losing_claim(&mut t);
+    let bob_munda_ata = jhandi_munda::musd_ata(&bob.pubkey(), &pda(&[MUNDA_MINT_SEED]));
+
+    // Take now mints 90% of the 1 MUNDA at once; the 10% tax is never minted.
+    assert!(take_now(&mut t, &bob, &bet).is_ok());
+    assert_eq!(token_amount(&t.svm, &bob_munda_ata), 900_000);
+    assert_eq!(munda_supply(&t), 900_000, "only the 90% is ever minted");
+    assert!(claim(&t, &bet).redeemed);
+    assert!(take_now(&mut t, &bob, &bet).is_err(), "a claim redeems once");
 }

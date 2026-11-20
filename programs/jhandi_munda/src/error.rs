@@ -48,8 +48,6 @@ pub enum ErrorCode {
     BetAlreadySettled,
     #[msg("A claim can only be opened for a settled bet")]
     BetNotSettled,
-    #[msg("Loss claims are not open yet (Step 7.3)")]
-    NoLossClaimYet,
     #[msg("This claim is still locked; Wait pays after its unlock time")]
     ClaimLocked,
     #[msg("This claim was already paid out")]

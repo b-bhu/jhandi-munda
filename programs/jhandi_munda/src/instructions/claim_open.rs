@@ -8,7 +8,8 @@ use anchor_lang::prelude::*;
 use crate::{
     error::ErrorCode,
     state::{Bet, Claim, ClaimAsset},
-    BET_SEED, CLAIM_SEED, ROUND_LENGTH_SECS, WIN_EARLY_EXIT_BPS,
+    BET_SEED, CLAIM_SEED, LOSS_EARLY_EXIT_BPS, LOSS_UNLOCK_SECS, ROUND_LENGTH_SECS,
+    WIN_EARLY_EXIT_BPS,
 };
 
 #[derive(Accounts)]
@@ -40,16 +41,22 @@ pub struct OpenClaim<'info> {
 pub fn handle_open_claim(ctx: Context<OpenClaim>) -> Result<()> {
     let bet = &ctx.accounts.bet;
     require!(bet.settled, ErrorCode::BetNotSettled);
-    // Only wins get a claim for now; loss claims are Step 7.3.
-    require!(bet.owed > 0, ErrorCode::NoLossClaimYet);
+
+    // A win pays its owed MUSD after one round (D7). A loss pays MUNDA at one
+    // base unit per base unit lost, after 24 hours (D23, D26).
+    let (asset, amount, unlock_at, early_exit_bps) = if bet.owed > 0 {
+        (ClaimAsset::Musd, bet.owed, bet.settled_at + ROUND_LENGTH_SECS, WIN_EARLY_EXIT_BPS)
+    } else {
+        (ClaimAsset::Munda, bet.amount, bet.settled_at + LOSS_UNLOCK_SECS, LOSS_EARLY_EXIT_BPS)
+    };
 
     let claim = &mut ctx.accounts.claim;
     claim.bet = bet.key();
     claim.player = bet.player;
-    claim.asset = ClaimAsset::Musd;
-    claim.amount = bet.owed;
-    claim.unlock_at = bet.settled_at + ROUND_LENGTH_SECS;
-    claim.early_exit_bps = WIN_EARLY_EXIT_BPS;
+    claim.asset = asset;
+    claim.amount = amount;
+    claim.unlock_at = unlock_at;
+    claim.early_exit_bps = early_exit_bps;
     claim.redeemed = false;
     claim.insurance_owed = 0;
     claim.bump = ctx.bumps.claim;

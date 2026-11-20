@@ -56,6 +56,10 @@ pub mod jhandi_munda {
         claim_redeem::handle_init_insurance(ctx)
     }
 
+    pub fn init_munda(ctx: Context<InitMunda>) -> Result<()> {
+        claim_redeem::handle_init_munda(ctx)
+    }
+
     pub fn redeem_wait(ctx: Context<RedeemClaim>) -> Result<()> {
         claim_redeem::handle_redeem_wait(ctx)
     }
