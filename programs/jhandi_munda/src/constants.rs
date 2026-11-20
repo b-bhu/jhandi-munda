@@ -76,6 +76,43 @@ pub const QUEUE_SEED: &[u8] = b"payout_queue";
 /// is about 4 KB, well under the 10,240-byte ER commit cap.
 pub const QUEUE_CAPACITY: usize = 100;
 
+/// Stake pool PDA seed (D15): totals for every MUNDA staker.
+pub const STAKE_POOL_SEED: &[u8] = b"stake_pool";
+
+/// Stake account PDA seed: ["stake", owner]. One per wallet. Stakers are separate
+/// from pool depositors (D27).
+pub const STAKE_SEED: &[u8] = b"stake";
+
+/// Staked MUNDA vault PDA seed. Its authority is the stake authority PDA.
+pub const STAKE_VAULT_SEED: &[u8] = b"stake_vault";
+
+/// Stake authority PDA seed: signs unstakes out of the stake vault.
+pub const STAKE_AUTHORITY_SEED: &[u8] = b"stake_authority";
+
+/// Stake lots per wallet (Step 10.2): each has its own clock. Unstaking frees lots.
+pub const STAKE_MAX_LOTS: usize = 4;
+
+/// Stake lock (D29): a stake earns fee rewards only after it has sat this long.
+/// Unstaking is allowed at any time; only rewards wait.
+pub const STAKE_LOCK_SECS: i64 = 24 * 60 * 60;
+
+/// Dev treasury vault PDA seed (D15: 10% of each win fee).
+pub const DEV_VAULT_SEED: &[u8] = b"dev_vault";
+
+/// Treasury vault PDA seed: the 20% fee slice once insurance is full (D18).
+pub const TREASURY_VAULT_SEED: &[u8] = b"treasury_vault";
+
+/// Rewards vault PDA seed: holds the stakers' 70% slice from distribution until
+/// claimed, so the pool vault (and LP NAV) counts only pool money (Step 9.5).
+pub const REWARDS_VAULT_SEED: &[u8] = b"rewards_vault";
+
+/// Treasury authority PDA seed: owns the dev and treasury vaults.
+pub const TREASURY_AUTHORITY_SEED: &[u8] = b"treasury_authority";
+
+/// Insurance target (D18), a demo number: 1,000 MUSD. Until the insurance vault
+/// holds this, the 20% slice fills it. After that, the 20% slice goes to treasury.
+pub const INSURANCE_TARGET: u64 = 1_000_000_000;
+
 /// Minimum bet: $1 MUSD in base units (D3).
 pub const MIN_BET: u64 = 1_000_000;
 
