@@ -103,18 +103,26 @@ The program is live on Solana **devnet only** (never mainnet, no real funds).
 
 - **Program id:** `4nsQ6ntZgpBhsDJt4bN5nu4bBvyqXtD4ReQdhAdSRhtH` — [Explorer](https://explorer.solana.com/address/4nsQ6ntZgpBhsDJt4bN5nu4bBvyqXtD4ReQdhAdSRhtH?cluster=devnet)
 - **Deploy transaction:** [Explorer](https://explorer.solana.com/tx/3B8sEnN1QE5s2FbmYGN2DnLKF2g1etuyJDWsUzW89BRfwL7rpRpjFq1TJrnZRjcvAwqStP22pCUqRWfYBX9bVK37?cluster=devnet)
+- **Program upgrade (table, bets, VRF):** [Explorer](https://explorer.solana.com/tx/2Kh1QbuG7JLa5GCtZRzVgtBmsPLwL99Xu1CHYyRwb3W15gLavWS71Szqjb75c6F6hvHcUviPgPJtRLd8mDVxUMh1?cluster=devnet)
 - **Initialize (config + MUSD mint):** [Explorer](https://explorer.solana.com/tx/3gZp61mfMjELBaPBgYrKFzpkarLC2LYuSCgfmGu4ZQBo7QyRScCoa8CC9QiDnEmvtZEXndS3b9hzebc75Zkyjap?cluster=devnet)
 - **Initialize pool (empty vault + share mint):** [Explorer](https://explorer.solana.com/tx/MeDrvQqcq1HuAPcYg8mnS4nw9rLBGpbAXKkbgbrsy2hSByF58qJQN3kE4xtkw2YtbZ3CTqEvijo2ovCqgvFZ2KD?cluster=devnet)
 - **Faucet (100 MUSD to the dev wallet):** [Explorer](https://explorer.solana.com/tx/5ezoTc7Jk3d5oxid2eqz7cpYQE1fjNfg8AMoCLY6SA12eM4CfH4shJU71z9jYzVJ3Paj48CBLyNChdLxTJtFhZi5?cluster=devnet)
 - **MUSD mint:** `9ixsxMHJHJJUSNCzQrpP511143s9xksBmYxFAomwjr56` — [Explorer](https://explorer.solana.com/address/9ixsxMHJHJJUSNCzQrpP511143s9xksBmYxFAomwjr56?cluster=devnet)
 - **Dev wallet:** `5qPRTWcUZw1XYGnXqUCCF65TGBgMjk9BfMyz2VBHacm7`
-- **Dev wallet MUSD token account (100 MUSD):** `5mwQw4GBc9KA77vH3hFkSSgjJWSF2zCUDmoXaLyFXUsu` — [Explorer](https://explorer.solana.com/address/5mwQw4GBc9KA77vH3hFkSSgjJWSF2zCUDmoXaLyFXUsu?cluster=devnet)
+- **Dev wallet MUSD token account (99 MUSD after the $1 Step 5.3 bet):** `5mwQw4GBc9KA77vH3hFkSSgjJWSF2zCUDmoXaLyFXUsu` — [Explorer](https://explorer.solana.com/address/5mwQw4GBc9KA77vH3hFkSSgjJWSF2zCUDmoXaLyFXUsu?cluster=devnet)
+- **Round account:** `87yKp1eX7exH7gABS2zmTNizHrTUotuX5fAdTU7oK2Bb` — [Explorer](https://explorer.solana.com/address/87yKp1eX7exH7gABS2zmTNizHrTUotuX5fAdTU7oK2Bb?cluster=devnet)
+- **VRF request:** [Explorer](https://explorer.solana.com/tx/5ucritoaKGe1XN2UdeV7dXc6vdUfp3GK7mVqjGMYXR9iBGcG4Fwh3k91FoiRx3APoo5PWhkrHVgxdUDU8iRrP8ya?cluster=devnet)
+- **VRF callback (faces 4, 5, 3, 5, 2, 4):** [Explorer](https://explorer.solana.com/tx/463n6bMyvDsjmbaYPqvoHqaGQ4QcYN2tvmcKyHazoFVGx2evp7gshTS1ti9oqwNZMXFf6oJomE62E4kAa9ditewH?cluster=devnet)
 
 Without a browser, the same initialize and faucet calls are:
 
 ```bash
 node scripts/devnet-musd.mjs init keys/dev-wallet.json
 node scripts/devnet-musd.mjs faucet keys/dev-wallet.json
+node scripts/devnet-vrf-roll.mjs keys/dev-wallet.json
 ```
+
+`devnet-vrf-roll.mjs` opens a round with a $1 bet, waits for the 90-second window on the on-chain Clock, requests the MagicBlock VRF roll, and prints Explorer links for the request and the callback. The current devnet round is already Rolled (faces 4, 5, 3, 5, 2, 4), so running it again reprints that proof. A new roll needs the Step 6 settle instruction first.
+
 
 Devnet and local only. Keypairs go in `keys/` or `~/.config/solana` and are never committed.
