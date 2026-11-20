@@ -1262,3 +1262,46 @@ fn test_stake_munda() {
     let p = stake_pool(&t);
     assert_eq!((p.total_staked, p.stakers), (40_000_000, 1));
 }
+
+fn unstake(t: &mut Table, owner: &Keypair, amount: u64) -> TransactionResult {
+    send(
+        &mut t.svm,
+        owner,
+        ix(
+            jhandi_munda::accounts::UnstakeMunda {
+                stake_pool: pda(&[jhandi_munda::STAKE_POOL_SEED]),
+                stake: pda(&[jhandi_munda::STAKE_SEED, owner.pubkey().as_ref()]),
+                stake_vault: pda(&[jhandi_munda::STAKE_VAULT_SEED]),
+                stake_authority: pda(&[jhandi_munda::STAKE_AUTHORITY_SEED]),
+                owner: owner.pubkey(),
+                owner_munda_ata: munda_ata(owner),
+                token_program: SPL_TOKEN_PROGRAM_ID,
+            },
+            jhandi_munda::instruction::Unstake { amount },
+        ),
+    )
+}
+
+#[test]
+fn test_unstake_munda_principal() {
+    let mut t = setup();
+    stub_vrf(&mut t);
+    let a = new_player(&mut t);
+    mint_munda(&mut t, &[(&a, 70_000_000)]);
+    init_staking(&mut t, &a);
+    assert!(stake(&mut t, &a, 40_000_000).is_ok());
+
+    // Stake and unstake straight away: the principal comes back in full.
+    assert!(unstake(&mut t, &a, 40_000_000).is_ok());
+    assert_eq!(token_amount(&t.svm, &munda_ata(&a)), 70_000_000, "principal back");
+    assert_eq!(token_amount(&t.svm, &pda(&[jhandi_munda::STAKE_VAULT_SEED])), 0);
+    assert_eq!(stake_account(&t, &a).amount, 0);
+    assert_eq!(stake_pool(&t).total_staked, 0);
+
+    // Unstaking more than is staked is rejected and moves nothing.
+    assert!(stake(&mut t, &a, 10_000_000).is_ok());
+    assert!(unstake(&mut t, &a, 11_000_000).is_err(), "over-unstake is rejected");
+    assert_eq!(stake_account(&t, &a).amount, 10_000_000);
+    assert!(unstake(&mut t, &a, 10_000_000).is_ok());
+    assert_eq!(token_amount(&t.svm, &munda_ata(&a)), 70_000_000);
+}

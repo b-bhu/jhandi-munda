@@ -72,6 +72,10 @@ pub mod jhandi_munda {
         staking::handle_stake(ctx, amount)
     }
 
+    pub fn unstake(ctx: Context<UnstakeMunda>, amount: u64) -> Result<()> {
+        staking::handle_unstake(ctx, amount)
+    }
+
     pub fn init_munda(ctx: Context<InitMunda>) -> Result<()> {
         claim_redeem::handle_init_munda(ctx)
     }

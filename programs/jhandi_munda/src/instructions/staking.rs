@@ -1,11 +1,11 @@
-//! MUNDA staking (D15, D26, D27; #33). Staked MUNDA sits in a program vault and
-//! is the only MUNDA that earns the 70% fee slice. Unstake and rewards come in
-//! later steps; this file starts with `init_staking` and `stake`.
+//! MUNDA staking (D15, D26, D27, D29; #33, #34). Staked MUNDA sits in a program
+//! vault and is the only MUNDA that earns the 70% fee slice. `unstake` returns
+//! principal at any time (D29); rewards come in Steps 9.3 and 10.
 
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::{
     instruction::{AccountMeta, Instruction},
-    program::invoke,
+    program::{invoke, invoke_signed},
 };
 
 use crate::{
@@ -178,4 +178,84 @@ pub fn handle_stake(ctx: Context<StakeMunda>, amount: u64) -> Result<()> {
     )?;
     msg!("Staked {} base MUNDA", amount);
     Ok(())
+}
+
+#[derive(Accounts)]
+pub struct UnstakeMunda<'info> {
+    #[account(mut, seeds = [STAKE_POOL_SEED], bump = stake_pool.bump)]
+    pub stake_pool: Account<'info, StakePool>,
+
+    /// The wallet's stake. Its seeds bind it to the signer.
+    #[account(mut, seeds = [STAKE_SEED, owner.key().as_ref()], bump = stake.bump)]
+    pub stake: Account<'info, Stake>,
+
+    /// CHECK: the staked MUNDA vault, seeds pin it.
+    #[account(mut, seeds = [STAKE_VAULT_SEED], bump)]
+    pub stake_vault: UncheckedAccount<'info>,
+
+    /// CHECK: the stake authority PDA; signs the vault's transfer back to the staker.
+    #[account(seeds = [STAKE_AUTHORITY_SEED], bump)]
+    pub stake_authority: UncheckedAccount<'info>,
+
+    /// The staker: receives the principal back.
+    #[account(mut)]
+    pub owner: Signer<'info>,
+
+    /// CHECK: the staker's MUNDA ATA, checked against the canonical address.
+    #[account(mut)]
+    pub owner_munda_ata: UncheckedAccount<'info>,
+
+    /// CHECK: verified against SPL_TOKEN_PROGRAM_ID in the handler.
+    pub token_program: UncheckedAccount<'info>,
+}
+
+/// Returns `amount` staked MUNDA to the staker at any time (D29). Unstaking more
+/// than is staked is rejected before anything moves.
+pub fn handle_unstake(ctx: Context<UnstakeMunda>, amount: u64) -> Result<()> {
+    require_keys_eq!(
+        ctx.accounts.token_program.key(),
+        SPL_TOKEN_PROGRAM_ID,
+        ErrorCode::InvalidTokenProgram
+    );
+    require!(amount > 0, ErrorCode::ZeroStake);
+    let owner = ctx.accounts.owner.key();
+    require_keys_eq!(
+        ctx.accounts.owner_munda_ata.key(),
+        crate::musd_ata(&owner, &pda_munda_mint()),
+        ErrorCode::InvalidAtaAddress
+    );
+    require!(amount <= ctx.accounts.stake.amount, ErrorCode::InsufficientStake);
+
+    ctx.accounts.stake.amount -= amount;
+    ctx.accounts.stake_pool.total_staked -= amount;
+
+    let mut data = Vec::with_capacity(9);
+    data.push(3u8);
+    data.extend_from_slice(&amount.to_le_bytes());
+    let ix = Instruction {
+        program_id: SPL_TOKEN_PROGRAM_ID,
+        accounts: vec![
+            AccountMeta::new(ctx.accounts.stake_vault.key(), false),
+            AccountMeta::new(ctx.accounts.owner_munda_ata.key(), false),
+            AccountMeta::new_readonly(ctx.accounts.stake_authority.key(), true),
+        ],
+        data,
+    };
+    let seeds: &[&[u8]] = &[STAKE_AUTHORITY_SEED, &[ctx.bumps.stake_authority]];
+    invoke_signed(
+        &ix,
+        &[
+            ctx.accounts.stake_vault.to_account_info(),
+            ctx.accounts.owner_munda_ata.to_account_info(),
+            ctx.accounts.stake_authority.to_account_info(),
+        ],
+        &[seeds],
+    )?;
+    msg!("Unstaked {} base MUNDA", amount);
+    Ok(())
+}
+
+/// The MUNDA mint's address, from its seeds.
+fn pda_munda_mint() -> Pubkey {
+    Pubkey::find_program_address(&[MUNDA_MINT_SEED], &crate::ID).0
 }
