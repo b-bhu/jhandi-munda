@@ -87,4 +87,9 @@ pnpm dev                       # http://localhost:3000
 pnpm build                     # production build check
 ```
 
+Get MUSD on devnet: the app's `/get-musd` page has the one-button faucet
+(100 MUSD per click) plus the mint address and an Explorer link
+(`?cluster=devnet`). Without a browser, `node scripts/devnet-musd.mjs faucet
+keys/devnet-wallet.json` calls the same instruction (see the script header).
+
 Devnet and local only. Keypairs go in `keys/` or `~/.config/solana` and are never committed.
