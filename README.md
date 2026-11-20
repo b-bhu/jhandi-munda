@@ -19,6 +19,7 @@ It should be the mela street game: a flashy dealer, a worn cloth board, the bowl
 
 - **Counterparty:** a shared house pool. Anyone can deposit into the pool and become part of the house. Players bet against the pool.
 - **Test dollar:** MUSD (Munda USD), 6 decimals like USDC (so 1 MUSD = 1_000_000 units). Our own devnet stablecoin at $1, created and controlled by the program as PDAs (D21, D26). No real USDC. The `musd_faucet` instruction mints 100 MUSD per call to the caller's associated token account (created if needed), at most once per wallet per hour (D33 cooldown, wallet record at `["faucet", wallet]`).
+- **House pool (Step 3.1, deposit comes later):** pool PDA at `["pool"]` with its MUSD vault at `["pool_vault"]` and the pool-share (LP) mint at `["pool_share_mint"]`. Initialized empty (0 MUSD vaulted, 0 shares, D4); NAV is $1.00 by definition until the first deposit, so the first shares mint 1:1 with MUSD (`nav_per_share`, D27).
 
 ## Open for brainstorming
 

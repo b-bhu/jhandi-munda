@@ -22,4 +22,8 @@ pub mod jhandi_munda {
     pub fn musd_faucet(ctx: Context<MusdFaucet>) -> Result<()> {
         faucet::handler(ctx)
     }
+
+    pub fn initialize_pool(ctx: Context<InitializePool>) -> Result<()> {
+        pool_init::handler(ctx)
+    }
 }
