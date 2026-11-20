@@ -1,5 +1,6 @@
 pub mod faucet;
 pub mod initialize;
 
-pub use faucet::*;
-pub use initialize::*;
+// Explicit re-exports: glob re-exports of both `handler` fns were ambiguous.
+pub use faucet::{MusdFaucet, musd_ata};
+pub use initialize::Initialize;

@@ -49,7 +49,7 @@ fn setup() -> (LiteSVM, Keypair, Pubkey, Pubkey, Pubkey) {
 
     let blockhash = svm.latest_blockhash();
     let msg = Message::new_with_blockhash(&[instruction], Some(&payer.pubkey()), &blockhash);
-    let tx = VersionedTransaction::try_new(VersionedMessage::Legacy(msg), &[payer]).unwrap();
+    let tx = VersionedTransaction::try_new(VersionedMessage::Legacy(msg), &[&payer]).unwrap();
 
     let res = svm.send_transaction(tx);
     assert!(res.is_ok(), "initialize failed: {:?}", res.err());

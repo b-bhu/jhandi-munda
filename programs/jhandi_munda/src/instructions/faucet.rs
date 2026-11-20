@@ -14,8 +14,8 @@ use crate::{
     MUSD_MINT_AUTHORITY_SEED, MUSD_MINT_SEED, SPL_TOKEN_PROGRAM_ID,
 };
 
-/// SPL token `MintTo`: data [7][amount u64 LE], accounts [mint, destination]
-/// both writable, signed by the mint authority.
+/// SPL token `MintTo`: data [7][amount u64 LE]. Writable mint and
+/// destination plus the mint authority as a readonly signer.
 const TOKEN_IX_MINT_TO: u8 = 7;
 
 /// ATA program `CreateIdempotent`: data [1]. Accounts: funding (signer),
@@ -31,7 +31,9 @@ pub struct MusdFaucet<'info> {
     #[account(seeds = [CONFIG_SEED], bump)]
     pub config: Account<'info, ProgramConfig>,
 
-    /// The MUSD mint PDA. Its supply is raised by the `mint_to` CPI below.
+    /// CHECK: the MUSD mint. The seeds pin its address, `owner = SPL_TOKEN_PROGRAM_ID`
+    /// keeps it a real mint of the SPL token program, and the constraint below ties
+    /// it to `config.musd_mint`; the `mint_to` CPI below only raises its supply.
     #[account(
         mut,
         seeds = [MUSD_MINT_SEED],
@@ -142,6 +144,7 @@ pub fn handler(ctx: Context<MusdFaucet>) -> Result<()> {
         accounts: vec![
             AccountMeta::new(musd_mint, false),
             AccountMeta::new(destination, false),
+            AccountMeta::new_readonly(ctx.accounts.musd_mint_authority.key(), true),
         ],
         data,
     };
@@ -150,6 +153,7 @@ pub fn handler(ctx: Context<MusdFaucet>) -> Result<()> {
         &[
             ctx.accounts.musd_mint.to_account_info(),
             ctx.accounts.destination.to_account_info(),
+            ctx.accounts.musd_mint_authority.to_account_info(),
         ],
         &[&[MUSD_MINT_AUTHORITY_SEED, &[ctx.bumps.musd_mint_authority]]],
     )?;
