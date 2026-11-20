@@ -18,6 +18,7 @@ It should be the mela street game: a flashy dealer, a worn cloth board, the bowl
 ## Decided so far
 
 - **Counterparty:** a shared house pool. Anyone can deposit into the pool and become part of the house. Players bet against the pool.
+- **Test dollar:** MUSD (Munda USD), 6 decimals like USDC (so 1 MUSD = 1_000_000 units). Our own devnet stablecoin at $1, created and controlled by the program as PDAs (D21, D26). No faucet and no real USDC in this step.
 
 ## Open for brainstorming
 
