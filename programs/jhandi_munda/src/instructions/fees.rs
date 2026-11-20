@@ -212,8 +212,14 @@ pub fn handle_distribute_fees<'info>(ctx: Context<'info, DistributeFees<'info>>)
         ErrorCode::StakerSetMismatch
     );
     let mut stakes: Vec<Account<'info, Stake>> = Vec::with_capacity(ctx.remaining_accounts.len());
+    let mut seen: Vec<Pubkey> = Vec::with_capacity(ctx.remaining_accounts.len());
     let mut staked_total = 0u64;
     for info in ctx.remaining_accounts.iter() {
+        // Each stake must be passed exactly once and be writable, so its credit
+        // cannot be dropped or counted twice.
+        require!(info.is_writable, ErrorCode::StakerSetMismatch);
+        require!(!seen.contains(&info.key()), ErrorCode::StakerSetMismatch);
+        seen.push(info.key());
         let stake: Account<Stake> = Account::try_from(info)?;
         let expected = Pubkey::find_program_address(&[STAKE_SEED, stake.owner.as_ref()], &crate::ID).0;
         require_keys_eq!(info.key(), expected, ErrorCode::StakerSetMismatch);

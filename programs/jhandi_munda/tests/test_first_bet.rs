@@ -1563,3 +1563,29 @@ fn test_new_stake_lot_has_own_clock() {
     assert_eq!(stake_account(&t, &x).pending, 84_000 + 64_615);
     assert_eq!(staker_pot(&t), 1, "rounding dust stays in the pot");
 }
+
+#[test]
+fn test_distribute_rejects_duplicate_staker() {
+    let mut t = setup();
+    stub_vrf(&mut t);
+    let a = new_player(&mut t);
+    let b = new_player(&mut t);
+    mint_munda(&mut t, &[(&a, 50_000_000), (&b, 50_000_000)]);
+    init_fee_vaults(&mut t, &a);
+    init_insurance(&mut t, &a);
+    init_staking(&mut t, &a);
+    assert!(stake(&mut t, &a, 50_000_000).is_ok());
+    assert!(stake(&mut t, &b, 50_000_000).is_ok());
+    let now = clock_now(&t);
+    set_time(&mut t, now + 86_400);
+    earn_win_fee(&mut t);
+
+    // Passing A twice would make the count and total look right while B is left out.
+    assert!(distribute(&mut t, &a, &[&a, &a]).is_err(), "a duplicate staker is refused");
+    assert_eq!(stake_account(&t, &b).pending, 0, "the refused call changed nothing");
+
+    // The complete set works: 280,000 split 50 : 50.
+    assert!(distribute(&mut t, &a, &[&a, &b]).is_ok());
+    assert_eq!(stake_account(&t, &a).pending, 140_000);
+    assert_eq!(stake_account(&t, &b).pending, 140_000);
+}
