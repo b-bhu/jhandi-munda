@@ -4,7 +4,7 @@
 **Current concept:** First-principles thinking, applied to the house pool.
 
 ## Exact next step
-Step 1 scaffold running on the box. When it builds: show Bibhu the folder layout, explaining each Anchor piece in plain words with a TypeScript comparison. Then Step 2: MUSD faucet with an Explorer link. Start the next session with the spaced-recall questions in tracker.md.
+Step 2: MUSD test mint + faucet on devnet, with an Explorer link. First explain "accounts" (Solana stores everything in accounts, like rows in a DB that each have an owner program) using TS comparisons. Run `source scripts/env.sh` before any build.
 
 ## Open decisions queue (Phase 1)
 1. Payout table and house edge (verify math)
