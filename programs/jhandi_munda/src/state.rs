@@ -7,6 +7,9 @@ use crate::{QUEUE_CAPACITY, STAKE_LOCK_SECS, STAKE_MAX_LOTS};
 #[account]
 #[derive(InitSpace)]
 pub struct ProgramConfig {
+    /// The table authority (D40): the only key that can delegate the round. Set
+    /// to the payer of `initialize`.
+    pub admin: Pubkey,
     /// The MUSD mint this program controls.
     pub musd_mint: Pubkey,
     /// Bump seed for the config PDA itself.

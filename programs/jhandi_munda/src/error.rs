@@ -58,6 +58,8 @@ pub enum ErrorCode {
     InsufficientInsuranceFunds,
     #[msg("There is nothing to collect from the pool for this claim")]
     NothingToCollect,
+    #[msg("Only the table authority (the config admin) can delegate the round")]
+    NotTableAuthority,
     #[msg("A token account does not have the expected layout")]
     InvalidTokenAccount,
     #[msg("The payout queue is full")]

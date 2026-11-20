@@ -77,6 +77,7 @@ pub fn handler(ctx: Context<Initialize>) -> Result<()> {
     )?;
 
     let config = &mut ctx.accounts.config;
+    config.admin = ctx.accounts.payer.key();
     config.musd_mint = ctx.accounts.musd_mint.key();
     config.bump = ctx.bumps.config;
     config.musd_bump = ctx.bumps.musd_mint_authority;

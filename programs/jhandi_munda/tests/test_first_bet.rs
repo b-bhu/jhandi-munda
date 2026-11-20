@@ -1682,12 +1682,14 @@ fn test_delegate_round_size_under_er_cap() {
         &dlp_id(),
     )
     .0;
+    // Only the table authority (D40) may delegate: the admin pays here.
     let res = send(
         &mut t.svm,
-        &alice,
+        &t.admin,
         ix(
             jhandi_munda::accounts::DelegateRound {
-                payer: alice.pubkey(),
+                payer: t.admin.pubkey(),
+                config: t.config,
                 round,
                 buffer_round: buffer,
                 delegation_record_round: record,
@@ -1706,4 +1708,37 @@ fn test_delegate_round_size_under_er_cap() {
     assert_eq!(after.owner, dlp_id(), "the round is now owned by the delegation program");
     assert_eq!(after.data.len(), size, "delegated round keeps its size");
     assert!(after.data.len() <= 10_240);
+}
+
+#[test]
+fn test_delegate_rejects_stranger() {
+    let mut t = setup();
+    stub_vrf(&mut t);
+    t.svm.add_program(dlp_id(), include_bytes!("fixtures/vrf_stub.so")).unwrap();
+    let alice = new_player(&mut t);
+    assert!(place(&mut t, &alice, 2, 10_000_000).is_ok());
+    let round = t.round;
+    let owner_before = t.svm.get_account(&round).unwrap().owner;
+
+    // A stranger (not the config admin, D40) cannot delegate the round.
+    let program = jhandi_munda::id();
+    let buffer = Pubkey::find_program_address(&[ephemeral_rollups_sdk::pda::DELEGATE_BUFFER_TAG, round.as_ref()], &program).0;
+    let record = Pubkey::find_program_address(&[ephemeral_rollups_sdk::pda::DELEGATION_RECORD_TAG, round.as_ref()], &dlp_id()).0;
+    let metadata = Pubkey::find_program_address(&[ephemeral_rollups_sdk::pda::DELEGATION_METADATA_TAG, round.as_ref()], &dlp_id()).0;
+    let stranger_ix = || ix(
+        jhandi_munda::accounts::DelegateRound {
+            payer: alice.pubkey(),
+            config: t.config,
+            round,
+            buffer_round: buffer,
+            delegation_record_round: record,
+            delegation_metadata_round: metadata,
+            owner_program: program,
+            delegation_program: dlp_id(),
+            system_program: SYS,
+        },
+        jhandi_munda::instruction::DelegateRound {},
+    );
+    assert!(send(&mut t.svm, &alice, stranger_ix()).is_err(), "a stranger is rejected");
+    assert_eq!(t.svm.get_account(&round).unwrap().owner, owner_before, "the round did not move");
 }

@@ -18,13 +18,22 @@ use ephemeral_rollups_sdk::{
     pda::{DELEGATE_BUFFER_TAG, DELEGATION_METADATA_TAG, DELEGATION_RECORD_TAG},
 };
 
-use crate::{state::Round, ER_VALIDATOR_ASIA, ROUND_SEED};
+use crate::{error::ErrorCode, state::{ProgramConfig, Round}, CONFIG_SEED, ER_VALIDATOR_ASIA, ROUND_SEED};
 
 #[derive(Accounts)]
 pub struct DelegateRound<'info> {
-    /// Pays the rent for the delegation buffer and record.
+    /// Pays the rent for the delegation buffer and record. Must be the table
+    /// authority (D40, checked against the config admin below).
     #[account(mut)]
     pub payer: Signer<'info>,
+
+    /// Program config: holds the table authority (D40).
+    #[account(
+        seeds = [CONFIG_SEED],
+        bump,
+        constraint = config.admin == payer.key() @ ErrorCode::NotTableAuthority
+    )]
+    pub config: Account<'info, ProgramConfig>,
 
     /// The live round, delegated to the Ephemeral Rollup. Untyped on purpose: it
     /// is owned by the delegation program after this call.
