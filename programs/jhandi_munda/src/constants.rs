@@ -89,6 +89,10 @@ pub const STAKE_VAULT_SEED: &[u8] = b"stake_vault";
 /// Stake authority PDA seed: signs unstakes out of the stake vault.
 pub const STAKE_AUTHORITY_SEED: &[u8] = b"stake_authority";
 
+/// Stake lock (D29): a stake earns fee rewards only after it has sat this long.
+/// Unstaking is allowed at any time; only rewards wait.
+pub const STAKE_LOCK_SECS: i64 = 24 * 60 * 60;
+
 /// Dev treasury vault PDA seed (D15: 10% of each win fee).
 pub const DEV_VAULT_SEED: &[u8] = b"dev_vault";
 

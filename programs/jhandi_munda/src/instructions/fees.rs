@@ -24,8 +24,9 @@ use crate::{
     instructions::claim_redeem::{spl_transfer, token_balance},
     state::{PayoutQueue, PoolState, ProgramConfig, Stake, StakePool, TableConfig},
     CONFIG_SEED, DEV_VAULT_SEED, INSURANCE_TARGET, INSURANCE_VAULT_SEED, MUSD_MINT_SEED,
-    POOL_SEED, POOL_VAULT_SEED, QUEUE_SEED, SPL_TOKEN_PROGRAM_ID, STAKE_POOL_SEED, STAKE_SEED,
-    TABLE_SEED, TOKEN_ACCOUNT_SPACE, TREASURY_AUTHORITY_SEED, TREASURY_VAULT_SEED,
+    POOL_SEED, POOL_VAULT_SEED, QUEUE_SEED, SPL_TOKEN_PROGRAM_ID, STAKE_LOCK_SECS,
+    STAKE_POOL_SEED, STAKE_SEED, TABLE_SEED, TOKEN_ACCOUNT_SPACE, TREASURY_AUTHORITY_SEED,
+    TREASURY_VAULT_SEED,
 };
 
 /// SPL token `InitializeAccount3` (opcode 18): data [18][authority 32 bytes].
@@ -162,10 +163,15 @@ pub struct DistributeFees<'info> {
     // Remaining accounts: every Stake account, once each, writable.
 }
 
-/// Eligible stake for a fee distribution. Every staked MUNDA counts for now;
-/// the 24-hour rule (D29) is added in Step 10.
-fn eligible_amount(stake: &Stake) -> u64 {
-    stake.amount
+/// Eligible stake for a fee distribution (D29): the staked amount, but only once
+/// the stake has sat for `STAKE_LOCK_SECS`. A stake made less than 24 hours
+/// ago earns nothing yet.
+fn eligible_amount(stake: &Stake, now: i64) -> u64 {
+    if now >= stake.staked_at + STAKE_LOCK_SECS {
+        stake.amount
+    } else {
+        0
+    }
 }
 
 pub fn handle_distribute_fees<'info>(ctx: Context<'info, DistributeFees<'info>>) -> Result<()> {
@@ -222,11 +228,12 @@ pub fn handle_distribute_fees<'info>(ctx: Context<'info, DistributeFees<'info>>)
     }
     require!(staked_total == ctx.accounts.stake_pool.total_staked, ErrorCode::StakerSetMismatch);
 
-    let eligible_total: u64 = stakes.iter().map(|s| eligible_amount(s)).sum();
+    let now = Clock::get()?.unix_timestamp;
+    let eligible_total: u64 = stakes.iter().map(|s| eligible_amount(s, now)).sum();
     if eligible_total > 0 && staker_pot > 0 {
         let mut distributed = 0u64;
         for stake in stakes.iter_mut() {
-            let credit = (staker_pot as u128 * eligible_amount(stake) as u128
+            let credit = (staker_pot as u128 * eligible_amount(stake, now) as u128
                 / eligible_total as u128) as u64;
             stake.pending = stake.pending.checked_add(credit).ok_or(ErrorCode::MathOverflow)?;
             distributed += credit;

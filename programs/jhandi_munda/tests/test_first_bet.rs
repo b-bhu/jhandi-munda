@@ -1402,6 +1402,9 @@ fn test_fee_split_two_stakers() {
     assert!(stake(&mut t, &a, 70_000_000).is_ok());
     assert!(stake(&mut t, &b, 30_000_000).is_ok());
     // C holds 5 MUNDA but never stakes it.
+    // Rewards count only after the 24-hour stake lock (D29).
+    let now = clock_now(&t);
+    set_time(&mut t, now + 86_400);
 
     earn_win_fee(&mut t);
     // The crank must be given every staker: leaving B out is refused.
@@ -1460,4 +1463,64 @@ fn test_insurance_fills_then_treasury() {
     assert_eq!(token_amount(&t.svm, &insurance), jhandi_munda::INSURANCE_TARGET, "insurance stays at target");
     assert_eq!(token_amount(&t.svm, &pda(&[jhandi_munda::TREASURY_VAULT_SEED])), 40_000 + 80_000);
     assert_eq!(token_amount(&t.svm, &pda(&[jhandi_munda::DEV_VAULT_SEED])), 80_000, "10% each win");
+}
+
+// Staker pot waiting in the table (carried until a distribution can pay it).
+fn staker_pot(t: &Table) -> u64 {
+    let data = t.svm.get_account(&t.table).unwrap().data;
+    jhandi_munda::state::TableConfig::try_deserialize(&mut data.as_slice()).unwrap().fee_stakers
+}
+
+#[test]
+fn test_stake_and_immediate_unstake_earns_zero() {
+    let mut t = setup();
+    stub_vrf(&mut t);
+    let a = new_player(&mut t);
+    let b = new_player(&mut t);
+    mint_munda(&mut t, &[(&a, 70_000_000), (&b, 30_000_000)]);
+    init_fee_vaults(&mut t, &a);
+    init_insurance(&mut t, &a);
+    init_staking(&mut t, &a);
+
+    // B stakes and matures for a day. Then A stakes and unstakes straight away.
+    assert!(stake(&mut t, &b, 30_000_000).is_ok());
+    let now = clock_now(&t);
+    set_time(&mut t, now + 86_400);
+    assert!(stake(&mut t, &a, 70_000_000).is_ok());
+    assert!(unstake(&mut t, &a, 70_000_000).is_ok());
+    assert_eq!(token_amount(&t.svm, &munda_ata(&a)), 70_000_000, "principal back at once");
+
+    earn_win_fee(&mut t);
+    assert!(distribute(&mut t, &a, &[&a, &b]).is_ok());
+    assert_eq!(stake_account(&t, &a).pending, 0, "stake and unstake earns zero");
+    assert_eq!(stake_account(&t, &b).pending, 280_000, "the mature stake takes the whole slice");
+}
+
+#[test]
+fn test_stake_24h_warp_earns() {
+    let mut t = setup();
+    stub_vrf(&mut t);
+    let a = new_player(&mut t);
+    let b = new_player(&mut t);
+    mint_munda(&mut t, &[(&a, 70_000_000), (&b, 30_000_000)]);
+    init_fee_vaults(&mut t, &a);
+    init_insurance(&mut t, &a);
+    init_staking(&mut t, &a);
+    assert!(stake(&mut t, &a, 70_000_000).is_ok());
+    assert!(stake(&mut t, &b, 30_000_000).is_ok());
+
+    // Inside the 24 hours, a fee earns nothing: the staker pot waits in the table.
+    earn_win_fee(&mut t);
+    assert!(distribute(&mut t, &a, &[&a, &b]).is_ok());
+    assert_eq!(stake_account(&t, &a).pending, 0);
+    assert_eq!(stake_account(&t, &b).pending, 0);
+    assert_eq!(staker_pot(&t), 280_000, "the pot waits for stakers who have matured");
+
+    // After a 24-hour clock warp, the same stakes earn their 70 : 30 share.
+    let now = clock_now(&t);
+    set_time(&mut t, now + 86_400);
+    assert!(distribute(&mut t, &a, &[&a, &b]).is_ok());
+    assert_eq!(stake_account(&t, &a).pending, 196_000);
+    assert_eq!(stake_account(&t, &b).pending, 84_000);
+    assert_eq!(staker_pot(&t), 0);
 }
