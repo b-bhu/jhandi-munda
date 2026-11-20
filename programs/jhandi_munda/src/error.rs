@@ -62,6 +62,8 @@ pub enum ErrorCode {
     InvalidTokenAccount,
     #[msg("The payout queue is full")]
     QueueFull,
+    #[msg("Withdrawals wait until every queued winner is paid (D30)")]
+    QueueNotEmpty,
     #[msg("Queue payouts must be passed in strict first-in, first-out order")]
     QueueOrderMismatch,
     #[msg("This claim is waiting in the payout queue")]

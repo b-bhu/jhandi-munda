@@ -1076,3 +1076,79 @@ fn test_queue_pays_head_not_newer_winner() {
     assert_eq!((head, tail), (1, 2), "one paid, one waiting");
     assert_eq!(entries, vec![(bc, 29_600_000)]);
 }
+
+// An LP withdraws `amount` shares for MUSD (the program's withdraw instruction).
+fn lp_withdraw(t: &mut Table, lp: &Keypair, amount: u64) -> TransactionResult {
+    let share_mint = pda(&[SHARE_MINT_SEED]);
+    send(
+        &mut t.svm,
+        lp,
+        ix(
+            jhandi_munda::accounts::Withdraw {
+                pool: t.pool,
+                share_mint,
+                vault: t.vault,
+                withdrawer: lp.pubkey(),
+                withdrawer_shares: jhandi_munda::share_ata(&lp.pubkey(), &share_mint),
+                withdrawer_ata: jhandi_munda::musd_ata(&lp.pubkey(), &t.musd_mint),
+                queue: pda(&[QUEUE_SEED]),
+                token_program: SPL_TOKEN_PROGRAM_ID,
+            },
+            jhandi_munda::instruction::Withdraw { amount },
+        ),
+    )
+}
+
+#[test]
+fn test_lp_withdraw_waits_for_queue() {
+    let mut t = setup();
+    stub_vrf(&mut t);
+    // An LP deposits 5 MUSD (5,000,000 shares at NAV $1).
+    let lp = new_player(&mut t);
+    deposit(&mut t, &lp, 5_000_000);
+
+    // Alice wins $29.60 on a $10 bet, but the pool holds only $15: she queues.
+    let alice = new_player(&mut t);
+    assert!(place(&mut t, &alice, 2, 10_000_000).is_ok());
+    set_time(&mut t, BASE_TIME + 90);
+    assert!(request_roll(&mut t, &alice).is_ok());
+    let mut randomness = [0u8; 32];
+    randomness[..6].copy_from_slice(&[1, 1, 4, 5, 0, 2]);
+    let request_id = round(&t).request_id;
+    assert!(send_callback(&mut t, &alice, randomness, request_id).is_ok());
+    set_time(&mut t, BASE_TIME + 100);
+    let ab = bet_pda(&alice, 2);
+    assert!(settle_bets(&mut t, &alice, &[ab]).is_ok());
+    assert!(finish_round(&mut t, &alice).is_ok());
+    assert!(open_claim(&mut t, &alice, &ab).is_ok());
+    set_time(&mut t, BASE_TIME + 190);
+    assert!(wait(&mut t, &alice, &ab).is_ok());
+    let ac = pda(&[CLAIM_SEED, ab.as_ref()]);
+    assert_eq!(queue_state(&t).2, vec![(ac, 29_600_000)], "Alice is queued");
+
+    // The LP cannot take MUSD out while Alice waits.
+    assert!(lp_withdraw(&mut t, &lp, 1_000_000).is_err(), "LP withdraw refused while queued");
+
+    // Round 2: Carol loses $10 on face 4 and $10 on face 6, so the pool holds $35.
+    set_time(&mut t, BASE_TIME + 200);
+    let carol = new_player(&mut t);
+    assert!(place(&mut t, &carol, 4, 10_000_000).is_ok());
+    assert!(place(&mut t, &carol, 6, 10_000_000).is_ok());
+    set_time(&mut t, BASE_TIME + 290);
+    assert!(request_roll(&mut t, &carol).is_ok());
+    let request_id = round(&t).request_id;
+    assert!(send_callback(&mut t, &carol, randomness, request_id).is_ok());
+    set_time(&mut t, BASE_TIME + 300);
+    assert!(settle_bets(&mut t, &carol, &[bet_pda_r(1, &carol, 4), bet_pda_r(1, &carol, 6)]).is_ok());
+    assert!(finish_round(&mut t, &carol).is_ok());
+    assert!(lp_withdraw(&mut t, &lp, 1_000_000).is_err(), "still refused: Alice is not paid yet");
+
+    // The crank pays Alice, the queue empties, and now the LP can withdraw.
+    assert!(pay_queue(&mut t, &carol, &[(&alice, ac)]).is_ok());
+    assert!(lp_withdraw(&mut t, &lp, 1_000_000).is_ok(), "LP withdraw after the queue is paid");
+    // Vault: 35 - 29.60 paid = 5.40. Supply 5,000,000 shares, so 1,000,000 shares
+    // are worth 1,000,000 x 5.40 / 5 = $1.08.
+    let lp_ata = jhandi_munda::musd_ata(&lp.pubkey(), &t.musd_mint);
+    assert_eq!(token_amount(&t.svm, &lp_ata), 95_000_000 + 1_080_000);
+    assert_eq!(token_amount(&t.svm, &t.vault), 4_320_000);
+}
