@@ -38,4 +38,12 @@ pub enum ErrorCode {
     UnexpectedCallback,
     #[msg("Too few usable VRF bytes to make six faces")]
     RollExhausted,
+    #[msg("Settle needs the six faces of a rolled round, and runs once per round")]
+    RoundNotRolled,
+    #[msg("A bet account passed to settle is not an unsettled bet of this round")]
+    BetAccountMismatch,
+    #[msg("Settle must pass every bet of the round")]
+    IncompleteSettle,
+    #[msg("A payout or fee amount overflowed")]
+    MathOverflow,
 }

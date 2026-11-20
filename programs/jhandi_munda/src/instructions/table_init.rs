@@ -45,6 +45,9 @@ pub fn handler(ctx: Context<InitializeTable>) -> Result<()> {
     // Max bet exists as config but is off by default on devnet (D6).
     table.max_bet = 0;
     table.max_bet_enabled = false;
+    table.fee_treasury = 0;
+    table.fee_devs = 0;
+    table.fee_stakers = 0;
     table.bump = ctx.bumps.table;
 
     let round = &mut ctx.accounts.round;
@@ -54,6 +57,7 @@ pub fn handler(ctx: Context<InitializeTable>) -> Result<()> {
     round.players = Vec::new();
     round.request_id = [0u8; 32];
     round.faces = [0u8; 6];
+    round.bet_count = 0;
     round.bump = ctx.bumps.round;
 
     msg!("Table config and idle round initialized");

@@ -69,6 +69,11 @@ pub struct TableConfig {
     pub max_bet: u64,
     /// Off by default on devnet (D6). A cap that exists but is switched off.
     pub max_bet_enabled: bool,
+    /// Fee pots, in MUSD base units, accrued by `settle` (D15): the treasury
+    /// share (20%), the devs share (10%) and the stakers share (70%).
+    pub fee_treasury: u64,
+    pub fee_devs: u64,
+    pub fee_stakers: u64,
     /// Bump seed for the table config PDA.
     pub bump: u8,
 }
@@ -108,6 +113,8 @@ pub struct Round {
     pub request_id: [u8; 32],
     /// The six dice faces (1 to 6) of the last roll. Zero until a roll lands.
     pub faces: [u8; 6],
+    /// Number of bets in this round. Settle must see exactly this many.
+    pub bet_count: u16,
     /// Bump seed for the round PDA.
     pub bump: u8,
 }
@@ -123,6 +130,12 @@ pub struct Bet {
     pub amount: u64,
     /// The die face (1 to 6) this bet is on.
     pub symbol: u8,
+    /// The round this bet belongs to. Its seeds include this too.
+    pub round_id: u64,
+    /// What settle owes this bet, after the 2% win fee. Zero for a loss.
+    pub owed: u64,
+    /// Set once settle has processed the bet, so it cannot be counted twice.
+    pub settled: bool,
     /// Bump seed for the bet PDA.
     pub bump: u8,
 }

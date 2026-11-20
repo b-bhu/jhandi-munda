@@ -48,6 +48,10 @@ pub mod jhandi_munda {
         request_roll::handler(ctx)
     }
 
+    pub fn settle(ctx: Context<Settle>) -> Result<()> {
+        settle::handler(ctx)
+    }
+
     pub fn callback_roll_dice(
         ctx: Context<CallbackRollDice>,
         randomness: [u8; 32],

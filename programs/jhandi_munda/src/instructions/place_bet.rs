@@ -147,7 +147,11 @@ pub fn handler(ctx: Context<PlaceBet>, symbol: u8, amount: u64) -> Result<()> {
     bet.player = bettor;
     bet.amount = amount;
     bet.symbol = symbol;
+    bet.round_id = round.round_id;
+    bet.owed = 0;
+    bet.settled = false;
     bet.bump = ctx.bumps.bet;
+    round.bet_count += 1;
 
     msg!("Bet of {} base MUSD on face {} in round {}", amount, symbol, round.round_id);
     Ok(())
