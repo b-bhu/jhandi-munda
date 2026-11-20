@@ -24,6 +24,6 @@ pub enum ErrorCode {
     BetAboveMaximum,
     #[msg("A bet must name one die face, 1 to 6")]
     InvalidSymbol,
-    #[msg("A round is already running; joining is not open yet")]
-    RoundAlreadyOpen,
+    #[msg("The table already has its maximum of 10 players this round")]
+    TableFull,
 }

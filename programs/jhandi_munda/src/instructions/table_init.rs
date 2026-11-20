@@ -50,7 +50,8 @@ pub fn handler(ctx: Context<InitializeTable>) -> Result<()> {
     let round = &mut ctx.accounts.round;
     round.status = RoundStatus::Idle;
     round.opened_at = 0;
-    round.player_count = 0;
+    round.round_id = 0;
+    round.players = Vec::new();
     round.bump = ctx.bumps.round;
 
     msg!("Table config and idle round initialized");
