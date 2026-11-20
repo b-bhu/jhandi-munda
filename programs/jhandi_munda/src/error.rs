@@ -14,8 +14,4 @@ pub enum ErrorCode {
     ZeroDeposit,
     #[msg("The pool is in a state its own instructions cannot create (shares without vaulted MUSD, or the reverse)")]
     InvalidPoolState,
-    #[msg("This deposit is too small at the current NAV and would mint zero shares")]
-    ZeroShareMint,
-    #[msg("This deposit would mint more pool shares than a u64 can hold")]
-    ShareMintOverflow,
 }

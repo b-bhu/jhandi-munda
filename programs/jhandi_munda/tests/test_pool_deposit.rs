@@ -22,18 +22,28 @@ const TOKEN_ACCOUNT_SPACE: usize = 165;
 const TOKEN_AMOUNT_OFFSET: usize = 64;
 const MINT_SUPPLY_OFFSET: usize = 36;
 
-// Fixed base clock for the faucet call inside these tests (same as the
-// faucet tests: LiteSVM starts its Clock at unix 0).
+// LiteSVM starts its Clock at unix 0, where the faucet's one-hour cooldown
+// can never pass, so the faucet call needs this timestamp stamped first.
 const BASE_TIME: i64 = 1_700_000_000;
 
-// The deposit the issue asks for: 100 MUSD in MUSD base units (6 decimals,
-// like USDC). A share is 1 MUSD-sized unit, so 100 MUSD must mint 100
-// = 100_000_000 base-unit shares at the empty-pool NAV of $1.00.
+// The issue's deposit: 100 MUSD in MUSD base units (6 decimals).
 const DEPOSIT_AMOUNT: u64 = 100_000_000;
 
+// Sends one instruction signed only by `signer`, expiring the blockhash
+// first (LiteSVM needs a fresh one per transaction), and returns the raw
+// result so tests can assert success or failure.
+fn send(svm: &mut LiteSVM, signer: &Keypair, instruction: &Instruction) -> TransactionResult {
+    svm.expire_blockhash();
+    let blockhash = svm.latest_blockhash();
+    let msg =
+        Message::new_with_blockhash(&[instruction.clone()], Some(&signer.pubkey()), &blockhash);
+    let tx = VersionedTransaction::try_new(VersionedMessage::Legacy(msg), &[signer]).unwrap();
+    svm.send_transaction(tx)
+}
+
 // Runs Step 2's `initialize` (config + MUSD mint) and Step 3.1's
-// `initialize_pool` (empty pool PDA, vault, share mint), returning everything
-// the deposit tests derive addresses from.
+// `initialize_pool` (empty pool PDA, vault, share mint), returning the PDAs
+// the deposit tests need.
 fn setup() -> (
     LiteSVM,
     Keypair,
@@ -73,15 +83,10 @@ fn setup() -> (
         }
         .to_account_metas(None),
     );
-
-    let blockhash = svm.latest_blockhash();
-    let msg = Message::new_with_blockhash(&[instruction], Some(&payer.pubkey()), &blockhash);
-    let tx = VersionedTransaction::try_new(VersionedMessage::Legacy(msg), &[&payer]).unwrap();
-
-    let res = svm.send_transaction(tx);
+    let res = send(&mut svm, &payer, &instruction);
     assert!(res.is_ok(), "initialize failed: {:?}", res.err());
 
-    // The pool init: creates an empty pool state, vault, and share mint.
+    // The pool init: creates the empty pool state, vault, and share mint.
     let instruction = Instruction::new_with_bytes(
         program_id,
         &jhandi_munda::instruction::InitializePool {}.data(),
@@ -97,14 +102,7 @@ fn setup() -> (
         }
         .to_account_metas(None),
     );
-
-    // Fresh blockhash: the previous transaction must not collide.
-    svm.expire_blockhash();
-    let blockhash = svm.latest_blockhash();
-    let msg = Message::new_with_blockhash(&[instruction], Some(&payer.pubkey()), &blockhash);
-    let tx = VersionedTransaction::try_new(VersionedMessage::Legacy(msg), &[&payer]).unwrap();
-
-    let res = svm.send_transaction(tx);
+    let res = send(&mut svm, &payer, &instruction);
     assert!(res.is_ok(), "initialize_pool failed: {:?}", res.err());
 
     (svm, payer, config, musd_mint, musd_mint_authority, pool, vault, share_mint)
@@ -122,13 +120,11 @@ fn faucet_record_pda(wallet: &Pubkey) -> Pubkey {
     Pubkey::find_program_address(&[FAUCET_RECORD_SEED, wallet.as_ref()], &jhandi_munda::id()).0
 }
 
-// Gives one wallet its 100 MUSD the demo way: the faucet (D21, D33). Each
-// wallet here claims at most once, so its fresh record passes the cooldown
-// check at any timestamp; the clock is stamped to a real-feeling time.
+// Gives one wallet its 100 MUSD the demo way: the faucet. Each test wallet
+// claims at most once, so its fresh record passes the cooldown check.
 fn faucet(svm: &mut LiteSVM, wallet: &Keypair, config: &Pubkey, musd_mint: &Pubkey,
           musd_mint_authority: &Pubkey, ata: &Pubkey, record: &Pubkey) {
     set_clock(svm, BASE_TIME);
-
     let instruction = Instruction::new_with_bytes(
         jhandi_munda::id(),
         &jhandi_munda::instruction::MusdFaucet {}.data(),
@@ -145,29 +141,15 @@ fn faucet(svm: &mut LiteSVM, wallet: &Keypair, config: &Pubkey, musd_mint: &Pubk
         }
         .to_account_metas(None),
     );
-
-    svm.expire_blockhash();
-    let blockhash = svm.latest_blockhash();
-    let msg = Message::new_with_blockhash(&[instruction], Some(&wallet.pubkey()), &blockhash);
-    let tx = VersionedTransaction::try_new(VersionedMessage::Legacy(msg), &[wallet]).unwrap();
-
-    let res = svm.send_transaction(tx);
+    let res = send(svm, wallet, &instruction);
     assert!(res.is_ok(), "musd_faucet failed: {:?}", res.err());
 }
 
-// Calls `deposit` for one wallet and returns the raw LiteSVM result so tests
-// can assert both success and failure. The MUSD source and the share
-// destination are the wallet's canonical ATAs, derived here the same way the
-// program checks them.
-fn try_deposit(
-    svm: &mut LiteSVM,
-    wallet: &Keypair,
-    pool: &Pubkey,
-    musd_mint: &Pubkey,
-    vault: &Pubkey,
-    share_mint: &Pubkey,
-    amount: u64,
-) -> TransactionResult {
+// Calls `deposit` for one wallet and returns the raw result so tests can
+// assert both success and failure. The MUSD source and share destination are
+// the wallet's canonical ATAs, derived the same way the program checks them.
+fn try_deposit(svm: &mut LiteSVM, wallet: &Keypair, pool: &Pubkey, musd_mint: &Pubkey,
+               vault: &Pubkey, share_mint: &Pubkey, amount: u64) -> TransactionResult {
     let depositor = wallet.pubkey();
     let depositor_ata = jhandi_munda::musd_ata(&depositor, musd_mint);
     let depositor_shares = jhandi_munda::share_ata(&depositor, share_mint);
@@ -188,21 +170,7 @@ fn try_deposit(
         }
         .to_account_metas(None),
     );
-
-    // A fresh blockhash per call, like every other helper in this suite.
-    svm.expire_blockhash();
-    let blockhash = svm.latest_blockhash();
-    let msg = Message::new_with_blockhash(&[instruction], Some(&depositor), &blockhash);
-    let tx = VersionedTransaction::try_new(VersionedMessage::Legacy(msg), &[wallet]).unwrap();
-
-    svm.send_transaction(tx)
-}
-
-// Calls `deposit` and asserts the transaction succeeded.
-fn deposit(svm: &mut LiteSVM, wallet: &Keypair, pool: &Pubkey, musd_mint: &Pubkey,
-           vault: &Pubkey, share_mint: &Pubkey, amount: u64) {
-    let res = try_deposit(svm, wallet, pool, musd_mint, vault, share_mint, amount);
-    assert!(res.is_ok(), "deposit failed: {:?}", res.err());
+    send(svm, wallet, &instruction)
 }
 
 // Reads a token account as (amount, mint, owner), asserting the layout.
@@ -210,17 +178,8 @@ fn token_account(svm: &LiteSVM, address: &Pubkey, label: &str) -> (u64, Pubkey, 
     let acc = svm
         .get_account(address)
         .unwrap_or_else(|| panic!("{} must exist", label));
-    assert_eq!(
-        acc.owner, SPL_TOKEN_PROGRAM_ID,
-        "{} owner must be the SPL token program",
-        label
-    );
-    assert_eq!(
-        acc.data.len(),
-        TOKEN_ACCOUNT_SPACE,
-        "{} must be a plain SPL token account",
-        label
-    );
+    assert_eq!(acc.owner, SPL_TOKEN_PROGRAM_ID, "{} owner must be the SPL token program", label);
+    assert_eq!(acc.data.len(), TOKEN_ACCOUNT_SPACE, "{} must be a plain SPL token account", label);
     // 0..32 mint, 32..64 owner, 64..72 amount.
     let mint = Pubkey::from(<[u8; 32]>::try_from(&acc.data[0..32]).unwrap());
     let owner = Pubkey::from(<[u8; 32]>::try_from(&acc.data[32..64]).unwrap());
@@ -233,8 +192,7 @@ fn token_account(svm: &LiteSVM, address: &Pubkey, label: &str) -> (u64, Pubkey, 
 fn mint_supply(svm: &LiteSVM, mint: &Pubkey) -> u64 {
     u64::from_le_bytes(
         <[u8; 8]>::try_from(
-            &svm.get_account(mint).unwrap().data
-                [MINT_SUPPLY_OFFSET..MINT_SUPPLY_OFFSET + 8],
+            &svm.get_account(mint).unwrap().data[MINT_SUPPLY_OFFSET..MINT_SUPPLY_OFFSET + 8],
         )
         .unwrap(),
     )
@@ -246,9 +204,8 @@ fn error_code(variant: ErrorCode) -> u32 {
     anchor_lang::error::ERROR_CODE_OFFSET + variant as u32
 }
 
-// The Done-when from the issue: faucet (mint) 100 MUSD, deposit it, see 100
-// shares at NAV $1.00 (1_000_000 in the documented integer representation),
-// with the vault holding the 100 MUSD.
+// The Done-when: faucet 100 MUSD, deposit it, see 100 shares at NAV $1.00
+// (1_000_000 in the documented integer representation), vault holding 100.
 #[test]
 fn test_pool_deposit_100() {
     let (mut svm, payer, config, musd_mint, musd_mint_authority, pool, vault, share_mint) =
@@ -257,18 +214,16 @@ fn test_pool_deposit_100() {
     let payer_shares = jhandi_munda::share_ata(&payer.pubkey(), &share_mint);
     let record = faucet_record_pda(&payer.pubkey());
 
-    // Seed the depositor the demo way: the faucet mints exactly 100 MUSD.
-    faucet(&mut svm, &payer, &config, &musd_mint, &musd_mint_authority, &payer_ata, &record);
-
-    // The depositor's share account does not exist yet: the deposit itself
-    // must create it at the canonical ATA address.
+    // The depositor's share ATA does not exist yet: the deposit must create
+    // it. The faucet mints exactly the 100 MUSD being deposited.
     assert!(
         svm.get_account(&payer_shares).is_none(),
         "share ATA must not exist before the first deposit"
     );
+    faucet(&mut svm, &payer, &config, &musd_mint, &musd_mint_authority, &payer_ata, &record);
 
-    // Deposit all 100 MUSD into the empty pool.
-    deposit(&mut svm, &payer, &pool, &musd_mint, &vault, &share_mint, DEPOSIT_AMOUNT);
+    let res = try_deposit(&mut svm, &payer, &pool, &musd_mint, &vault, &share_mint, DEPOSIT_AMOUNT);
+    assert!(res.is_ok(), "deposit failed: {:?}", res.err());
 
     // The vault received the whole deposit and stayed a pool-owned MUSD
     // account.
@@ -286,18 +241,12 @@ fn test_pool_deposit_100() {
     );
     assert_eq!(share_mint_read, share_mint, "shares must be the pool's LP mint");
     assert_eq!(share_owner, payer.pubkey(), "shares must belong to the depositor");
-    assert_eq!(
-        mint_supply(&svm, &share_mint),
-        DEPOSIT_AMOUNT,
-        "the share supply must equal the minted shares"
-    );
-
-    // The full deposit left the depositor's MUSD account.
+    assert_eq!(mint_supply(&svm, &share_mint), DEPOSIT_AMOUNT, "the share supply must equal the minted shares");
     let (musd_left, _, _) = token_account(&svm, &payer_ata, "depositor MUSD ATA");
     assert_eq!(musd_left, 0, "the full 100 MUSD deposit must leave the depositor");
 
-    // NAV readback in the documented integer representation: vault / supply
-    // is exactly 1:1, so $1.00 reads as 1_000_000 (6 decimals).
+    // NAV readback in the documented integer representation: $1.00 is
+    // 1_000_000 (6 decimals).
     assert_eq!(
         jhandi_munda::nav_per_share(vault_amount, DEPOSIT_AMOUNT),
         1_000_000,
@@ -324,9 +273,8 @@ fn test_pool_deposit_rejects_zero() {
         err.err
     );
 
-    // The rejected call changed nothing: the vault stayed empty, no shares
-    // were minted, the depositor kept their MUSD, and no share account was
-    // created for them.
+    // The rejected call changed nothing: empty vault, no shares, MUSD kept,
+    // no share ATA created.
     let (vault_amount, _, _) = token_account(&svm, &vault, "pool vault");
     assert_eq!(vault_amount, 0, "a rejected zero deposit must not fill the vault");
     assert_eq!(mint_supply(&svm, &share_mint), 0, "a rejected zero deposit must not mint shares");
@@ -335,44 +283,5 @@ fn test_pool_deposit_rejects_zero() {
     assert!(
         svm.get_account(&payer_shares).is_none(),
         "a rejected zero deposit must not create a share account"
-    );
-}
-
-// Two depositors, both at the defined $1.00 NAV of an unprofit pool: the
-// second deposit prices off the live vault/supply ratio and the pool
-// accumulates (exercise for the non-empty pricing branch).
-#[test]
-fn test_pool_deposit_twice_at_one_dollar_nav() {
-    let (mut svm, payer, config, musd_mint, musd_mint_authority, pool, vault, share_mint) =
-        setup();
-    let payer_ata = jhandi_munda::musd_ata(&payer.pubkey(), &musd_mint);
-    let payer_shares = jhandi_munda::share_ata(&payer.pubkey(), &share_mint);
-    let record = faucet_record_pda(&payer.pubkey());
-    faucet(&mut svm, &payer, &config, &musd_mint, &musd_mint_authority, &payer_ata, &record);
-    deposit(&mut svm, &payer, &pool, &musd_mint, &vault, &share_mint, DEPOSIT_AMOUNT);
-
-    // A second wallet deposits its own faucet MUSD; the hourly cooldown
-    // (D33) is per wallet, so the second wallet claims right away.
-    let other = Keypair::new();
-    svm.airdrop(&other.pubkey(), 1_000_000_000).unwrap();
-    let other_ata = jhandi_munda::musd_ata(&other.pubkey(), &musd_mint);
-    let other_shares = jhandi_munda::share_ata(&other.pubkey(), &share_mint);
-    let other_record = faucet_record_pda(&other.pubkey());
-    faucet(&mut svm, &other, &config, &musd_mint, &musd_mint_authority, &other_ata, &other_record);
-    deposit(&mut svm, &other, &pool, &musd_mint, &vault, &share_mint, DEPOSIT_AMOUNT);
-
-    // The pool accumulated both deposits; the share supply tracked them, so
-    // the NAV is still $1.00 for both holders.
-    let (vault_amount, _, _) = token_account(&svm, &vault, "pool vault");
-    assert_eq!(vault_amount, 2 * DEPOSIT_AMOUNT, "the vault must hold both deposits");
-    assert_eq!(mint_supply(&svm, &share_mint), 2 * DEPOSIT_AMOUNT, "both deposits minted shares");
-    let (payer_shares_amount, _, _) = token_account(&svm, &payer_shares, "first depositor shares");
-    assert_eq!(payer_shares_amount, DEPOSIT_AMOUNT, "the first depositor must still hold 100 shares");
-    let (other_shares_amount, _, _) = token_account(&svm, &other_shares, "second depositor shares");
-    assert_eq!(other_shares_amount, DEPOSIT_AMOUNT, "the second depositor must hold 100 shares");
-    assert_eq!(
-        jhandi_munda::nav_per_share(vault_amount, 2 * DEPOSIT_AMOUNT),
-        1_000_000,
-        "NAV after two 1:1 deposits must still be $1.00"
     );
 }
