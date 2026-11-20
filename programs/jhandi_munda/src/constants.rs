@@ -89,6 +89,9 @@ pub const STAKE_VAULT_SEED: &[u8] = b"stake_vault";
 /// Stake authority PDA seed: signs unstakes out of the stake vault.
 pub const STAKE_AUTHORITY_SEED: &[u8] = b"stake_authority";
 
+/// Stake lots per wallet (Step 10.2): each has its own clock. Unstaking frees lots.
+pub const STAKE_MAX_LOTS: usize = 4;
+
 /// Stake lock (D29): a stake earns fee rewards only after it has sat this long.
 /// Unstaking is allowed at any time; only rewards wait.
 pub const STAKE_LOCK_SECS: i64 = 24 * 60 * 60;

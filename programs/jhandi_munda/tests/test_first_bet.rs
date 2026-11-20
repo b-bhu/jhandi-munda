@@ -1524,3 +1524,42 @@ fn test_stake_24h_warp_earns() {
     assert_eq!(stake_account(&t, &b).pending, 84_000);
     assert_eq!(staker_pot(&t), 0);
 }
+
+#[test]
+fn test_new_stake_lot_has_own_clock() {
+    let mut t = setup();
+    stub_vrf(&mut t);
+    let w = new_player(&mut t);
+    let x = new_player(&mut t);
+    mint_munda(&mut t, &[(&w, 100_000_000), (&x, 30_000_000)]);
+    init_fee_vaults(&mut t, &w);
+    init_insurance(&mut t, &w);
+    init_staking(&mut t, &w);
+
+    // Lot A: W stakes 70 and X stakes 30 at T0.
+    assert!(stake(&mut t, &w, 70_000_000).is_ok());
+    assert!(stake(&mut t, &x, 30_000_000).is_ok());
+    let now = clock_now(&t);
+    set_time(&mut t, now + 86_400); // lot A matures
+
+    // Lot B: W tops up 30 now. It is fresh and earns nothing yet.
+    assert!(stake(&mut t, &w, 30_000_000).is_ok());
+    assert_eq!(stake_account(&t, &w).lots[0].amount, 70_000_000, "lot A keeps its clock");
+
+    // First fee: only lot A counts, so W has 70 of the 100 eligible; X has 30.
+    earn_win_fee(&mut t);
+    assert!(distribute(&mut t, &w, &[&w, &x]).is_ok());
+    assert_eq!(stake_account(&t, &w).pending, 196_000, "lot B earns zero; W gets 70 : 30");
+    assert_eq!(stake_account(&t, &x).pending, 84_000);
+
+    // A further 24 hours: lot B matures too. Both lots now earn.
+    let now = clock_now(&t);
+    set_time(&mut t, now + 86_400);
+    earn_win_fee(&mut t);
+    assert!(distribute(&mut t, &w, &[&w, &x]).is_ok());
+    // W has 100 of 130 eligible: 280,000 x 100 / 130 = 215,384; X gets 64,615.
+    // One base unit of rounding stays in the pot.
+    assert_eq!(stake_account(&t, &w).pending, 196_000 + 215_384, "B earns after its 24 hours");
+    assert_eq!(stake_account(&t, &x).pending, 84_000 + 64_615);
+    assert_eq!(staker_pot(&t), 1, "rounding dust stays in the pot");
+}

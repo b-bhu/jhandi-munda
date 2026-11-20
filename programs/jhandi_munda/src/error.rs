@@ -76,6 +76,8 @@ pub enum ErrorCode {
     StakerSetMismatch,
     #[msg("There is nothing to claim")]
     NothingToClaim,
+    #[msg("This wallet already has the maximum number of stake lots; unstake to free one")]
+    TooManyLots,
     #[msg("A payout or fee amount overflowed")]
     MathOverflow,
 }

@@ -10,7 +10,7 @@ use anchor_lang::solana_program::{
 
 use crate::{
     error::ErrorCode,
-    state::{Stake, StakePool},
+    state::{Stake, StakeLot, StakePool},
     MUNDA_MINT_SEED, SPL_TOKEN_PROGRAM_ID, STAKE_AUTHORITY_SEED, STAKE_POOL_SEED, STAKE_SEED,
     STAKE_VAULT_SEED, TOKEN_ACCOUNT_SPACE,
 };
@@ -151,8 +151,15 @@ pub fn handle_stake(ctx: Context<StakeMunda>, amount: u64) -> Result<()> {
         stake.bump = ctx.bumps.stake;
         pool.stakers += 1;
     }
+    // Each stake makes its own lot with its own clock (Step 10.2). Topping up never
+    // resets an older lot.
+    let slot = stake
+        .lots
+        .iter()
+        .position(|lot| lot.amount == 0)
+        .ok_or(ErrorCode::TooManyLots)?;
+    stake.lots[slot] = StakeLot { amount, staked_at: now };
     stake.amount = stake.amount.checked_add(amount).ok_or(ErrorCode::MathOverflow)?;
-    stake.staked_at = now;
     pool.total_staked = pool.total_staked.checked_add(amount).ok_or(ErrorCode::MathOverflow)?;
 
     // Move the MUNDA into the vault, signed by the staker.
@@ -226,6 +233,19 @@ pub fn handle_unstake(ctx: Context<UnstakeMunda>, amount: u64) -> Result<()> {
     );
     require!(amount <= ctx.accounts.stake.amount, ErrorCode::InsufficientStake);
 
+    // Unstake from the newest lots first, so the mature lots keep earning.
+    let mut left = amount;
+    while left > 0 {
+        let lots = &mut ctx.accounts.stake.lots;
+        let newest = lots
+            .iter_mut()
+            .filter(|lot| lot.amount > 0)
+            .max_by_key(|lot| lot.staked_at)
+            .ok_or(ErrorCode::InsufficientStake)?;
+        let take = left.min(newest.amount);
+        newest.amount -= take;
+        left -= take;
+    }
     ctx.accounts.stake.amount -= amount;
     ctx.accounts.stake_pool.total_staked -= amount;
 

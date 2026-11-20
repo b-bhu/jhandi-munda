@@ -1,6 +1,6 @@
 use anchor_lang::prelude::*;
 
-use crate::QUEUE_CAPACITY;
+use crate::{QUEUE_CAPACITY, STAKE_LOCK_SECS, STAKE_MAX_LOTS};
 
 /// Program-wide settings, first written by `initialize`. Later steps (pool,
 /// table, faucet) read or extend this account.
@@ -215,21 +215,43 @@ pub struct StakePool {
     pub bump: u8,
 }
 
-/// One wallet's MUNDA stake (D15, D27). Holding MUNDA alone earns nothing: only
-/// the staked amount takes part in the 70% fee slice.
+/// One stake lot (D29, Step 10.2): an amount staked at one time. Each lot has its
+/// own 24-hour clock from `staked_at`. An empty lot has `amount` 0.
+#[derive(AnchorSerialize, AnchorDeserialize, InitSpace, Clone, Copy, Default, Debug, PartialEq, Eq)]
+pub struct StakeLot {
+    /// MUNDA in this lot, in base units.
+    pub amount: u64,
+    /// Clock time this lot was staked.
+    pub staked_at: i64,
+}
+
+/// One wallet's MUNDA stake (D15, D27, D29). Holding MUNDA alone earns nothing:
+/// only staked lots that have matured take part in the 70% fee slice.
 #[account]
 #[derive(InitSpace)]
 pub struct Stake {
     /// The wallet that staked.
     pub owner: Pubkey,
-    /// MUNDA staked, in base units.
+    /// Total MUNDA staked across the lots, in base units.
     pub amount: u64,
-    /// Clock time of the latest stake. Used by the 24-hour rule (Step 10).
-    pub staked_at: i64,
+    /// The stake lots. Each has its own 24-hour clock (up to `STAKE_MAX_LOTS`).
+    pub lots: [StakeLot; STAKE_MAX_LOTS],
     /// Fee rewards credited to this stake, in MUSD base units, not yet claimed.
     pub pending: u64,
     /// Bump seed for the stake PDA.
     pub bump: u8,
+}
+
+impl Stake {
+    /// MUNDA that earns rewards at `now`: each lot counts once it has been staked
+    /// for `STAKE_LOCK_SECS` (D29). Younger lots count for nothing yet.
+    pub fn eligible(&self, now: i64) -> u64 {
+        self.lots
+            .iter()
+            .filter(|lot| lot.amount > 0 && now >= lot.staked_at + STAKE_LOCK_SECS)
+            .map(|lot| lot.amount)
+            .sum()
+    }
 }
 
 /// The MUSD faucet cooldown record for one wallet (D33): a small PDA at
