@@ -161,7 +161,7 @@ fn new_player(t: &mut Table) -> Keypair {
 
 // Places one bet on die face `symbol` for `wallet` in round 0.
 fn place(t: &mut Table, wallet: &Keypair, symbol: u8, amount: u64) -> TransactionResult {
-    let bet = pda(&[BET_SEED, &0u64.to_le_bytes(), wallet.pubkey().as_ref(), &[symbol]]);
+    let bet = bet_pda_r(round(t).round_id, wallet, symbol);
     let ata = jhandi_munda::musd_ata(&wallet.pubkey(), &t.musd_mint);
     send(
         &mut t.svm,
@@ -461,7 +461,12 @@ fn finish_round(t: &mut Table, signer: &Keypair) -> TransactionResult {
 }
 
 fn bet_pda(wallet: &Keypair, symbol: u8) -> Pubkey {
-    pda(&[BET_SEED, &0u64.to_le_bytes(), wallet.pubkey().as_ref(), &[symbol]])
+    bet_pda_r(0, wallet, symbol)
+}
+
+// A bet's PDA in a given round.
+fn bet_pda_r(round_id: u64, wallet: &Keypair, symbol: u8) -> Pubkey {
+    pda(&[BET_SEED, &round_id.to_le_bytes(), wallet.pubkey().as_ref(), &[symbol]])
 }
 
 #[test]
@@ -988,4 +993,86 @@ fn test_enqueue_win_when_pool_short() {
     assert_eq!(token_amount(&t.svm, &t.vault), 25_000_000);
     assert!(wait(&mut t, &alice, &ab).is_err(), "a queued claim cannot be queued twice");
     assert!(take_now(&mut t, &alice, &ab).is_err(), "a queued claim cannot take now");
+}
+
+// Cranks the payout queue: `pairs` are (player, claim) in queue order. Each
+// claim is followed by the player's MUSD ATA, as the instruction expects.
+fn pay_queue(t: &mut Table, signer: &Keypair, pairs: &[(&Keypair, Pubkey)]) -> TransactionResult {
+    let mut instruction = ix(
+        jhandi_munda::accounts::PayQueue {
+            queue: pda(&[QUEUE_SEED]),
+            pool: t.pool,
+            pool_vault: t.vault,
+            token_program: SPL_TOKEN_PROGRAM_ID,
+        },
+        jhandi_munda::instruction::PayQueue {},
+    );
+    for (player, claim_key) in pairs {
+        instruction.accounts.push(AccountMeta::new(*claim_key, false));
+        instruction
+            .accounts
+            .push(AccountMeta::new(jhandi_munda::musd_ata(&player.pubkey(), &t.musd_mint), false));
+    }
+    send(&mut t.svm, signer, instruction)
+}
+
+#[test]
+fn test_queue_pays_head_not_newer_winner() {
+    let mut t = setup();
+    stub_vrf(&mut t);
+    let funder = new_player(&mut t);
+    deposit(&mut t, &funder, 5_000_000);
+
+    // Round 1: Alice and Bob each win $29.60 on face 2; the pool holds 25 MUSD.
+    let alice = new_player(&mut t);
+    let bob = new_player(&mut t);
+    assert!(place(&mut t, &alice, 2, 10_000_000).is_ok());
+    assert!(place(&mut t, &bob, 2, 10_000_000).is_ok());
+    set_time(&mut t, BASE_TIME + 90);
+    assert!(request_roll(&mut t, &alice).is_ok());
+    let mut randomness = [0u8; 32];
+    randomness[..6].copy_from_slice(&[1, 1, 4, 5, 0, 2]);
+    let request_id = round(&t).request_id;
+    assert!(send_callback(&mut t, &alice, randomness, request_id).is_ok());
+    set_time(&mut t, BASE_TIME + 100);
+    let (ab, bb) = (bet_pda(&alice, 2), bet_pda(&bob, 2));
+    assert!(settle_bets(&mut t, &alice, &[ab, bb]).is_ok());
+    assert!(finish_round(&mut t, &alice).is_ok());
+    assert!(open_claim(&mut t, &alice, &ab).is_ok());
+    assert!(open_claim(&mut t, &bob, &bb).is_ok());
+    set_time(&mut t, BASE_TIME + 190);
+    assert!(wait(&mut t, &alice, &ab).is_ok(), "Alice queues first");
+    assert!(wait(&mut t, &bob, &bb).is_ok(), "Bob queues behind her");
+    let (ac, bc) = (pda(&[CLAIM_SEED, ab.as_ref()]), pda(&[CLAIM_SEED, bb.as_ref()]));
+    assert_eq!(queue_state(&t).2, vec![(ac, 29_600_000), (bc, 29_600_000)]);
+
+    // Round 2: Carol loses $10 on face 4. Her stake flows into the pool: 35 MUSD.
+    set_time(&mut t, BASE_TIME + 200);
+    let carol = new_player(&mut t);
+    assert!(place(&mut t, &carol, 4, 10_000_000).is_ok());
+    assert_eq!(token_amount(&t.svm, &t.vault), 35_000_000);
+    set_time(&mut t, BASE_TIME + 290);
+    assert!(request_roll(&mut t, &carol).is_ok());
+    let request_id = round(&t).request_id;
+    assert!(send_callback(&mut t, &carol, randomness, request_id).is_ok());
+    set_time(&mut t, BASE_TIME + 300);
+    assert!(settle_bets(&mut t, &carol, &[bet_pda_r(1, &carol, 4)]).is_ok());
+    assert!(finish_round(&mut t, &carol).is_ok());
+
+    // Bob cannot jump the queue: passing his claim first is refused.
+    assert!(pay_queue(&mut t, &carol, &[(&bob, bc)]).is_err(), "no skipping the head");
+
+    // The crank pays Alice (the head) in full. Bob's $29.60 is more than the
+    // $5.40 left, so the crank stops there: Bob stays in the queue.
+    assert!(pay_queue(&mut t, &carol, &[(&alice, ac), (&bob, bc)]).is_ok());
+    let alice_ata = jhandi_munda::musd_ata(&alice.pubkey(), &t.musd_mint);
+    let bob_ata = jhandi_munda::musd_ata(&bob.pubkey(), &t.musd_mint);
+    assert_eq!(token_amount(&t.svm, &alice_ata), 90_000_000 + 29_600_000, "Alice paid in full");
+    assert_eq!(token_amount(&t.svm, &bob_ata), 90_000_000, "Bob not paid yet");
+    assert_eq!(token_amount(&t.svm, &t.vault), 5_400_000);
+    assert!(claim(&t, &ab).redeemed && !claim(&t, &ab).queued);
+    assert!(claim(&t, &bb).queued && !claim(&t, &bb).redeemed);
+    let (head, tail, entries) = queue_state(&t);
+    assert_eq!((head, tail), (1, 2), "one paid, one waiting");
+    assert_eq!(entries, vec![(bc, 29_600_000)]);
 }

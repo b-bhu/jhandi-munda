@@ -60,6 +60,10 @@ pub mod jhandi_munda {
         payout_queue::handle_init_queue(ctx)
     }
 
+    pub fn pay_queue<'info>(ctx: Context<'info, PayQueue<'info>>) -> Result<()> {
+        payout_queue::handle_pay_queue(ctx)
+    }
+
     pub fn init_munda(ctx: Context<InitMunda>) -> Result<()> {
         claim_redeem::handle_init_munda(ctx)
     }
