@@ -169,6 +169,11 @@ pub struct Claim {
     pub unlock_at: i64,
     /// The "Take now" cut in basis points (D7: 500 = 5% for a win).
     pub early_exit_bps: u16,
+    /// Set once the claim is paid out, by Wait or by Take now (one redeem only).
+    pub redeemed: bool,
+    /// After a "Take now" win: the full amount the insurance fund advanced at
+    /// 95%, which the pool owes back in full (D7). Zero once collected.
+    pub insurance_owed: u64,
     /// Bump seed for the claim PDA.
     pub bump: u8,
 }

@@ -50,6 +50,18 @@ pub enum ErrorCode {
     BetNotSettled,
     #[msg("Loss claims are not open yet (Step 7.3)")]
     NoLossClaimYet,
+    #[msg("This claim is still locked; Wait pays after its unlock time")]
+    ClaimLocked,
+    #[msg("This claim was already paid out")]
+    ClaimAlreadyRedeemed,
+    #[msg("The pool does not hold enough MUSD to pay this now (the queue is Step 8)")]
+    InsufficientPoolFunds,
+    #[msg("The insurance fund does not hold enough MUSD for this Take now")]
+    InsufficientInsuranceFunds,
+    #[msg("There is nothing to collect from the pool for this claim")]
+    NothingToCollect,
+    #[msg("A token account does not have the expected layout")]
+    InvalidTokenAccount,
     #[msg("A payout or fee amount overflowed")]
     MathOverflow,
 }

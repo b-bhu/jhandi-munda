@@ -46,6 +46,12 @@ pub const CLAIM_SEED: &[u8] = b"claim";
 /// Win "Take now" cut: 500 BPS, so the player gets 95% now (D7).
 pub const WIN_EARLY_EXIT_BPS: u16 = 500;
 
+/// Insurance fund authority PDA seed. Signs the "Take now" payouts (D7).
+pub const INSURANCE_SEED: &[u8] = b"insurance";
+
+/// Insurance fund MUSD vault PDA seed: a token account owned by the insurance PDA.
+pub const INSURANCE_VAULT_SEED: &[u8] = b"insurance_vault";
+
 /// Minimum bet: $1 MUSD in base units (D3).
 pub const MIN_BET: u64 = 1_000_000;
 

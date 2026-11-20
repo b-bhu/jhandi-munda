@@ -6,7 +6,7 @@ use {
     },
     jhandi_munda::{
         state::{Bet, Claim, ClaimAsset, Round, RoundStatus, TableConfig},
-        BET_SEED, CLAIM_SEED, CONFIG_SEED, FAUCET_RECORD_SEED, MUSD_MINT_AUTHORITY_SEED, MUSD_MINT_SEED,
+        BET_SEED, CLAIM_SEED, CONFIG_SEED, INSURANCE_SEED, INSURANCE_VAULT_SEED, FAUCET_RECORD_SEED, MUSD_MINT_AUTHORITY_SEED, MUSD_MINT_SEED,
         POOL_SEED, POOL_VAULT_SEED, ROUND_SEED, SHARE_MINT_SEED, SPL_TOKEN_PROGRAM_ID, TABLE_SEED,
     },
     litesvm::{types::TransactionResult, LiteSVM},
@@ -623,4 +623,188 @@ fn test_open_claim_from_settled_bet() {
     assert!(open_claim(&mut t, &bob, &alice_bet).is_err(), "one claim per bet");
     // Bob's loss has no claim until Step 7.3.
     assert!(open_claim(&mut t, &bob, &bob_bet).is_err(), "no loss claim yet");
+}
+
+// Pool deposit (the existing `deposit`): the pool needs MUSD to pay winners.
+fn deposit(t: &mut Table, funder: &Keypair, amount: u64) {
+    let share_mint = pda(&[SHARE_MINT_SEED]);
+    let res = send(
+        &mut t.svm,
+        funder,
+        ix(
+            jhandi_munda::accounts::Deposit {
+                pool: t.pool,
+                share_mint,
+                vault: t.vault,
+                depositor: funder.pubkey(),
+                depositor_ata: jhandi_munda::musd_ata(&funder.pubkey(), &t.musd_mint),
+                depositor_shares: jhandi_munda::share_ata(&funder.pubkey(), &share_mint),
+                token_program: SPL_TOKEN_PROGRAM_ID,
+                system_program: SYS,
+                associated_token_program: jhandi_munda::ATA_PROGRAM_ID,
+            },
+            jhandi_munda::instruction::Deposit { amount },
+        ),
+    );
+    assert!(res.is_ok(), "deposit failed: {:?}", res.err());
+}
+
+// Creates the insurance vault (the insurance PDA is its authority).
+fn init_insurance(t: &mut Table, payer: &Keypair) {
+    let res = send(
+        &mut t.svm,
+        payer,
+        ix(
+            jhandi_munda::accounts::InitInsurance {
+                config: t.config,
+                insurance_vault: pda(&[INSURANCE_VAULT_SEED]),
+                musd_mint: t.musd_mint,
+                payer: payer.pubkey(),
+                token_program: SPL_TOKEN_PROGRAM_ID,
+                system_program: SYS,
+            },
+            jhandi_munda::instruction::InitInsurance {},
+        ),
+    );
+    assert!(res.is_ok(), "init_insurance failed: {:?}", res.err());
+}
+
+// Plain SPL transfer of MUSD from `from`'s ATA into a token account `to`.
+fn transfer_musd(t: &mut Table, from: &Keypair, to: &Pubkey, amount: u64) {
+    let mut data = vec![3u8];
+    data.extend_from_slice(&amount.to_le_bytes());
+    let instruction = Instruction::new_with_bytes(
+        SPL_TOKEN_PROGRAM_ID,
+        &data,
+        vec![
+            AccountMeta::new(jhandi_munda::musd_ata(&from.pubkey(), &t.musd_mint), false),
+            AccountMeta::new(*to, false),
+            AccountMeta::new_readonly(from.pubkey(), true),
+        ],
+    );
+    let res = send(&mut t.svm, from, instruction);
+    assert!(res.is_ok(), "transfer failed: {:?}", res.err());
+}
+
+// Shared start for the redeem tests: the pool holds 100 MUSD (a deposit), the
+// insurance fund holds 50 MUSD (pre-seeded by transfer; Step 9 funds it from
+// the treasury slice), and Alice has a $10 win on face 2 with a claim
+// (owed $29.60) that unlocks at +190 s. The clock is left at +100 s.
+fn winning_claim(t: &mut Table) -> (Keypair, Pubkey) {
+    let funder = new_player(t);
+    deposit(t, &funder, 100_000_000);
+    let insurer = new_player(t);
+    init_insurance(t, &insurer);
+    transfer_musd(t, &insurer, &pda(&[INSURANCE_VAULT_SEED]), 50_000_000);
+
+    let alice = new_player(t);
+    let bob = new_player(t);
+    assert!(place(t, &alice, 2, 10_000_000).is_ok());
+    assert!(place(t, &bob, 4, 1_000_000).is_ok());
+    set_time(t, BASE_TIME + 90);
+    assert!(request_roll(t, &bob).is_ok());
+    let mut randomness = [0u8; 32];
+    randomness[..6].copy_from_slice(&[1, 1, 4, 5, 0, 2]);
+    let request_id = round(t).request_id;
+    assert!(send_callback(t, &bob, randomness, request_id).is_ok());
+    set_time(t, BASE_TIME + 100);
+    let alice_bet = bet_pda(&alice, 2);
+    assert!(settle_bets(t, &bob, &[alice_bet, bet_pda(&bob, 4)]).is_ok());
+    assert!(open_claim(t, &bob, &alice_bet).is_ok());
+    (alice, alice_bet)
+}
+
+// Redeem accounts for a claim, signed by its player.
+fn redeem_accounts(t: &Table, player: &Keypair, bet: &Pubkey) -> jhandi_munda::accounts::RedeemClaim {
+    jhandi_munda::accounts::RedeemClaim {
+        bet: *bet,
+        claim: pda(&[CLAIM_SEED, bet.as_ref()]),
+        player: player.pubkey(),
+        pool: t.pool,
+        pool_vault: t.vault,
+        insurance_vault: pda(&[INSURANCE_VAULT_SEED]),
+        insurance_authority: pda(&[INSURANCE_SEED]),
+        player_ata: jhandi_munda::musd_ata(&player.pubkey(), &t.musd_mint),
+        token_program: SPL_TOKEN_PROGRAM_ID,
+    }
+}
+
+fn wait(t: &mut Table, player: &Keypair, bet: &Pubkey) -> TransactionResult {
+    let accounts = redeem_accounts(t, player, bet);
+    send(&mut t.svm, player, ix(accounts, jhandi_munda::instruction::RedeemWait {}))
+}
+
+fn take_now(t: &mut Table, player: &Keypair, bet: &Pubkey) -> TransactionResult {
+    let accounts = redeem_accounts(t, player, bet);
+    send(&mut t.svm, player, ix(accounts, jhandi_munda::instruction::RedeemTakeNow {}))
+}
+
+fn collect(t: &mut Table, payer: &Keypair, bet: &Pubkey) -> TransactionResult {
+    send(
+        &mut t.svm,
+        payer,
+        ix(
+            jhandi_munda::accounts::CollectInsurance {
+                bet: *bet,
+                claim: pda(&[CLAIM_SEED, bet.as_ref()]),
+                pool: t.pool,
+                pool_vault: t.vault,
+                insurance_vault: pda(&[INSURANCE_VAULT_SEED]),
+                token_program: SPL_TOKEN_PROGRAM_ID,
+            },
+            jhandi_munda::instruction::CollectInsurance {},
+        ),
+    )
+}
+
+#[test]
+fn test_win_redeem_full_after_90s() {
+    let mut t = setup();
+    stub_vrf(&mut t);
+    let (alice, bet) = winning_claim(&mut t);
+    let alice_ata = jhandi_munda::musd_ata(&alice.pubkey(), &t.musd_mint);
+
+    // Wait is locked until the claim unlocks at +190 s.
+    assert!(wait(&mut t, &alice, &bet).is_err(), "Wait before unlock must be rejected");
+
+    // At +190 s Wait pays the full $29.60 from the pool.
+    set_time(&mut t, BASE_TIME + 190);
+    assert!(wait(&mut t, &alice, &bet).is_ok());
+    assert_eq!(token_amount(&t.svm, &alice_ata), 90_000_000 + 29_600_000);
+    assert_eq!(token_amount(&t.svm, &t.vault), 111_000_000 - 29_600_000, "pool pays the win");
+    assert!(claim(&t, &bet).redeemed);
+
+    // A second redeem is rejected.
+    assert!(wait(&mut t, &alice, &bet).is_err(), "a claim redeems once");
+}
+
+#[test]
+fn test_win_redeem_take_now_95() {
+    let mut t = setup();
+    stub_vrf(&mut t);
+    let (alice, bet) = winning_claim(&mut t);
+    let alice_ata = jhandi_munda::musd_ata(&alice.pubkey(), &t.musd_mint);
+    let insurance = pda(&[INSURANCE_VAULT_SEED]);
+
+    // Take now pays 95% of $29.60 = $28.12 at once, from the insurance fund.
+    assert!(take_now(&mut t, &alice, &bet).is_ok());
+    assert_eq!(token_amount(&t.svm, &alice_ata), 90_000_000 + 28_120_000);
+    assert_eq!(token_amount(&t.svm, &insurance), 50_000_000 - 28_120_000);
+    let c = claim(&t, &bet);
+    assert!(c.redeemed);
+    assert_eq!(c.insurance_owed, 29_600_000, "the pool owes insurance the full 100%");
+
+    // Take now and Wait are each one-time: a second redeem is rejected.
+    assert!(take_now(&mut t, &alice, &bet).is_err());
+    assert!(wait(&mut t, &alice, &bet).is_err());
+
+    // The pool repays insurance the full $29.60 once the claim unlocks, and
+    // insurance keeps the 5%: its balance ends at $51.48 (50 + 1.48).
+    assert!(collect(&mut t, &alice, &bet).is_err(), "collect before unlock must be rejected");
+    set_time(&mut t, BASE_TIME + 190);
+    assert!(collect(&mut t, &alice, &bet).is_ok());
+    assert_eq!(token_amount(&t.svm, &t.vault), 111_000_000 - 29_600_000);
+    assert_eq!(token_amount(&t.svm, &insurance), 51_480_000, "insurance keeps its 5%");
+    assert_eq!(claim(&t, &bet).insurance_owed, 0);
+    assert!(collect(&mut t, &alice, &bet).is_err(), "nothing left to collect");
 }

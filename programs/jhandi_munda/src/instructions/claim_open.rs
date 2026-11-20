@@ -50,6 +50,8 @@ pub fn handle_open_claim(ctx: Context<OpenClaim>) -> Result<()> {
     claim.amount = bet.owed;
     claim.unlock_at = bet.settled_at + ROUND_LENGTH_SECS;
     claim.early_exit_bps = WIN_EARLY_EXIT_BPS;
+    claim.redeemed = false;
+    claim.insurance_owed = 0;
     claim.bump = ctx.bumps.claim;
 
     msg!("Claim opened: {} base MUSD, unlocks at {}", claim.amount, claim.unlock_at);

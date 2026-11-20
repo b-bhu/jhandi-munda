@@ -52,6 +52,22 @@ pub mod jhandi_munda {
         claim_open::handle_open_claim(ctx)
     }
 
+    pub fn init_insurance(ctx: Context<InitInsurance>) -> Result<()> {
+        claim_redeem::handle_init_insurance(ctx)
+    }
+
+    pub fn redeem_wait(ctx: Context<RedeemClaim>) -> Result<()> {
+        claim_redeem::handle_redeem_wait(ctx)
+    }
+
+    pub fn redeem_take_now(ctx: Context<RedeemClaim>) -> Result<()> {
+        claim_redeem::handle_redeem_take_now(ctx)
+    }
+
+    pub fn collect_insurance(ctx: Context<CollectInsurance>) -> Result<()> {
+        claim_redeem::handle_collect_insurance(ctx)
+    }
+
     pub fn settle_bets(ctx: Context<SettleBets>) -> Result<()> {
         settle::handle_settle_bets(ctx)
     }

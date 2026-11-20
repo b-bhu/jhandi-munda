@@ -68,6 +68,13 @@ pub fn split_fee(fee: u64) -> FeeSplit {
     FeeSplit { treasury, devs, stakers: fee - treasury - devs }
 }
 
+/// What "Take now" pays: the amount less the early-exit cut in BPS (D7: a win
+/// keeps 5% back, so the player gets 95% now). Rounds the cut down.
+pub fn take_now_payout(amount: u64, early_exit_bps: u16) -> u64 {
+    let cut = (amount as u128 * early_exit_bps as u128 / BPS) as u64;
+    amount - cut
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -126,6 +133,13 @@ mod tests {
         // $10 at 3x is exactly ten times the $1 case.
         let ten = settle_win(10 * ONE_MUSD, gross_return(10 * ONE_MUSD, 2).unwrap());
         assert_eq!(ten, Settled { owed: 29_600_000, fee: 400_000 });
+    }
+
+    #[test]
+    fn test_take_now_payout_is_95_percent_of_a_win() {
+        // $29.60 owed at a 5% cut: the player gets $28.12 now.
+        assert_eq!(take_now_payout(29_600_000, 500), 28_120_000);
+        assert_eq!(take_now_payout(1_000_000, 0), 1_000_000);
     }
 
     #[test]
