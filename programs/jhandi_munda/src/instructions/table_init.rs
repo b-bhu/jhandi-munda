@@ -58,6 +58,7 @@ pub fn handler(ctx: Context<InitializeTable>) -> Result<()> {
     round.request_id = [0u8; 32];
     round.faces = [0u8; 6];
     round.bet_count = 0;
+    round.settled_count = 0;
     round.bump = ctx.bumps.round;
 
     msg!("Table config and idle round initialized");

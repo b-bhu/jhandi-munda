@@ -5,8 +5,9 @@ use {
         InstructionData, ToAccountMetas,
     },
     jhandi_munda::{
-        state::{Bet, Round, RoundStatus, TableConfig},
-        BET_SEED, CONFIG_SEED, FAUCET_RECORD_SEED, MUSD_MINT_AUTHORITY_SEED, MUSD_MINT_SEED,
+        state::{Bet, Claim, ClaimAsset, Round, RoundStatus, TableConfig},
+        BET_SEED, CLAIM_SEED, CONFIG_SEED, INSURANCE_SEED, INSURANCE_VAULT_SEED, MUNDA_MINT_AUTHORITY_SEED,
+        MUNDA_MINT_SEED, FAUCET_RECORD_SEED, MUSD_MINT_AUTHORITY_SEED, MUSD_MINT_SEED,
         POOL_SEED, POOL_VAULT_SEED, ROUND_SEED, SHARE_MINT_SEED, SPL_TOKEN_PROGRAM_ID, TABLE_SEED,
     },
     litesvm::{types::TransactionResult, LiteSVM},
@@ -427,16 +428,28 @@ fn test_unexpected_vrf_callback_rejected() {
     assert_eq!(round(&t).status, RoundStatus::Rolled);
 }
 
-// Settles round 0 with the given bet accounts as remaining accounts.
-fn settle(t: &mut Table, signer: &Keypair, bets: &[Pubkey]) -> TransactionResult {
+// Settles some of round 0's bets: the given bet accounts are remaining accounts.
+fn settle_bets(t: &mut Table, signer: &Keypair, bets: &[Pubkey]) -> TransactionResult {
     let mut instruction = ix(
-        jhandi_munda::accounts::Settle { table: t.table, round: t.round },
-        jhandi_munda::instruction::Settle {},
+        jhandi_munda::accounts::SettleBets { table: t.table, round: t.round },
+        jhandi_munda::instruction::SettleBets {},
     );
     for bet in bets {
         instruction.accounts.push(AccountMeta::new(*bet, false));
     }
     send(&mut t.svm, signer, instruction)
+}
+
+// Closes round 0 once every bet is settled.
+fn finish_round(t: &mut Table, signer: &Keypair) -> TransactionResult {
+    send(
+        &mut t.svm,
+        signer,
+        ix(
+            jhandi_munda::accounts::FinishRound { round: t.round },
+            jhandi_munda::instruction::FinishRound {},
+        ),
+    )
 }
 
 fn bet_pda(wallet: &Keypair, symbol: u8) -> Pubkey {
@@ -458,11 +471,11 @@ fn test_settle_known_dice() {
     let bets = [bet_pda(&alice, 2), bet_pda(&bob, 4), bet_pda(&carol, 2)];
 
     // Settle before the faces exist (round still open) is rejected.
-    assert!(settle(&mut t, &bob, &bets).is_err(), "no settle before the window closes");
+    assert!(settle_bets(&mut t, &bob, &bets).is_err(), "no settle before the window closes");
 
     set_time(&mut t, BASE_TIME + 90);
     assert!(request_roll(&mut t, &bob).is_ok());
-    assert!(settle(&mut t, &bob, &bets).is_err(), "no settle while the roll is pending");
+    assert!(settle_bets(&mut t, &bob, &bets).is_err(), "no settle while the roll is pending");
 
     // Known dice: bytes 1,1,4,5,0,2 map to faces 2,2,5,6,1,3 (face = byte % 6 + 1).
     let mut randomness = [0u8; 32];
@@ -472,8 +485,9 @@ fn test_settle_known_dice() {
     assert_eq!(round(&t).faces, [2, 2, 5, 6, 1, 3]);
 
     // Settle with every bet: a 2-match win, a loss and a 2-match win.
-    let res = settle(&mut t, &bob, &bets);
+    let res = settle_bets(&mut t, &bob, &bets);
     assert!(res.is_ok(), "settle failed: {:?}", res.err());
+    assert!(finish_round(&mut t, &bob).is_ok(), "finish after full settle");
 
     // Alice $10 on face 2 (two matches, 3x): owed $29.60, fee $0.40.
     // Carol $1 on face 2 (two matches, 3x): owed $2.96, fee $0.04.
@@ -501,6 +515,390 @@ fn test_settle_known_dice() {
     assert_eq!(r.round_id, 1, "settle bumps the round id");
     assert_eq!(r.bet_count, 0);
 
-    // A second settle of the same round is rejected.
-    assert!(settle(&mut t, &bob, &bets).is_err(), "a second settle must be rejected");
+    // The round is closed: settling or finishing it again is rejected.
+    assert!(settle_bets(&mut t, &bob, &bets).is_err(), "a second settle must be rejected");
+    assert!(finish_round(&mut t, &bob).is_err(), "a second finish must be rejected");
+}
+
+#[test]
+fn test_settle_full_table_in_chunks() {
+    let mut t = setup();
+    stub_vrf(&mut t);
+    // A full table: 10 players, each on all six faces, $1 each = 60 bets.
+    let players: Vec<Keypair> = (0..10).map(|_| new_player(&mut t)).collect();
+    for p in &players {
+        for symbol in 1..=6u8 {
+            assert!(place(&mut t, p, symbol, 1_000_000).is_ok());
+        }
+    }
+    assert_eq!(round(&t).bet_count, 60);
+    let bets: Vec<Pubkey> = players
+        .iter()
+        .flat_map(|p| (1..=6u8).map(move |s| bet_pda(p, s)))
+        .collect();
+
+    set_time(&mut t, BASE_TIME + 90);
+    assert!(request_roll(&mut t, &players[0]).is_ok());
+    let request_id = round(&t).request_id;
+    assert!(send_callback(&mut t, &players[0], counting_randomness(), request_id).is_ok());
+
+    // Nothing is settled yet: finishing the round is rejected.
+    assert!(finish_round(&mut t, &players[0]).is_err());
+
+    // Six chunks of ten bets. Each chunk adds to the settled count.
+    let chunks: Vec<&[Pubkey]> = bets.chunks(10).collect();
+    assert!(settle_bets(&mut t, &players[0], chunks[0]).is_ok());
+    assert_eq!(round(&t).settled_count, 10);
+    assert!(finish_round(&mut t, &players[0]).is_err(), "finish before every bet is settled");
+
+    // Settling the same bets again is rejected, and the count does not move.
+    assert!(settle_bets(&mut t, &players[0], chunks[0]).is_err(), "a bet is settled once");
+    assert_eq!(round(&t).settled_count, 10);
+
+    for chunk in &chunks[1..] {
+        assert!(settle_bets(&mut t, &players[0], chunk).is_ok());
+    }
+    assert_eq!(round(&t).settled_count, 60);
+    assert!(finish_round(&mut t, &players[0]).is_ok());
+
+    let r = round(&t);
+    assert_eq!(r.status, RoundStatus::Idle);
+    assert_eq!(r.round_id, 1);
+    assert_eq!(r.bet_count, 0);
+    assert_eq!(r.settled_count, 0);
+}
+
+fn claim(t: &Table, bet: &Pubkey) -> Claim {
+    let data = t.svm.get_account(&pda(&[CLAIM_SEED, bet.as_ref()])).expect("claim must exist").data;
+    Claim::try_deserialize(&mut data.as_slice()).unwrap()
+}
+
+fn open_claim(t: &mut Table, payer: &Keypair, bet: &Pubkey) -> TransactionResult {
+    send(
+        &mut t.svm,
+        payer,
+        ix(
+            jhandi_munda::accounts::OpenClaim {
+                bet: *bet,
+                claim: pda(&[CLAIM_SEED, bet.as_ref()]),
+                payer: payer.pubkey(),
+                system_program: SYS,
+            },
+            jhandi_munda::instruction::OpenClaim {},
+        ),
+    )
+}
+
+#[test]
+fn test_open_claim_from_settled_bet() {
+    let mut t = setup();
+    stub_vrf(&mut t);
+    let alice = new_player(&mut t);
+    let bob = new_player(&mut t);
+    assert!(place(&mut t, &alice, 2, 10_000_000).is_ok());
+    assert!(place(&mut t, &bob, 4, 1_000_000).is_ok());
+    set_time(&mut t, BASE_TIME + 90);
+    assert!(request_roll(&mut t, &bob).is_ok());
+    let mut randomness = [0u8; 32];
+    randomness[..6].copy_from_slice(&[1, 1, 4, 5, 0, 2]);
+    let request_id = round(&t).request_id;
+    assert!(send_callback(&mut t, &bob, randomness, request_id).is_ok());
+
+    // Settle at +100 s: settled_at is the settle time, so unlock is +190 s.
+    set_time(&mut t, BASE_TIME + 100);
+    let alice_bet = bet_pda(&alice, 2);
+    let bob_bet = bet_pda(&bob, 4);
+    assert!(settle_bets(&mut t, &bob, &[alice_bet, bob_bet]).is_ok());
+
+    // Alice's win opens a claim: $29.60 MUSD, unlock 90 s after settle, 5% take-now cut.
+    assert!(open_claim(&mut t, &bob, &alice_bet).is_ok());
+    let c = claim(&t, &alice_bet);
+    assert_eq!(c.bet, alice_bet);
+    assert_eq!(c.player, alice.pubkey());
+    assert_eq!(c.asset, ClaimAsset::Musd);
+    assert_eq!(c.amount, 29_600_000);
+    assert_eq!(c.unlock_at, BASE_TIME + 190);
+    assert_eq!(c.early_exit_bps, 500);
+
+    // A second claim for the same bet is rejected.
+    assert!(open_claim(&mut t, &bob, &alice_bet).is_err(), "one claim per bet");
+    // Bob's loss opens a MUNDA claim: 1 MUNDA per 1 MUSD lost, unlock 24 h after settle.
+    assert!(open_claim(&mut t, &bob, &bob_bet).is_ok());
+    let l = claim(&t, &bob_bet);
+    assert_eq!(l.asset, ClaimAsset::Munda);
+    assert_eq!(l.amount, 1_000_000);
+    assert_eq!(l.unlock_at, BASE_TIME + 100 + 86_400);
+    assert_eq!(l.early_exit_bps, 1000);
+}
+
+// Pool deposit (the existing `deposit`): the pool needs MUSD to pay winners.
+fn deposit(t: &mut Table, funder: &Keypair, amount: u64) {
+    let share_mint = pda(&[SHARE_MINT_SEED]);
+    let res = send(
+        &mut t.svm,
+        funder,
+        ix(
+            jhandi_munda::accounts::Deposit {
+                pool: t.pool,
+                share_mint,
+                vault: t.vault,
+                depositor: funder.pubkey(),
+                depositor_ata: jhandi_munda::musd_ata(&funder.pubkey(), &t.musd_mint),
+                depositor_shares: jhandi_munda::share_ata(&funder.pubkey(), &share_mint),
+                token_program: SPL_TOKEN_PROGRAM_ID,
+                system_program: SYS,
+                associated_token_program: jhandi_munda::ATA_PROGRAM_ID,
+            },
+            jhandi_munda::instruction::Deposit { amount },
+        ),
+    );
+    assert!(res.is_ok(), "deposit failed: {:?}", res.err());
+}
+
+// Creates the insurance vault (the insurance PDA is its authority).
+fn init_insurance(t: &mut Table, payer: &Keypair) {
+    let res = send(
+        &mut t.svm,
+        payer,
+        ix(
+            jhandi_munda::accounts::InitInsurance {
+                config: t.config,
+                insurance_vault: pda(&[INSURANCE_VAULT_SEED]),
+                musd_mint: t.musd_mint,
+                payer: payer.pubkey(),
+                token_program: SPL_TOKEN_PROGRAM_ID,
+                system_program: SYS,
+            },
+            jhandi_munda::instruction::InitInsurance {},
+        ),
+    );
+    assert!(res.is_ok(), "init_insurance failed: {:?}", res.err());
+}
+
+// Plain SPL transfer of MUSD from `from`'s ATA into a token account `to`.
+fn transfer_musd(t: &mut Table, from: &Keypair, to: &Pubkey, amount: u64) {
+    let mut data = vec![3u8];
+    data.extend_from_slice(&amount.to_le_bytes());
+    let instruction = Instruction::new_with_bytes(
+        SPL_TOKEN_PROGRAM_ID,
+        &data,
+        vec![
+            AccountMeta::new(jhandi_munda::musd_ata(&from.pubkey(), &t.musd_mint), false),
+            AccountMeta::new(*to, false),
+            AccountMeta::new_readonly(from.pubkey(), true),
+        ],
+    );
+    let res = send(&mut t.svm, from, instruction);
+    assert!(res.is_ok(), "transfer failed: {:?}", res.err());
+}
+
+// Shared start for the redeem tests: the pool holds 100 MUSD (a deposit), the
+// insurance fund holds 50 MUSD (pre-seeded by transfer; Step 9 funds it from
+// the treasury slice), and Alice has a $10 win on face 2 with a claim
+// (owed $29.60) that unlocks at +190 s. The clock is left at +100 s.
+fn winning_claim(t: &mut Table) -> (Keypair, Pubkey) {
+    let funder = new_player(t);
+    deposit(t, &funder, 100_000_000);
+    let insurer = new_player(t);
+    init_insurance(t, &insurer);
+    transfer_musd(t, &insurer, &pda(&[INSURANCE_VAULT_SEED]), 50_000_000);
+
+    let alice = new_player(t);
+    let bob = new_player(t);
+    assert!(place(t, &alice, 2, 10_000_000).is_ok());
+    assert!(place(t, &bob, 4, 1_000_000).is_ok());
+    set_time(t, BASE_TIME + 90);
+    assert!(request_roll(t, &bob).is_ok());
+    let mut randomness = [0u8; 32];
+    randomness[..6].copy_from_slice(&[1, 1, 4, 5, 0, 2]);
+    let request_id = round(t).request_id;
+    assert!(send_callback(t, &bob, randomness, request_id).is_ok());
+    set_time(t, BASE_TIME + 100);
+    let alice_bet = bet_pda(&alice, 2);
+    assert!(settle_bets(t, &bob, &[alice_bet, bet_pda(&bob, 4)]).is_ok());
+    assert!(open_claim(t, &bob, &alice_bet).is_ok());
+    (alice, alice_bet)
+}
+
+// Redeem accounts for a claim, signed by its player.
+fn redeem_accounts(t: &Table, player: &Keypair, bet: &Pubkey) -> jhandi_munda::accounts::RedeemClaim {
+    let munda_mint = pda(&[MUNDA_MINT_SEED]);
+    jhandi_munda::accounts::RedeemClaim {
+        bet: *bet,
+        claim: pda(&[CLAIM_SEED, bet.as_ref()]),
+        player: player.pubkey(),
+        pool: t.pool,
+        pool_vault: t.vault,
+        insurance_vault: pda(&[INSURANCE_VAULT_SEED]),
+        insurance_authority: pda(&[INSURANCE_SEED]),
+        player_ata: jhandi_munda::musd_ata(&player.pubkey(), &t.musd_mint),
+        munda_mint,
+        munda_mint_authority: pda(&[MUNDA_MINT_AUTHORITY_SEED]),
+        player_munda_ata: jhandi_munda::musd_ata(&player.pubkey(), &munda_mint),
+        token_program: SPL_TOKEN_PROGRAM_ID,
+        associated_token_program: jhandi_munda::ATA_PROGRAM_ID,
+        system_program: SYS,
+    }
+}
+
+fn wait(t: &mut Table, player: &Keypair, bet: &Pubkey) -> TransactionResult {
+    let accounts = redeem_accounts(t, player, bet);
+    send(&mut t.svm, player, ix(accounts, jhandi_munda::instruction::RedeemWait {}))
+}
+
+fn take_now(t: &mut Table, player: &Keypair, bet: &Pubkey) -> TransactionResult {
+    let accounts = redeem_accounts(t, player, bet);
+    send(&mut t.svm, player, ix(accounts, jhandi_munda::instruction::RedeemTakeNow {}))
+}
+
+fn collect(t: &mut Table, payer: &Keypair, bet: &Pubkey) -> TransactionResult {
+    send(
+        &mut t.svm,
+        payer,
+        ix(
+            jhandi_munda::accounts::CollectInsurance {
+                bet: *bet,
+                claim: pda(&[CLAIM_SEED, bet.as_ref()]),
+                pool: t.pool,
+                pool_vault: t.vault,
+                insurance_vault: pda(&[INSURANCE_VAULT_SEED]),
+                token_program: SPL_TOKEN_PROGRAM_ID,
+            },
+            jhandi_munda::instruction::CollectInsurance {},
+        ),
+    )
+}
+
+#[test]
+fn test_win_redeem_full_after_90s() {
+    let mut t = setup();
+    stub_vrf(&mut t);
+    let (alice, bet) = winning_claim(&mut t);
+    let alice_ata = jhandi_munda::musd_ata(&alice.pubkey(), &t.musd_mint);
+
+    // Wait is locked until the claim unlocks at +190 s.
+    assert!(wait(&mut t, &alice, &bet).is_err(), "Wait before unlock must be rejected");
+
+    // At +190 s Wait pays the full $29.60 from the pool.
+    set_time(&mut t, BASE_TIME + 190);
+    assert!(wait(&mut t, &alice, &bet).is_ok());
+    assert_eq!(token_amount(&t.svm, &alice_ata), 90_000_000 + 29_600_000);
+    assert_eq!(token_amount(&t.svm, &t.vault), 111_000_000 - 29_600_000, "pool pays the win");
+    assert!(claim(&t, &bet).redeemed);
+
+    // A second redeem is rejected.
+    assert!(wait(&mut t, &alice, &bet).is_err(), "a claim redeems once");
+}
+
+#[test]
+fn test_win_redeem_take_now_95() {
+    let mut t = setup();
+    stub_vrf(&mut t);
+    let (alice, bet) = winning_claim(&mut t);
+    let alice_ata = jhandi_munda::musd_ata(&alice.pubkey(), &t.musd_mint);
+    let insurance = pda(&[INSURANCE_VAULT_SEED]);
+
+    // Take now pays 95% of $29.60 = $28.12 at once, from the insurance fund.
+    assert!(take_now(&mut t, &alice, &bet).is_ok());
+    assert_eq!(token_amount(&t.svm, &alice_ata), 90_000_000 + 28_120_000);
+    assert_eq!(token_amount(&t.svm, &insurance), 50_000_000 - 28_120_000);
+    let c = claim(&t, &bet);
+    assert!(c.redeemed);
+    assert_eq!(c.insurance_owed, 29_600_000, "the pool owes insurance the full 100%");
+
+    // Take now and Wait are each one-time: a second redeem is rejected.
+    assert!(take_now(&mut t, &alice, &bet).is_err());
+    assert!(wait(&mut t, &alice, &bet).is_err());
+
+    // The pool repays insurance the full $29.60 once the claim unlocks, and
+    // insurance keeps the 5%: its balance ends at $51.48 (50 + 1.48).
+    assert!(collect(&mut t, &alice, &bet).is_err(), "collect before unlock must be rejected");
+    set_time(&mut t, BASE_TIME + 190);
+    assert!(collect(&mut t, &alice, &bet).is_ok());
+    assert_eq!(token_amount(&t.svm, &t.vault), 111_000_000 - 29_600_000);
+    assert_eq!(token_amount(&t.svm, &insurance), 51_480_000, "insurance keeps its 5%");
+    assert_eq!(claim(&t, &bet).insurance_owed, 0);
+    assert!(collect(&mut t, &alice, &bet).is_err(), "nothing left to collect");
+}
+
+// Creates the MUNDA mint (the program's own mint authority PDA).
+fn init_munda(t: &mut Table, payer: &Keypair) {
+    let res = send(
+        &mut t.svm,
+        payer,
+        ix(
+            jhandi_munda::accounts::InitMunda {
+                munda_mint: pda(&[MUNDA_MINT_SEED]),
+                munda_mint_authority: pda(&[MUNDA_MINT_AUTHORITY_SEED]),
+                payer: payer.pubkey(),
+                token_program: SPL_TOKEN_PROGRAM_ID,
+                system_program: SYS,
+            },
+            jhandi_munda::instruction::InitMunda {},
+        ),
+    );
+    assert!(res.is_ok(), "init_munda failed: {:?}", res.err());
+}
+
+fn munda_supply(t: &Table) -> u64 {
+    let data = t.svm.get_account(&pda(&[MUNDA_MINT_SEED])).unwrap().data;
+    u64::from_le_bytes(data[36..44].try_into().unwrap())
+}
+
+// Shared start for the loss tests: MUNDA mint created, and Bob loses a $1 bet
+// on face 4 (the dice are 2,2,5,6,1,3). His loss claim unlocks at +24 h.
+fn losing_claim(t: &mut Table) -> (Keypair, Pubkey) {
+    let deployer = new_player(t);
+    init_munda(t, &deployer);
+    let bob = new_player(t);
+    assert!(place(t, &bob, 4, 1_000_000).is_ok());
+    set_time(t, BASE_TIME + 90);
+    assert!(request_roll(t, &bob).is_ok());
+    let mut randomness = [0u8; 32];
+    randomness[..6].copy_from_slice(&[1, 1, 4, 5, 0, 2]);
+    let request_id = round(t).request_id;
+    assert!(send_callback(t, &bob, randomness, request_id).is_ok());
+    set_time(t, BASE_TIME + 100);
+    let bob_bet = bet_pda(&bob, 4);
+    assert!(settle_bets(t, &bob, &[bob_bet]).is_ok());
+    assert!(open_claim(t, &bob, &bob_bet).is_ok());
+    // MUNDA is minted only on redeem, never at settle (D26).
+    assert_eq!(munda_supply(t), 0, "no MUNDA before a redeem");
+    (bob, bob_bet)
+}
+
+#[test]
+fn test_loss_redeem_full_after_24h() {
+    let mut t = setup();
+    stub_vrf(&mut t);
+    let (bob, bet) = losing_claim(&mut t);
+    let bob_munda_ata = jhandi_munda::musd_ata(&bob.pubkey(), &pda(&[MUNDA_MINT_SEED]));
+
+    // Wait is locked for 24 hours after the settle at +100 s.
+    assert!(wait(&mut t, &bob, &bet).is_err(), "Wait before 24 h must be rejected");
+    set_time(&mut t, BASE_TIME + 100 + 86_399);
+    assert!(wait(&mut t, &bob, &bet).is_err(), "one second early is still locked");
+
+    // At 24 h, Wait mints the full 1 MUNDA for the 1 MUSD lost.
+    set_time(&mut t, BASE_TIME + 100 + 86_400);
+    assert!(wait(&mut t, &bob, &bet).is_ok());
+    assert_eq!(token_amount(&t.svm, &bob_munda_ata), 1_000_000);
+    assert_eq!(munda_supply(&t), 1_000_000, "supply rises on redeem only");
+    assert!(claim(&t, &bet).redeemed);
+    assert!(wait(&mut t, &bob, &bet).is_err(), "a claim redeems once");
+}
+
+#[test]
+fn test_loss_redeem_now_10_percent_tax() {
+    let mut t = setup();
+    stub_vrf(&mut t);
+    let (bob, bet) = losing_claim(&mut t);
+    let bob_munda_ata = jhandi_munda::musd_ata(&bob.pubkey(), &pda(&[MUNDA_MINT_SEED]));
+
+    // Take now mints 90% of the 1 MUNDA at once; the 10% tax is never minted.
+    assert!(take_now(&mut t, &bob, &bet).is_ok());
+    assert_eq!(token_amount(&t.svm, &bob_munda_ata), 900_000);
+    assert_eq!(munda_supply(&t), 900_000, "only the 90% is ever minted");
+    assert!(claim(&t, &bet).redeemed);
+    assert!(take_now(&mut t, &bob, &bet).is_err(), "a claim redeems once");
 }

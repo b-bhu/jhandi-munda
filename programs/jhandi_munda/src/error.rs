@@ -42,8 +42,24 @@ pub enum ErrorCode {
     RoundNotRolled,
     #[msg("A bet account passed to settle is not an unsettled bet of this round")]
     BetAccountMismatch,
-    #[msg("Settle must pass every bet of the round")]
+    #[msg("Finish the round only after every bet of it is settled")]
     IncompleteSettle,
+    #[msg("This bet is already settled")]
+    BetAlreadySettled,
+    #[msg("A claim can only be opened for a settled bet")]
+    BetNotSettled,
+    #[msg("This claim is still locked; Wait pays after its unlock time")]
+    ClaimLocked,
+    #[msg("This claim was already paid out")]
+    ClaimAlreadyRedeemed,
+    #[msg("The pool does not hold enough MUSD to pay this now (the queue is Step 8)")]
+    InsufficientPoolFunds,
+    #[msg("The insurance fund does not hold enough MUSD for this Take now")]
+    InsufficientInsuranceFunds,
+    #[msg("There is nothing to collect from the pool for this claim")]
+    NothingToCollect,
+    #[msg("A token account does not have the expected layout")]
+    InvalidTokenAccount,
     #[msg("A payout or fee amount overflowed")]
     MathOverflow,
 }

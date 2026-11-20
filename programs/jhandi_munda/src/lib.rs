@@ -48,8 +48,36 @@ pub mod jhandi_munda {
         request_roll::handler(ctx)
     }
 
-    pub fn settle(ctx: Context<Settle>) -> Result<()> {
-        settle::handler(ctx)
+    pub fn open_claim(ctx: Context<OpenClaim>) -> Result<()> {
+        claim_open::handle_open_claim(ctx)
+    }
+
+    pub fn init_insurance(ctx: Context<InitInsurance>) -> Result<()> {
+        claim_redeem::handle_init_insurance(ctx)
+    }
+
+    pub fn init_munda(ctx: Context<InitMunda>) -> Result<()> {
+        claim_redeem::handle_init_munda(ctx)
+    }
+
+    pub fn redeem_wait(ctx: Context<RedeemClaim>) -> Result<()> {
+        claim_redeem::handle_redeem_wait(ctx)
+    }
+
+    pub fn redeem_take_now(ctx: Context<RedeemClaim>) -> Result<()> {
+        claim_redeem::handle_redeem_take_now(ctx)
+    }
+
+    pub fn collect_insurance(ctx: Context<CollectInsurance>) -> Result<()> {
+        claim_redeem::handle_collect_insurance(ctx)
+    }
+
+    pub fn settle_bets(ctx: Context<SettleBets>) -> Result<()> {
+        settle::handle_settle_bets(ctx)
+    }
+
+    pub fn finish_round(ctx: Context<FinishRound>) -> Result<()> {
+        settle::handle_finish_round(ctx)
     }
 
     pub fn callback_roll_dice(

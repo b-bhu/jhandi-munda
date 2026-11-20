@@ -150,6 +150,7 @@ pub fn handler(ctx: Context<PlaceBet>, symbol: u8, amount: u64) -> Result<()> {
     bet.round_id = round.round_id;
     bet.owed = 0;
     bet.settled = false;
+    bet.settled_at = 0;
     bet.bump = ctx.bumps.bet;
     round.bet_count += 1;
 
