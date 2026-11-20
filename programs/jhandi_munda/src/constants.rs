@@ -13,8 +13,17 @@ pub const MUSD_MINT_AUTHORITY_SEED: &[u8] = b"musd_mint_authority";
 
 /// MUSD (Munda USD) uses 6 decimals, the same as USDC, so 1 MUSD = 1_000_000
 /// base units and all amounts read like USDC amounts. It is our $1 stand-in on
-/// devnet (D21, D26). No real USDC and no faucet in this step.
+/// devnet (D21, D26). The `musd_faucet` instruction mints FAUCET_AMOUNT
+/// base units per call.
 pub const MUSD_DECIMALS: u8 = 6;
+
+/// MUSD the faucet mints per call: 100 MUSD (100 x 1_000_000, 6 decimals).
+/// No per-day cap; documented in README.md (D21, D26).
+pub const FAUCET_AMOUNT: u64 = 100_000_000;
+
+/// Associated Token Account program (devnet and mainnet). The faucet CPIs
+/// `create_idempotent` to it so the wallet's MUSD ATA exists before minting.
+pub const ATA_PROGRAM_ID: Pubkey = pubkey!("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
 
 /// SPL Token (non-2022) program id.
 pub const SPL_TOKEN_PROGRAM_ID: Pubkey = pubkey!("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
