@@ -59,3 +59,9 @@
 - Step 2.1 (PR #85) verified: build ok, 3 LiteSVM tests pass, mint authority is a PDA. Merged. `next-up` moved to #3 (Step 2.2 faucet).
 - Taught: accounts as "boxes" (DB rows owned by a program), mint vs config, PDAs. Bibhu: only the program mints (demonstrated). PDA question: half right, derive vs sign corrected.
 - Decision 33: faucet cooldown, new issue Step 2.4.
+
+## 2026-11-20 (evening): loop on autopilot
+- Auto-verify loop live: Hermes PR -> box build/test -> merge or "Blitz verify" fix notes -> Hermes fix pass (max 3).
+- Merged: #87 faucet (3 tries), #88 Get MUSD page, #89 faucet cooldown (D33), #90 pool vault + share mint, #91 deposit.
+- Devnet deploy done (program 4nsQ6ntZgpBhsDJt4bN5nu4bBvyqXtD4ReQdhAdSRhtH); faucet tx gave 100 MUSD. Links in README.
+- Teaching: why accounts are listed up front (Bibhu didn't know; taught parallel execution). NAV: Bibhu first said 110 shares for 110 MUSD at $1.10 NAV (wrong), then said he understood after explanation (claimed). Skipped "price before transfer" question (answer given).

@@ -19,3 +19,7 @@ Step 2: MUSD test mint + faucet on devnet, with an Explorer link. First explain 
 ## Now (20 Nov, afternoon)
 - Hermes is on Step 2.2 (#3, faucet). Next: verify its PR on the box, then teach token accounts (ATA = a player's wallet pocket for one token) before Step 2.3.
 - Small fix pending: Anchor.toml wallet path / `anchor test` on box; misleading comment in initialize.rs.
+
+## Now (20 Nov, 5:20 PM IST)
+- Program on devnet. Hermes on Step 3.3 withdraw (#8). Loop auto-merges passing PRs.
+- Next teaching: Step 4 round/bet accounts; open with spaced recall (NAV at 90/100, accounts up front).
