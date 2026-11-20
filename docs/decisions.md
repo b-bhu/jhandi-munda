@@ -67,3 +67,11 @@ Answers from the planning Q&A, in order.
    - *Why:* a PDA locks *who* can print, but not *how often*. Without a rule in the faucet, one script could print unlimited chips and fake pool deposits or wins. Coach recommendation after Bibhu's PDA answer (20 Nov).
 34. **Program first, UI after:** build every program step first. Frontend-only steps (#10, #36, #47, #48, #51, #54) are labeled `ui-later` and wait until the program side is done. Steps are now coded with Claude Code on Bibhu's Mac, not Hermes.
    - *Why:* the UI reads program accounts. Building screens while those accounts are still changing means building them twice. (Bibhu, 20 Nov.)
+35. **Loss Take-now tax:** the 10% cut on a loss Take-now is simply never minted, which works the same as a burn.
+   - *Why:* simplest honest rule. No hidden house wallet collects it. (Step 7.3, PR #103, 20 Nov.)
+36. **Win unlock:** a win claim unlocks 90 s after settle for the full 100% Wait payout.
+   - *Why:* matches the round length and gives the pool one round to rebalance. (PR #103.)
+37. **MUNDA decimals:** 6, the same as MUSD.
+   - *Why:* 1 MUNDA for 1 MUSD lost reads cleanly, with no decimal conversion. (PR #103.)
+38. **Insurance seeding:** tests pre-seed the insurance fund for now. Step 9 fills it from the treasury's 20% fee slice.
+   - *Why:* lets claims be tested before staking and the fee split exist. (PR #103.)
