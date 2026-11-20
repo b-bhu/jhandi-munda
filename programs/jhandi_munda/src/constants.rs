@@ -11,6 +11,13 @@ pub const MUSD_MINT_SEED: &[u8] = b"musd_mint";
 /// program can sign as it (never print or commit a mint authority keypair).
 pub const MUSD_MINT_AUTHORITY_SEED: &[u8] = b"musd_mint_authority";
 
+/// Faucet cooldown record PDA, second seed: one record per wallet, so the
+/// full derivation is `["faucet", wallet_pubkey]` (D33).
+pub const FAUCET_RECORD_SEED: &[u8] = b"faucet";
+
+/// Faucet cooldown: each wallet can claim at most once per hour (D33).
+pub const FAUCET_COOLDOWN_SECS: i64 = 60 * 60;
+
 /// MUSD (Munda USD) uses 6 decimals, the same as USDC, so 1 MUSD = 1_000_000
 /// base units and all amounts read like USDC amounts. It is our $1 stand-in on
 /// devnet (D21, D26). The `musd_faucet` instruction mints FAUCET_AMOUNT
@@ -18,7 +25,8 @@ pub const MUSD_MINT_AUTHORITY_SEED: &[u8] = b"musd_mint_authority";
 pub const MUSD_DECIMALS: u8 = 6;
 
 /// MUSD the faucet mints per call: 100 MUSD (100 x 1_000_000, 6 decimals).
-/// No per-day cap; documented in README.md (D21, D26).
+/// No per-day cap, but one call per wallet per hour (D33); documented in
+/// README.md (D21, D26).
 pub const FAUCET_AMOUNT: u64 = 100_000_000;
 
 /// Associated Token Account program (devnet and mainnet). The faucet CPIs

@@ -1,7 +1,8 @@
 //! The MUSD faucet: one instruction that mints a fixed amount of test MUSD
-//! to the caller's associated token account (D21, D26). Anyone with a wallet
-//! can call it, as often as they like — no cap in this step. Devnet demo
-//! scaffolding only, never a mainnet faucet.
+//! to the caller's associated token account (D21, D26). Any wallet can call
+//! it, at most once per hour (D33): the wallet's faucet-record PDA stores
+//! its last claim, and repeat calls inside the hour fail with
+//! `FaucetCooldown`. Devnet demo scaffolding only, never a mainnet faucet.
 
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::{
@@ -10,8 +11,9 @@ use anchor_lang::solana_program::{
 };
 
 use crate::{
-    error::ErrorCode, state::ProgramConfig, ATA_PROGRAM_ID, CONFIG_SEED, FAUCET_AMOUNT,
-    MUSD_MINT_AUTHORITY_SEED, MUSD_MINT_SEED, SPL_TOKEN_PROGRAM_ID,
+    error::ErrorCode, state::{FaucetRecord, ProgramConfig}, ATA_PROGRAM_ID, CONFIG_SEED,
+    FAUCET_AMOUNT, FAUCET_COOLDOWN_SECS, FAUCET_RECORD_SEED, MUSD_MINT_AUTHORITY_SEED,
+    MUSD_MINT_SEED, SPL_TOKEN_PROGRAM_ID,
 };
 
 /// SPL token `MintTo`: data [7][amount u64 LE]. Writable mint and
@@ -49,10 +51,24 @@ pub struct MusdFaucet<'info> {
     #[account(seeds = [MUSD_MINT_AUTHORITY_SEED], bump)]
     pub musd_mint_authority: UncheckedAccount<'info>,
 
-    /// The caller: pays the ATA rent when one has to be created, and receives
-    /// the minted MUSD.
+    /// The caller: pays the ATA rent when one has to be created, pays the
+    /// faucet-record rent on the wallet's first call, and receives the
+    /// minted MUSD.
     #[account(mut)]
     pub wallet: Signer<'info>,
+
+    /// The wallet's faucet cooldown record (D33). Created by this same call
+    /// when it is missing, then keeps the wallet's last claim timestamp. The
+    /// seeds bind the PDA to the caller, so a wallet can only ever touch its
+    /// own record.
+    #[account(
+        init_if_needed,
+        payer = wallet,
+        space = 8 + FaucetRecord::INIT_SPACE,
+        seeds = [FAUCET_RECORD_SEED, wallet.key().as_ref()],
+        bump
+    )]
+    pub faucet_record: Account<'info, FaucetRecord>,
 
     /// CHECK: must be the wallet's canonical MUSD ATA (checked in the
     /// handler) and is created there if missing.
@@ -104,6 +120,19 @@ pub fn handler(ctx: Context<MusdFaucet>) -> Result<()> {
         musd_ata(&wallet, &musd_mint),
         ErrorCode::InvalidAtaAddress
     );
+
+    // One claim per wallet per hour (D33). The record stores the last
+    // successful claim's `unix_timestamp`; on the wallet's very first call
+    // the freshly created record is all zeros, so the check passes and this
+    // call stamps the current time. Failed calls roll back everything.
+    let clock = Clock::get()?;
+    require!(
+        clock.unix_timestamp
+            >= ctx.accounts.faucet_record.last_claim_time + FAUCET_COOLDOWN_SECS,
+        ErrorCode::FaucetCooldown
+    );
+    ctx.accounts.faucet_record.last_claim_time = clock.unix_timestamp;
+    ctx.accounts.faucet_record.bump = ctx.bumps.faucet_record;
 
     // Create the ATA if the wallet does not have one yet (the wallet pays the
     // rent). Repeating this call is safe: the ATA program turns

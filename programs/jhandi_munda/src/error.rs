@@ -8,4 +8,6 @@ pub enum ErrorCode {
     MusdMintMismatch,
     #[msg("The destination account is not the wallet's MUSD associated token account")]
     InvalidAtaAddress,
+    #[msg("This wallet already claimed MUSD in the last hour — wait for the cooldown to pass")]
+    FaucetCooldown,
 }
