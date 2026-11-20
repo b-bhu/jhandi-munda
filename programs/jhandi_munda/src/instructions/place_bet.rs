@@ -2,8 +2,9 @@
 //! an idle round opens it and records `opened_at` from the Clock. Later bets
 //! join the open round: a wallet can bet on several faces (D10), and at most
 //! `MAX_PLAYERS` distinct wallets sit in one round (D25). The stake moves from
-//! the bettor's MUSD ATA into the pool vault. The 90 s timer is not enforced
-//! here yet (4.4).
+//! the bettor's MUSD ATA into the pool vault. Bets close once the round has run
+//! `round_length_secs` (90 s, D8) from `opened_at`: the window is
+//! [opened_at, opened_at + 90), checked against the Clock, not slots (D8).
 
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::{
@@ -91,6 +92,17 @@ pub fn handler(ctx: Context<PlaceBet>, symbol: u8, amount: u64) -> Result<()> {
         ErrorCode::InvalidAtaAddress
     );
 
+    // The join window closes 90 s after the round opened (D8). Clock time
+    // only: slots are never the timer.
+    let now = Clock::get()?.unix_timestamp;
+    let round = &ctx.accounts.round;
+    if round.status == RoundStatus::Open {
+        require!(
+            now < round.opened_at + ctx.accounts.table.round_length_secs,
+            ErrorCode::BettingClosed
+        );
+    }
+
     // A wallet already in the round does not take a seat; a new wallet needs
     // one of the MAX_PLAYERS seats (D25).
     let is_new_player = !ctx.accounts.round.players.contains(&bettor);
@@ -122,7 +134,6 @@ pub fn handler(ctx: Context<PlaceBet>, symbol: u8, amount: u64) -> Result<()> {
     )?;
 
     // The first bet opens an idle round and starts the clock (D31, D8).
-    let now = Clock::get()?.unix_timestamp;
     let round = &mut ctx.accounts.round;
     if is_new_player {
         round.players.push(bettor);
