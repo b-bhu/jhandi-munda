@@ -2,6 +2,7 @@ pub mod faucet;
 pub mod initialize;
 pub mod pool_deposit;
 pub mod pool_init;
+pub mod place_bet;
 pub mod pool_withdraw;
 pub mod table_init;
 
@@ -16,6 +17,8 @@ pub use initialize::*;
 pub use pool_deposit::*;
 #[allow(ambiguous_glob_reexports)]
 pub use pool_init::*;
+#[allow(ambiguous_glob_reexports)]
+pub use place_bet::*;
 #[allow(ambiguous_glob_reexports)]
 pub use pool_withdraw::*;
 #[allow(ambiguous_glob_reexports)]

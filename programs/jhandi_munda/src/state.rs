@@ -98,6 +98,21 @@ pub struct Round {
     pub bump: u8,
 }
 
+/// One player's bet in the table's current round (D3, D31). Created by
+/// `place_bet`, which also opens the round when it is idle.
+#[account]
+#[derive(InitSpace)]
+pub struct Bet {
+    /// The wallet that placed the bet.
+    pub player: Pubkey,
+    /// Stake in MUSD base units.
+    pub amount: u64,
+    /// The die face (1 to 6) this bet is on.
+    pub symbol: u8,
+    /// Bump seed for the bet PDA.
+    pub bump: u8,
+}
+
 /// The MUSD faucet cooldown record for one wallet (D33): a small PDA at
 /// `["faucet", user_pubkey]`, created by the wallet's first faucet call, that
 /// stores when that wallet last claimed. One record per wallet, so every

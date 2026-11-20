@@ -18,4 +18,12 @@ pub enum ErrorCode {
     ZeroWithdraw,
     #[msg("The withdrawer does not hold that many pool shares")]
     InsufficientShares,
+    #[msg("A bet must be at least the table minimum (1 MUSD)")]
+    BetBelowMinimum,
+    #[msg("A bet is above the table maximum")]
+    BetAboveMaximum,
+    #[msg("A bet must name one die face, 1 to 6")]
+    InvalidSymbol,
+    #[msg("A round is already running; joining is not open yet")]
+    RoundAlreadyOpen,
 }

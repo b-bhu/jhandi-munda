@@ -38,4 +38,8 @@ pub mod jhandi_munda {
     pub fn initialize_table(ctx: Context<InitializeTable>) -> Result<()> {
         table_init::handler(ctx)
     }
+
+    pub fn place_bet(ctx: Context<PlaceBet>, symbol: u8, amount: u64) -> Result<()> {
+        place_bet::handler(ctx, symbol, amount)
+    }
 }
