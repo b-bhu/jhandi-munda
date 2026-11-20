@@ -385,12 +385,17 @@ fn test_pool_nav_after_profit() {
     let res = try_withdraw(&mut svm, &payer, &pool, &musd_mint, &vault, &share_mint, DEPOSIT_AMOUNT);
     assert!(res.is_ok(), "the first depositor's withdraw failed: {:?}", res.err());
 
+    // The payout readback must be a before/after delta, not the whole ATA
+    // balance: A's ATA still holds 75 MUSD here — what stayed of the second
+    // faucet claim after A funded the 25 MUSD mock out of it (200 after =
+    // 75 before + 125 paid).
+    let (musd_before, _, _) = token_account(&svm, &payer_ata, "first depositor MUSD ATA");
     let expected = DEPOSIT_AMOUNT * NAV_AFTER / 1_000_000;
     assert_eq!(expected, 125_000_000, "sanity: 100 shares × $1.25 = 125 MUSD");
     let (musd_back, _, _) = token_account(&svm, &payer_ata, "first depositor MUSD ATA");
     assert_eq!(
-        musd_back, expected,
-        "100 shares at NAV $1.25 must pay exactly 125 MUSD (shares × NAV)"
+        musd_back - musd_before, expected,
+        "100 shares at NAV $1.25 must pay exactly 125 MUSD (shares × NAV): after − before"
     );
     let (shares_left, _, _) = token_account(&svm, &payer_shares, "first depositor share account");
     assert_eq!(shares_left, 0, "the withdraw must burn all of A's shares");
@@ -414,12 +419,15 @@ fn test_pool_nav_after_profit() {
     let res = try_withdraw(&mut svm, &payer_b, &pool, &musd_mint, &vault, &share_mint, SHARES_SECOND);
     assert!(res.is_ok(), "the second depositor's withdraw failed: {:?}", res.err());
 
+    // Same delta readback as A's, so the pay check never depends on leftover
+    // faucet MUSD sitting in the ATA (this story happens to start B at 0).
+    let (musd_before, _, _) = token_account(&svm, &payer_b_ata, "second depositor MUSD ATA");
     let expected = SHARES_SECOND * NAV_AFTER / 1_000_000;
     assert_eq!(expected, 100_000_000, "sanity: 80 shares × $1.25 = 100 MUSD");
     let (musd_back, _, _) = token_account(&svm, &payer_b_ata, "second depositor MUSD ATA");
     assert_eq!(
-        musd_back, expected,
-        "80 shares at NAV $1.25 must pay exactly 100 MUSD (shares × NAV)"
+        musd_back - musd_before, expected,
+        "80 shares at NAV $1.25 must pay exactly 100 MUSD (shares × NAV): after − before"
     );
     let (vault_amount, _, vault_owner) = token_account(&svm, &vault, "pool vault");
     assert_eq!(vault_amount, 0, "both withdraws must empty the vault: no MUSD stranded");
@@ -428,10 +436,12 @@ fn test_pool_nav_after_profit() {
     let (shares_left, _, _) = token_account(&svm, &payer_b_shares, "second depositor share account");
     assert_eq!(shares_left, 0, "the withdraw must empty B's shares");
 
-    // ---- Conservation readback. A fed the pool 100 and took 125 out (the
-    // mocked profit went to the depositor, D27): 100 − 100 − 25 + 125 = 200,
-    // both faucet claims. B funded the 25 MUSD mock and broke even: 100 − 100
-    // + 100 = 100.
+    // ---- Conservation readback. A funded the 25 MUSD mock (the transfer
+    // above signs with A's key, out of the second faucet claim) and got the
+    // profit back inside the 125 payout, D27: 2 × 100 (both claims) − 100
+    // (deposit) − 25 (mock) + 125 (payout) = 200 = 2 × FAUCET_AMOUNT. B broke
+    // even — no mock, no profit: 100 (claim) − 100 (deposit) + 100 (payout)
+    // = 100 = FAUCET_AMOUNT.
     let (musd_a, _, _) = token_account(&svm, &payer_ata, "first depositor MUSD ATA");
     assert_eq!(musd_a, 2 * FAUCET_AMOUNT, "A's MUSD must balance to both faucet claims");
     let (musd_b, _, _) = token_account(&svm, &payer_b_ata, "second depositor MUSD ATA");
