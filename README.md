@@ -91,6 +91,27 @@ pnpm build                     # production build check
 Get MUSD on devnet: the app's `/get-musd` page has the one-button faucet
 (100 MUSD per click) plus the mint address and an Explorer link
 (`?cluster=devnet`). Without a browser, `node scripts/devnet-musd.mjs faucet
-keys/devnet-wallet.json` calls the same instruction (see the script header).
+keys/dev-wallet.json` calls the same instruction (see the script header).
+
+
+## Devnet
+
+The program is live on Solana **devnet only** (never mainnet, no real funds).
+
+- **Program id:** `4nsQ6ntZgpBhsDJt4bN5nu4bBvyqXtD4ReQdhAdSRhtH` — [Explorer](https://explorer.solana.com/address/4nsQ6ntZgpBhsDJt4bN5nu4bBvyqXtD4ReQdhAdSRhtH?cluster=devnet)
+- **Deploy transaction:** [Explorer](https://explorer.solana.com/tx/3B8sEnN1QE5s2FbmYGN2DnLKF2g1etuyJDWsUzW89BRfwL7rpRpjFq1TJrnZRjcvAwqStP22pCUqRWfYBX9bVK37?cluster=devnet)
+- **Initialize (config + MUSD mint):** [Explorer](https://explorer.solana.com/tx/3gZp61mfMjELBaPBgYrKFzpkarLC2LYuSCgfmGu4ZQBo7QyRScCoa8CC9QiDnEmvtZEXndS3b9hzebc75Zkyjap?cluster=devnet)
+- **Initialize pool (empty vault + share mint):** [Explorer](https://explorer.solana.com/tx/MeDrvQqcq1HuAPcYg8mnS4nw9rLBGpbAXKkbgbrsy2hSByF58qJQN3kE4xtkw2YtbZ3CTqEvijo2ovCqgvFZ2KD?cluster=devnet)
+- **Faucet (100 MUSD to the dev wallet):** [Explorer](https://explorer.solana.com/tx/5ezoTc7Jk3d5oxid2eqz7cpYQE1fjNfg8AMoCLY6SA12eM4CfH4shJU71z9jYzVJ3Paj48CBLyNChdLxTJtFhZi5?cluster=devnet)
+- **MUSD mint:** `9ixsxMHJHJJUSNCzQrpP511143s9xksBmYxFAomwjr56` — [Explorer](https://explorer.solana.com/address/9ixsxMHJHJJUSNCzQrpP511143s9xksBmYxFAomwjr56?cluster=devnet)
+- **Dev wallet:** `5qPRTWcUZw1XYGnXqUCCF65TGBgMjk9BfMyz2VBHacm7`
+- **Dev wallet MUSD token account (100 MUSD):** `5mwQw4GBc9KA77vH3hFkSSgjJWSF2zCUDmoXaLyFXUsu` — [Explorer](https://explorer.solana.com/address/5mwQw4GBc9KA77vH3hFkSSgjJWSF2zCUDmoXaLyFXUsu?cluster=devnet)
+
+Without a browser, the same initialize and faucet calls are:
+
+```bash
+node scripts/devnet-musd.mjs init keys/dev-wallet.json
+node scripts/devnet-musd.mjs faucet keys/dev-wallet.json
+```
 
 Devnet and local only. Keypairs go in `keys/` or `~/.config/solana` and are never committed.

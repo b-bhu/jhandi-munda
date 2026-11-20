@@ -67,7 +67,7 @@ const FAUCET_DATA = Buffer.from([0x2e, 0xc9, 0x3b, 0x58, 0xbd, 0x65, 0x51, 0x03]
 
 const FAUCET_AMOUNT_TEXT = "100 MUSD";
 const DEFAULT_RPC = "https://api.devnet.solana.com";
-const DEFAULT_KEYPAIR = "keys/devnet-wallet.json";
+const DEFAULT_KEYPAIR = "keys/dev-wallet.json";
 const explorer = (path) => `https://explorer.solana.com/${path}?cluster=devnet`;
 
 async function readMusdBalance(connection, wallet) {
