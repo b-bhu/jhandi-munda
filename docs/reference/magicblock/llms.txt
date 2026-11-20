@@ -1,0 +1,216 @@
+# MagicBlock Documentation
+
+> MagicBlock runs Ephemeral Rollups on Solana for gasless, real-time, high-frequency transactions, with private execution in a TEE, verifiable randomness (VRF), price oracles, cranks, and session keys.
+
+- [Products (98 pages)](https://docs.magicblock.gg/_llms/en/products.txt): Ephemeral Rollup, Private Ephemeral Rollup, Ephemeral SPL Token, Solana VRF, Price Oracle.
+
+## Get Started
+
+### Welcome
+
+- [Why MagicBlock?](https://docs.magicblock.gg/pages/get-started/introduction/why-magicblock.md): Run gasless, low-latency, high-frequency transactions on Solana with Ephemeral Rollups, and add private execution, verifiable randomness, and price feeds to the same program.
+- [MagicBlock Products](https://docs.magicblock.gg/pages/overview/products.md): MagicBlock products: Ephemeral Rollups for gasless real-time transactions, Private Ephemeral Rollups for private program state, Ephemeral SPL Tokens and private payments, Solana VRF, price oracles, cranks, and session keys.
+
+### Use Cases
+
+- [What You Can Build with MagicBlock](https://docs.magicblock.gg/pages/get-started/use-cases/introduction.md): Apps that need gasless, real-time, or private transactions on Solana: games, trading and DeFi, payments, AI agents, DePIN, and privacy.
+- [Real-Time Onchain Games on Solana](https://docs.magicblock.gg/pages/get-started/use-cases/games.md): Build real-time onchain games on Solana with gasless moves, session keys so players skip the wallet popup on every action, and verifiable randomness for dice and loot.
+- [Real-Time Trading and DeFi on Solana](https://docs.magicblock.gg/pages/get-started/use-cases/finance.md): Real-time trading and DeFi on Solana, with low-latency execution and price updates on Ephemeral Rollups and settlement back to Solana.
+- [Gasless and Private Payments on Solana](https://docs.magicblock.gg/pages/get-started/use-cases/payments.md): Fast, gasless, and private payments on Solana with Ephemeral SPL Tokens and the Private Payments API.
+- [AI Agents on Solana](https://docs.magicblock.gg/pages/get-started/use-cases/ai.md): Let AI agents make high-frequency onchain transactions on Solana without paying base-layer fees for each one.
+- [DePIN on Solana](https://docs.magicblock.gg/pages/get-started/use-cases/depin.md): Gasless, high-frequency microtransactions and device updates for DePIN networks on Solana.
+- [Privacy Use Cases on Solana](https://docs.magicblock.gg/pages/get-started/use-cases/privacy.md): Keep Solana program state and payments private while they execute, using Private Ephemeral Rollups in a TEE with per-account access control.
+
+### Solutions
+
+- [Prediction Markets and Trading](https://docs.magicblock.gg/pages/solutions/prediction-markets.md): Architecture guide for prediction markets, leveraged trading, and settlement using Ephemeral Rollups, session keys, SPL token custody, pricing oracles, cranks, and Magic Actions.
+
+### Platform
+
+- [MagicBlock Pricing](https://docs.magicblock.gg/pages/overview/additional-information/pricing.md): MagicBlock’s pricing is modeled after decentralized cloud infrastructure. The goal is to keep computing costs **predictable for developers**, while still providing **flexibility for enterprises** that need priority access or dedicated resources.
+- [MagicBlock Security and Audits](https://docs.magicblock.gg/pages/overview/additional-information/security-and-audits.md): At MagicBlock, security is a top priority. All our core programs have undergone professional audits to ensure robustness and safety for our users.
+- [MagicBlock System Status](https://docs.magicblock.gg/pages/overview/additional-information/system-status.md)
+- [MagicBlock Whitepaper](https://docs.magicblock.gg/pages/overview/additional-information/whitepaper.md): Ephemeral Rollups Are All You Need (https://arxiv.org/abs/2311.02650)
+- [MagicBlock Request for Products](https://docs.magicblock.gg/pages/overview/additional-information/request-for-products.md): Go beyond tutorials by working on real-world problems and community challenges. The Request for Products (RFPs) showcase open ideas and challenges waiting for contributors like you.
+- [MagicBlock AI Dev Skill for Coding Agents](https://docs.magicblock.gg/pages/overview/additional-information/ai-dev-skill.md): MagicBlock Ephemeral Rollups development skill for AI coding agents, with MagicBlock-specific patterns for delegation, fee economics, Magic Actions, cranks, VRF, lamports top-up, the Ephemeral SPL Token lifecycle, private payments with swaps, and dual-connection architecture.
+
+## Guides
+
+### Starter Guides
+
+- [Oracle-Priced Purchase](https://docs.magicblock.gg/pages/templates/oracle-priced-purchase.md): Learn oracle account validation, freshness checks, price conversion, and slippage protection with a compact Anchor example.
+- [Onchain Dice](https://docs.magicblock.gg/pages/templates/onchain-dice.md): Roll dice onchain with verifiable randomness from Solana VRF, on Solana and on an Ephemeral Rollup.
+- [Counter](https://docs.magicblock.gg/pages/templates/counter.md): The smallest Ephemeral Rollup app. Delegate a counter account, increment it on the rollup without fees, and commit it back to Solana.
+
+### Advanced Guides
+
+- [Binary Prediction](https://docs.magicblock.gg/pages/templates/binary-prediction.md): Build an up/down prediction flow with session-authorized bets, SPL token custody, real-time oracle prices, and Ephemeral Rollup settlement.
+- [Sealed-Bid Auction](https://docs.magicblock.gg/pages/templates/sealed-bid-auction.md): Run a private first-price sealed-bid auction with hidden bids on a Private Ephemeral Rollup, SPL token escrow on both layers, and on-chain winner selection.
+
+### App Templates
+
+- [Private Payments](https://docs.magicblock.gg/pages/templates/private-payments.md): A private SPL payments app built on MagicBlock Private Ephemeral Rollups.
+- [Rock Paper Scissors](https://docs.magicblock.gg/pages/templates/rock-paper-scissors.md): A two-player game with hidden moves on a Private Ephemeral Rollup, using access control so neither player sees the other's choice before the reveal.
+- [Real-Time Price Feed](https://docs.magicblock.gg/pages/templates/real-time-price-feed.md): Read real-time Pyth Lazer prices from an Ephemeral Rollup in a Solana app.
+- [VRF Rewards](https://docs.magicblock.gg/pages/templates/vrf-rewards.md): Mint random rewards on an Ephemeral Rollup with a delegated reward account, verifiable randomness from the VRF oracle, and commit-back settlement to Solana.
+- [Gachapon](https://docs.magicblock.gg/pages/templates/gachapon.md)
+- [Random Character Generator](https://docs.magicblock.gg/pages/templates/random-character-generator.md): Generate random game characters with Solana VRF randomness.
+
+## Integrations
+
+### Overview
+
+- [MagicBlock Integrations](https://docs.magicblock.gg/pages/tools/introduction.md): Utilize existing SDKs and Frameworks to accelerate your development process
+
+### Wallets & Onramp
+
+- [Wallets and Onramps for Solana Apps](https://docs.magicblock.gg/pages/tools/wallets-and-onramp/overview.md): Accelerate user onboarding with existing wallet and onramp solutions
+
+### Session Keys
+
+- [Session Keys for Solana Apps](https://docs.magicblock.gg/pages/tools/session-keys/introduction.md): Let users act in your Solana app without approving every transaction, using session keys that are scoped to your program and expire.
+- [How do Session Keys work?](https://docs.magicblock.gg/pages/tools/session-keys/how-do-session-keys-work.md): How session keys work: an ephemeral keypair, a session token with an expiry, and revoking it.
+- [Session Keys Security](https://docs.magicblock.gg/pages/tools/session-keys/security.md): Key management and security model
+
+#### Getting Started
+
+- [Integrating Sessions in your Program](https://docs.magicblock.gg/pages/tools/session-keys/integrating-sessions-in-your-program.md): Integrate and manage sessions in your Solana Programs
+- [Install Session Keys](https://docs.magicblock.gg/pages/tools/session-keys/installation.md): Step-by-step guide on setting up and integrating the session wallet management system into your dApp
+- [Session Provider & Context](https://docs.magicblock.gg/pages/tools/session-keys/session-provider-and-context.md): Understand the usage of the SessionWalletProvider and the context it provides, enabling easy access to the session wallet functionalities across your application components?
+- [Session Keys Usage Example](https://docs.magicblock.gg/pages/tools/session-keys/usage-examples.md): Learn how to interact with your dApp using the useSessionKeyManager and SessionWalletProvider through various practical examples
+- [Use session key manager](https://docs.magicblock.gg/pages/tools/session-keys/use-sessionkey-manager.md): A custom React hook that manages the creation and revocation of session tokens, and provides essential methods for signing and sending transactions in a secure and user-friendly way
+
+### On-chain Identity
+
+- [SOAR](https://docs.magicblock.gg/pages/tools/open-source-programs/SOAR.md): Solana On-Chain Achievement & Ranking
+
+## OpenAPI Specs
+
+- [openapi-getRoutes](/pages/ephemeral-rollups-ers/api-reference/er/openapi/openapi-getRoutes.json)
+- [openapi-getIdentity](/pages/ephemeral-rollups-ers/api-reference/er/openapi/openapi-getIdentity.json)
+- [openapi-getBlockhashForAccounts](/pages/ephemeral-rollups-ers/api-reference/er/openapi/openapi-getBlockhashForAccounts.json)
+- [openapi-getSignatureStatuses](/pages/ephemeral-rollups-ers/api-reference/er/openapi/openapi-getSignatureStatuses.json)
+- [openapi-getAccountInfo](/pages/ephemeral-rollups-ers/api-reference/er/openapi/openapi-getAccountInfo.json)
+- [openapi-getDelegationStatus](/pages/ephemeral-rollups-ers/api-reference/er/openapi/openapi-getDelegationStatus.json)
+- [openapi-rpc-getAccountInfo](/pages/ephemeral-rollups-ers/api-reference/rpc/openapi/openapi-rpc-getAccountInfo.json)
+- [openapi-rpc-getBalance](/pages/ephemeral-rollups-ers/api-reference/rpc/openapi/openapi-rpc-getBalance.json)
+- [openapi-rpc-getBlock](/pages/ephemeral-rollups-ers/api-reference/rpc/openapi/openapi-rpc-getBlock.json)
+- [openapi-rpc-getBlockCommitment](/pages/ephemeral-rollups-ers/api-reference/rpc/openapi/openapi-rpc-getBlockCommitment.json)
+- [openapi-rpc-getBlockHeight](/pages/ephemeral-rollups-ers/api-reference/rpc/openapi/openapi-rpc-getBlockHeight.json)
+- [openapi-rpc-getBlocks](/pages/ephemeral-rollups-ers/api-reference/rpc/openapi/openapi-rpc-getBlocks.json)
+- [openapi-rpc-getBlocksWithLimit](/pages/ephemeral-rollups-ers/api-reference/rpc/openapi/openapi-rpc-getBlocksWithLimit.json)
+- [openapi-rpc-getBlockTime](/pages/ephemeral-rollups-ers/api-reference/rpc/openapi/openapi-rpc-getBlockTime.json)
+- [openapi-rpc-getFirstAvailableBlock](/pages/ephemeral-rollups-ers/api-reference/rpc/openapi/openapi-rpc-getFirstAvailableBlock.json)
+- [openapi-rpc-getGenesisHash](/pages/ephemeral-rollups-ers/api-reference/rpc/openapi/openapi-rpc-getGenesisHash.json)
+- [openapi-rpc-getHealth](/pages/ephemeral-rollups-ers/api-reference/rpc/openapi/openapi-rpc-getHealth.json)
+- [openapi-rpc-getIdentity](/pages/ephemeral-rollups-ers/api-reference/rpc/openapi/openapi-rpc-getIdentity.json)
+- [openapi-rpc-getLargestAccounts](/pages/ephemeral-rollups-ers/api-reference/rpc/openapi/openapi-rpc-getLargestAccounts.json)
+- [openapi-rpc-getLatestBlockhash](/pages/ephemeral-rollups-ers/api-reference/rpc/openapi/openapi-rpc-getLatestBlockhash.json)
+- [openapi-rpc-getLeaderSchedule](/pages/ephemeral-rollups-ers/api-reference/rpc/openapi/openapi-rpc-getLeaderSchedule.json)
+- [openapi-rpc-getMinimumBalanceForRentExemption](/pages/ephemeral-rollups-ers/api-reference/rpc/openapi/openapi-rpc-getMinimumBalanceForRentExemption.json)
+- [openapi-rpc-getMultipleAccounts](/pages/ephemeral-rollups-ers/api-reference/rpc/openapi/openapi-rpc-getMultipleAccounts.json)
+- [openapi-rpc-getProgramAccounts](/pages/ephemeral-rollups-ers/api-reference/rpc/openapi/openapi-rpc-getProgramAccounts.json)
+- [openapi-rpc-getRecentPerformanceSamples](/pages/ephemeral-rollups-ers/api-reference/rpc/openapi/openapi-rpc-getRecentPerformanceSamples.json)
+- [openapi-rpc-getSignaturesForAddress](/pages/ephemeral-rollups-ers/api-reference/rpc/openapi/openapi-rpc-getSignaturesForAddress.json)
+- [openapi-rpc-getSignatureStatuses](/pages/ephemeral-rollups-ers/api-reference/rpc/openapi/openapi-rpc-getSignatureStatuses.json)
+- [openapi-rpc-getSlot](/pages/ephemeral-rollups-ers/api-reference/rpc/openapi/openapi-rpc-getSlot.json)
+- [openapi-rpc-getTokenAccountBalance](/pages/ephemeral-rollups-ers/api-reference/rpc/openapi/openapi-rpc-getTokenAccountBalance.json)
+- [openapi-rpc-getTokenAccountsByDelegate](/pages/ephemeral-rollups-ers/api-reference/rpc/openapi/openapi-rpc-getTokenAccountsByDelegate.json)
+- [openapi-rpc-getTokenAccountsByOwner](/pages/ephemeral-rollups-ers/api-reference/rpc/openapi/openapi-rpc-getTokenAccountsByOwner.json)
+- [openapi-rpc-getTokenLargestAccounts](/pages/ephemeral-rollups-ers/api-reference/rpc/openapi/openapi-rpc-getTokenLargestAccounts.json)
+- [openapi-rpc-getTokenSupply](/pages/ephemeral-rollups-ers/api-reference/rpc/openapi/openapi-rpc-getTokenSupply.json)
+- [openapi-rpc-getTransaction](/pages/ephemeral-rollups-ers/api-reference/rpc/openapi/openapi-rpc-getTransaction.json)
+- [openapi-rpc-getTransactionCount](/pages/ephemeral-rollups-ers/api-reference/rpc/openapi/openapi-rpc-getTransactionCount.json)
+- [openapi-rpc-getVersion](/pages/ephemeral-rollups-ers/api-reference/rpc/openapi/openapi-rpc-getVersion.json)
+- [openapi-rpc-isBlockhashValid](/pages/ephemeral-rollups-ers/api-reference/rpc/openapi/openapi-rpc-isBlockhashValid.json)
+- [openapi-rpc-sendTransaction](/pages/ephemeral-rollups-ers/api-reference/rpc/openapi/openapi-rpc-sendTransaction.json)
+- [openapi-rpc-simulateTransaction](/pages/ephemeral-rollups-ers/api-reference/rpc/openapi/openapi-rpc-simulateTransaction.json)
+- [deposit.openapi](/pages/ephemeral-spl-token/api-reference/openapi/deposit.openapi.json)
+- [transfer.openapi](/pages/ephemeral-spl-token/api-reference/openapi/transfer.openapi.json)
+- [withdraw.openapi](/pages/ephemeral-spl-token/api-reference/openapi/withdraw.openapi.json)
+- [balance.openapi](/pages/ephemeral-spl-token/api-reference/openapi/balance.openapi.json)
+- [initialize-mint.openapi](/pages/ephemeral-spl-token/api-reference/openapi/initialize-mint.openapi.json)
+- [is-mint-initialized.openapi](/pages/ephemeral-spl-token/api-reference/openapi/is-mint-initialized.openapi.json)
+- [undelegate-ephemeral-ata.openapi](/pages/ephemeral-spl-token/api-reference/openapi/undelegate-ephemeral-ata.openapi.json)
+- [transaction-send.openapi](/pages/ephemeral-spl-token/api-reference/openapi/transaction-send.openapi.json)
+- [challenge.openapi](/pages/ephemeral-spl-token/api-reference/openapi/challenge.openapi.json)
+- [login.openapi](/pages/ephemeral-spl-token/api-reference/openapi/login.openapi.json)
+- [private-balance.openapi](/pages/ephemeral-spl-token/api-reference/openapi/private-balance.openapi.json)
+- [stealth-pool.openapi](/pages/ephemeral-spl-token/api-reference/openapi/stealth-pool.openapi.json)
+- [transfer-queue-ensure-crank.openapi](/pages/ephemeral-spl-token/api-reference/openapi/transfer-queue-ensure-crank.openapi.json)
+- [quote.openapi](/pages/ephemeral-spl-token/api-reference/openapi/quote.openapi.json)
+- [swap.openapi](/pages/ephemeral-spl-token/api-reference/openapi/swap.openapi.json)
+- [health.openapi](/pages/ephemeral-spl-token/api-reference/openapi/health.openapi.json)
+- [mcp.openapi](/pages/ephemeral-spl-token/api-reference/openapi/mcp.openapi.json)
+- [.markdownlint](/.markdownlint.json)
+- [balance.openapi](/cn/pages/ephemeral-spl-token/api-reference/openapi/balance.openapi.json)
+- [challenge.openapi](/cn/pages/ephemeral-spl-token/api-reference/openapi/challenge.openapi.json)
+- [deposit.openapi](/cn/pages/ephemeral-spl-token/api-reference/openapi/deposit.openapi.json)
+- [health.openapi](/cn/pages/ephemeral-spl-token/api-reference/openapi/health.openapi.json)
+- [initialize-mint.openapi](/cn/pages/ephemeral-spl-token/api-reference/openapi/initialize-mint.openapi.json)
+- [is-mint-initialized.openapi](/cn/pages/ephemeral-spl-token/api-reference/openapi/is-mint-initialized.openapi.json)
+- [login.openapi](/cn/pages/ephemeral-spl-token/api-reference/openapi/login.openapi.json)
+- [mcp.openapi](/cn/pages/ephemeral-spl-token/api-reference/openapi/mcp.openapi.json)
+- [private-balance.openapi](/cn/pages/ephemeral-spl-token/api-reference/openapi/private-balance.openapi.json)
+- [quote.openapi](/cn/pages/ephemeral-spl-token/api-reference/openapi/quote.openapi.json)
+- [stealth-pool.openapi](/cn/pages/ephemeral-spl-token/api-reference/openapi/stealth-pool.openapi.json)
+- [swap.openapi](/cn/pages/ephemeral-spl-token/api-reference/openapi/swap.openapi.json)
+- [transaction-send.openapi](/cn/pages/ephemeral-spl-token/api-reference/openapi/transaction-send.openapi.json)
+- [transfer-queue-ensure-crank.openapi](/cn/pages/ephemeral-spl-token/api-reference/openapi/transfer-queue-ensure-crank.openapi.json)
+- [transfer.openapi](/cn/pages/ephemeral-spl-token/api-reference/openapi/transfer.openapi.json)
+- [undelegate-ephemeral-ata.openapi](/cn/pages/ephemeral-spl-token/api-reference/openapi/undelegate-ephemeral-ata.openapi.json)
+- [withdraw.openapi](/cn/pages/ephemeral-spl-token/api-reference/openapi/withdraw.openapi.json)
+- [balance.openapi](/jp/pages/ephemeral-spl-token/api-reference/openapi/balance.openapi.json)
+- [challenge.openapi](/jp/pages/ephemeral-spl-token/api-reference/openapi/challenge.openapi.json)
+- [deposit.openapi](/jp/pages/ephemeral-spl-token/api-reference/openapi/deposit.openapi.json)
+- [health.openapi](/jp/pages/ephemeral-spl-token/api-reference/openapi/health.openapi.json)
+- [initialize-mint.openapi](/jp/pages/ephemeral-spl-token/api-reference/openapi/initialize-mint.openapi.json)
+- [is-mint-initialized.openapi](/jp/pages/ephemeral-spl-token/api-reference/openapi/is-mint-initialized.openapi.json)
+- [login.openapi](/jp/pages/ephemeral-spl-token/api-reference/openapi/login.openapi.json)
+- [mcp.openapi](/jp/pages/ephemeral-spl-token/api-reference/openapi/mcp.openapi.json)
+- [private-balance.openapi](/jp/pages/ephemeral-spl-token/api-reference/openapi/private-balance.openapi.json)
+- [quote.openapi](/jp/pages/ephemeral-spl-token/api-reference/openapi/quote.openapi.json)
+- [stealth-pool.openapi](/jp/pages/ephemeral-spl-token/api-reference/openapi/stealth-pool.openapi.json)
+- [swap.openapi](/jp/pages/ephemeral-spl-token/api-reference/openapi/swap.openapi.json)
+- [transaction-send.openapi](/jp/pages/ephemeral-spl-token/api-reference/openapi/transaction-send.openapi.json)
+- [transfer-queue-ensure-crank.openapi](/jp/pages/ephemeral-spl-token/api-reference/openapi/transfer-queue-ensure-crank.openapi.json)
+- [transfer.openapi](/jp/pages/ephemeral-spl-token/api-reference/openapi/transfer.openapi.json)
+- [undelegate-ephemeral-ata.openapi](/jp/pages/ephemeral-spl-token/api-reference/openapi/undelegate-ephemeral-ata.openapi.json)
+- [withdraw.openapi](/jp/pages/ephemeral-spl-token/api-reference/openapi/withdraw.openapi.json)
+- [balance.openapi](/ko/pages/ephemeral-spl-token/api-reference/openapi/balance.openapi.json)
+- [challenge.openapi](/ko/pages/ephemeral-spl-token/api-reference/openapi/challenge.openapi.json)
+- [deposit.openapi](/ko/pages/ephemeral-spl-token/api-reference/openapi/deposit.openapi.json)
+- [health.openapi](/ko/pages/ephemeral-spl-token/api-reference/openapi/health.openapi.json)
+- [initialize-mint.openapi](/ko/pages/ephemeral-spl-token/api-reference/openapi/initialize-mint.openapi.json)
+- [is-mint-initialized.openapi](/ko/pages/ephemeral-spl-token/api-reference/openapi/is-mint-initialized.openapi.json)
+- [login.openapi](/ko/pages/ephemeral-spl-token/api-reference/openapi/login.openapi.json)
+- [mcp.openapi](/ko/pages/ephemeral-spl-token/api-reference/openapi/mcp.openapi.json)
+- [private-balance.openapi](/ko/pages/ephemeral-spl-token/api-reference/openapi/private-balance.openapi.json)
+- [quote.openapi](/ko/pages/ephemeral-spl-token/api-reference/openapi/quote.openapi.json)
+- [stealth-pool.openapi](/ko/pages/ephemeral-spl-token/api-reference/openapi/stealth-pool.openapi.json)
+- [swap.openapi](/ko/pages/ephemeral-spl-token/api-reference/openapi/swap.openapi.json)
+- [transaction-send.openapi](/ko/pages/ephemeral-spl-token/api-reference/openapi/transaction-send.openapi.json)
+- [transfer-queue-ensure-crank.openapi](/ko/pages/ephemeral-spl-token/api-reference/openapi/transfer-queue-ensure-crank.openapi.json)
+- [transfer.openapi](/ko/pages/ephemeral-spl-token/api-reference/openapi/transfer.openapi.json)
+- [undelegate-ephemeral-ata.openapi](/ko/pages/ephemeral-spl-token/api-reference/openapi/undelegate-ephemeral-ata.openapi.json)
+- [withdraw.openapi](/ko/pages/ephemeral-spl-token/api-reference/openapi/withdraw.openapi.json)
+- [openapi](/pages/ephemeral-rollups-ers/api-reference/er/openapi/openapi.json)
+- [openapi-rpc](/pages/ephemeral-rollups-ers/api-reference/rpc/openapi/openapi-rpc.json)
+
+## Optional
+
+- [Tutorials](https://www.youtube.com/@Magicblock-Labs)
+- [Community](https://build.magicblock.app/builders?utm_source=docs.magicblock.gg)
+- [Hackathons & Events](https://luma.com/magicblock-events?utm_source=docs.magicblock.app)
+
+> The links below point to documentation indexes. Follow each `/_llms/` index recursively until you reach documentation pages.
+
+## Indexes
+
+- [English / Products (98 pages)](https://docs.magicblock.gg/_llms/en/products.txt): Ephemeral Rollup, Private Ephemeral Rollup, Ephemeral SPL Token, Solana VRF, Price Oracle.
+- [Chinese (132 pages)](https://docs.magicblock.gg/_llms/cn.txt): 概览, Ephemeral Rollup, Private Ephemeral Rollup, Ephemeral SPL Token, Solana VRF, 模板, 工具.
+- [Japanese (132 pages)](https://docs.magicblock.gg/_llms/jp.txt): 概要, Ephemeral Rollup, Private Ephemeral Rollup, Ephemeral SPL Token, Solana VRF, テンプレート, ツール.
+- [Korean (132 pages)](https://docs.magicblock.gg/_llms/ko.txt): 개요, Ephemeral Rollup, Private Ephemeral Rollup, Ephemeral SPL Token, Solana VRF, 템플릿, 도구.
+
+
+This documentation is built and hosted on [Mintlify](https://mintlify.com), a developer documentation platform.

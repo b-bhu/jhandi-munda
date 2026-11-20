@@ -1,0 +1,60 @@
+Returns the confirmation status for one or more signatures
+
+# Introduction
+Source: https://docs.magicblock.gg/pages/ephemeral-rollups-ers/api-reference/er/introduction
+
+MagicBlock Router API documentation
+
+## Overview
+
+The MagicBlock Router API is a JSON-RPC API that serves a subset of the standard Solana RPC methods and adds router-specific methods. It simplifies multi-node setups by handling node selection and routing behind a single endpoint.
+
+> [!WARNING]
+>
+> The router does not implement every Solana RPC method. On November 19, 2026, both routers answered `getAccountInfo`, `getMultipleAccounts`, `getBalance`, `getLatestBlockhash`, `getSignatureStatuses`, `getSignaturesForAddress`, `getTransaction`, `getIdentity`, `getRoutes`, `getBlockhashForAccounts` and `getDelegationStatus`. They returned `-32601 Method not found` for `getSlot`, `getBlockHeight`, `getHealth`, `getVersion`, `getGenesisHash`, `getProgramAccounts`, `getMinimumBalanceForRentExemption` and `simulateTransaction`. Send those calls to a Solana RPC endpoint or to the ER endpoint (`fqdn` from `getDelegationStatus`) instead, and do not use a router-only `Connection` for code that simulates transactions, reads rent, or scans program accounts.
+
+It can be used to retrieve delegation status for accounts and identify the closest node for request execution. For example, `getBlockhashForAccounts` returns a blockhash from the appropriate node based on the provided accounts and their delegation status.
+
+**Mainnet URL:** `https://router.magicblock.app`
+
+**Devnet URL:** `https://devnet-router.magicblock.app`
+
+**API Version:** 2.0
+
+## Main Operations
+
+### Network Information
+
+* [**Get Routes**](/pages/ephemeral-rollups-ers/api-reference/er/getRoutes) - Query available routing information
+* [**Get Identity**](/pages/ephemeral-rollups-ers/api-reference/er/getIdentity) - Retrieve identity information
+
+### Account Operations
+
+* [**Get Account Info**](/pages/ephemeral-rollups-ers/api-reference/er/getAccountInfo) - Fetch account information
+* [**Get Blockhash For Accounts**](/pages/ephemeral-rollups-ers/api-reference/er/getBlockhashForAccounts) - Get blockhash for specific accounts
+
+### Status & Delegation
+
+* [**Get Signature Statuses**](/pages/ephemeral-rollups-ers/api-reference/er/getSignatureStatuses) - Check transaction signature statuses
+* [**Get Delegation Status**](/pages/ephemeral-rollups-ers/api-reference/er/getDelegationStatus) - Query delegation information
+
+## Key Features
+
+* **Solana RPC Coverage** - Serves common account, blockhash and signature methods; see the warning above for what is missing
+* **Router-Specific Methods** - Adds methods such as `getBlockhashForAccounts` and `getDelegationStatus`
+* **Simplified Multi-Node Setup** - Use one router endpoint instead of manually managing multiple node endpoints
+* **Fast Route Query** - Efficiently determine routing paths for transactions
+* **Account State** - Access current account information and balances
+* **Transaction Tracking** - Monitor transaction status and confirmation
+* **Delegation Queries** - Check delegation relationships through the router
+
+## Use Cases
+
+* Retrieve account balances and state
+* Check transaction confirmation status
+* Query route information for transaction routing
+* Verify delegation configurations
+* Avoid manual multi-node endpoint management
+
+
+# getAccountInfo

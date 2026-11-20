@@ -1,0 +1,54 @@
+# Session log
+
+## 2026-11-19 (Session 1, kickoff)
+- Read README, decisions 1–3, ideas, characters.
+- Created learning desk.
+- Opened with the first-principles question on pool solvency vs fun.
+
+## 2026-11-20 (Session 1, cont.)
+- Bibhu asked for simple, friendly words always; profile voice updated.
+- Re-asked the opening question in plain words. Waiting on his answer.
+- Bibhu asked: explain a stretch first, then ask (profile updated).
+- His answer to the opening question: "pool needs balance to pay for any win." Good first truth (worst-case cover). Partial demonstration of first-principles thinking.
+- Taught: two truths for a pool (cover the worst case right now; win slightly on average over many rounds), plus the "fun" side (big wins must stay possible).
+- Asked: pool has $1,000 and the top payout is 100x; what's the biggest bet on one symbol?
+- Bibhu (unprompted): cap risk at ~10% of pool, dynamic with pool size; or use a Papertrade-style queue. Also: depositors own the pool, so they earn the edge but live with ups and downs. Good systems-thinking signal (links depositors <-> payouts <-> variance).
+- Pushback given: "10% of pool" must mean max *payout* (not bet). With 100x top payout that gives max bet = pool/1000, so $1,000 pool -> $1 max = the $1 minimum. Asked how he wants to handle a small pool.
+- DECISION 4 recorded: Papertrade queue pool + treasury insurance fund that lends to the pool (his idea, unprompted: "no one but us has incentive to seed"). Strong first-principles + systems signal.
+- Pushback asked: a winner stuck in the queue feels bad (fun risk). What does the player see when they win but the pool can't pay?
+- Bibhu proposed (unprompted): always-on timed rounds; per-round exposure cap from reserves; queued wins as a tradable claim with early-exit fee. Strong decomposition + systems thinking (rounds <-> pool exposure <-> queue). Logged in ideas.md.
+- Coached: per-round cap and the queue solve the same problem from two ends; early-exit claim is good but a Phase 2 stretch. Asked him to pick which to lock first.
+- DECISIONS 5 and 6 recorded: on-demand table rounds with a 5–10 s join timer; all caps exist as config but default off for devnet.
+- Next: go deeper on the queue and the "claim you can hold or cash out early" idea. Teach first, then ask.
+- Bibhu corrected me: the claim is for every win, not only shortfalls. Lock period (~1h) for full payout, or 95% instant, bought by the insurance fund (which earns the 5%). I had misread it. Strong systems idea (time as a pool-safety lever + insurance fund revenue).
+- Asked: how long can the lock be before it stops feeling like a casino win (fun cost)?
+- DECISION 7 recorded: full payout at next round settle, or 95% instant via insurance fund. His reason included player discipline (behaviour effect) = systems thinking.
+- Asked: on-demand rounds mean the next round may never come. What's the fallback?
+- Decision 7 updated: payout unlocks after a fixed round-length timer, not an actual next round. Bibhu fixed the stuck-winner hole himself (demonstrated applying constraints from decision 5).
+- DECISION 8: round = 90 s. Flagged: 5–10 s join window vs 90 s total, so ~80 s is show/wait. Asked how to split it.
+- Parked the 90 s split as a setting (Bibhu: not a big deal now). Next topic: verify payout table math.
+- DECISION 9: crypto-style total-return display. Converted table 3/5/9/26/101x. Next: Bibhu checks one row of the edge math; decide whether the jackpot shows 100x or 101x.
+- 101x confirmed. Bibhu asked for rapid-fire mode: short context + one quick question each.
+- Rapid fire Q1: multi-symbol bets = yes (decision 10).
+- Rapid fire Q2: MagicBlock VRF = yes (decision 11).
+- Rapid fire Q3: session keys = yes (decision 12). Bibhu asked me to keep raising UX angles on every decision.
+- Q4 (gas sponsorship) parked by Bibhu as too micro; decide in build. He wants to go up a level: token model (Papertrade-style). Feedback noted: keep rapid fire at product level, not implementation detail.
+- Bibhu proposed the same mature-or-exit-with-tax layer for loser tokens; asked me to steer. Suggested one shared claim primitive for wins and losses. Asked him to confirm.
+- DECISION 13: one shared claim primitive for wins and losses. Next rapid fire: what token holders earn.
+- DECISION 14: token earns from both pool edge and insurance fees. Open: split between token holders, LP depositors, treasury.
+- DECISION 15: BPS fee split 20 treasury / 10 devs / 70 stakers; stake-to-earn SPL token. Bibhu raised self-tuning risk (system adjusts when stressed) = systems thinking. Next: what should the system auto-adjust when the pool is stressed?
+- Bibhu asked for recommend-first mode on detail questions. DECISION 16: auto-shrink max bet under stress (coach recommendation, accepted).
+- DECISION 17: 2% win-only fee (accepted). Flag: stacks with the table edge; recheck total edge.
+- DECISION 18: treasury 20% feeds insurance fund until target (accepted). Next rapid fire: tech stack (Anchor program).
+- DECISION 19: Anchor + Next.js/TS (accepted).
+- DECISION 20: normal + private ER, user's choice. Private ER unverified, check docs. Recommend default = normal.
+- Q12: normal ER first and default, private later. Sent batch Q13–Q17 with recommendations.
+- DECISIONS 21–25 accepted in rapid fire. Next: Phase 1 close-out (full edge recheck incl. 2% win fee, then 3-question check).
+- DECISION 26: MUSD (bet money, $1) vs MUNDA (floating house share, 1 per 1 MUSD lost, minted on claim redeem). Bibhu caught my price/issue-rate mixup: good first-principles push.
+- DECISIONS 27–32 recorded (NAV, daily snapshots, stake lock, FIFO, permissionless settle, 50-round demo). Session paused for now.
+- MagicBlock docs pulled to docs/reference/magicblock/, build plan at docs/build-plan.md. Edge 3.80% base; 5.20% with 2% fee on profit, 5.73% on total. Asked Bibhu to compute the 3-match row; fee-on-profit recommended.
+- Private mode put on hold (D20). Bibhu asked where we are: end of Phase 1.
+- D17 fee confirmed on profit only (edge ~5.2%). Next: 3-question wrap-up.
+- Wrap-up Q1 (what did you learn): Bibhu: improved at top-level, architecture thinking without code jargon; he could reason the system through. Bottleneck = Rust + Anchor syntax, not design. (Self-report; matches today's evidence: he designed the claim/option layer, the stuck-winner fix, NAV, MUSD/MUNDA split.)
+- Wrap-up Q2 (explain without looking): core flow right (pick symbol, bet, dealer rolls, paid by math after some time). Missing unprompted: the claim (wait 90 s or 95% now), 2% fee on profit, loss -> MUNDA claim, pool/queue paying. Partial. Add to spaced recall.
+- Wrap-up Q3 (apply today): Bibhu fuzzy on how to start; handed lead to me. Explained Step 1 spec (scaffold, pinned versions) and Step 2 (MUSD faucet = first visible thing). Phase 1 CLOSED. Phase 2 Step 1 started on the box.

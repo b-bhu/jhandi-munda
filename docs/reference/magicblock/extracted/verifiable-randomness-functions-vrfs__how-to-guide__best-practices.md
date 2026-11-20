@@ -1,0 +1,30 @@
+
+
+# VRF Best Practices
+Source: https://docs.magicblock.gg/pages/verifiable-randomness-functions-vrfs/how-to-guide/best-practices
+
+Guidelines for integrating verifiable randomness
+
+Use these tips to get the most reliable results when requesting randomness.
+Pass the oracle queue that matches where your transaction runs: `DEFAULT_QUEUE` on Solana, `DEFAULT_EPHEMERAL_QUEUE` inside an ephemeral rollup. You don't delegate queues yourself; `DelegateOracleQueue` can only be signed by the queue's authority.
+
+### Seed Selection
+
+* Combine user input with server timestamps or game state to create unpredictable seeds.
+* Avoid letting players specify the entire `caller_seed` to prevent grinding.
+
+### Callback Validation
+
+* Put `#[vrf_callback]` on every callback accounts struct. It checks that the signer is your program's scoped VRF identity. Don't add your own `vrf_program_identity` field checked against `VRF_PROGRAM_IDENTITY` (the deprecated global signer): it replaces the macro's check and rejects every request made through `#[vrf]`.
+* Reject callbacks that do not match the original request parameters.
+
+### State Management
+
+* Store any pending request identifiers so that retries or unexpected callbacks can be handled safely. A callback can arrive late: the VRF program applies no age limit when it fulfills, and an unfulfilled request can still be fulfilled until someone purges it, which is allowed about two minutes after the request.
+* Track the oracle queue your requests were delegated to so results can be matched back correctly.
+* Keep random outputs ephemeral—consume them immediately within your [rollup logic](/pages/ephemeral-rollups-ers/introduction/ephemeral-rollup) and avoid reusing them.
+
+Following these guidelines reduces the risk of manipulation and ensures consistent randomness across sessions.
+
+
+# VRF Quickstart

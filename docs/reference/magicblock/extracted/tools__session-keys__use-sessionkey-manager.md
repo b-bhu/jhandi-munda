@@ -1,0 +1,94 @@
+
+
+# Use session key manager
+Source: https://docs.magicblock.gg/pages/tools/session-keys/use-sessionkey-manager
+
+A custom React hook that manages the creation and revocation of session tokens, and provides essential methods for signing and sending transactions in a secure and user-friendly way
+
+`useSessionKeyManager` is a custom hook that takes an `AnchorWallet`, `Connection`, and `Cluster` as arguments and returns a `SessionWalletInterface`. This hook manages the session keys, tokens, and provides methods for signing and sending transactions.
+
+> [!NOTE]
+>
+> `createSession` and `revokeSession` use the V1 `SessionToken`. A program that
+> expects `SessionTokenV2` rejects these tokens. See
+> [Integrating Sessions in your Program](/pages/tools/session-keys/integrating-sessions-in-your-program).
+
+The `SessionWalletInterface` consists of the following properties and methods:
+
+```typescript theme={null}
+interface SessionWalletInterface {
+  publicKey: PublicKey | null; // Public key associated with the session wallet
+  ownerPublicKey: PublicKey | null; // The Publickey of the session token authority(The creator of the session token)
+  isLoading: boolean; // Indicates whether the session wallet is loading
+  error: string | null; // An error message, if any
+  sessionToken: string | null; // Session token for the current session
+  signTransaction:
+    | (<T extends Transaction>(
+        transaction: T,
+        connection?: Connection,
+        sendOptions?: SendTransactionOptions
+      ) => Promise<T>)
+    | undefined; // Sign a single transaction
+  signAllTransactions:
+    | (<T extends Transaction>(
+        transactions: T[],
+        connection?: Connection,
+        sendOptions?: SendTransactionOptions
+      ) => Promise<T[]>)
+    | undefined; // Sign multiple transactions
+  signMessage: ((message: Uint8Array) => Promise<Uint8Array>) | undefined; // Sign a message
+  sendTransaction:
+    | (<T extends Transaction>(
+        transaction: T,
+        connection?: Connection,
+        options?: SendTransactionOptions
+      ) => Promise<string>)
+    | undefined; // Send a signed transaction
+  signAndSendTransaction:
+    | (<T extends Transaction>(
+        transactions: T | T[],
+        connection?: Connection,
+        options?: SendTransactionOptions
+      ) => Promise<string[]>)
+    | undefined; // Sign and send transactions
+  createSession: (
+    targetProgram: PublicKey, // Target Solana program
+    topUpLamports?: number, // Top up session wallet with lamports or not
+    validUntil?: number, // Duration of session token before expiration
+    sessionCreatedCallback?: (sessionInfo: {
+      sessionToken: string;
+      publicKey: string;
+    }) => void
+  ) => Promise<SessionWalletInterface | undefined>; // Create a new session
+  revokeSession: () => Promise<void>; // Revoke the current session
+  getSessionToken: () => Promise<string | null>; // Retrieve the current session token
+}
+```
+
+Here's an example of how to use the `useSessionKeyManager`:
+
+```typescript theme={null}
+import { useAnchorWallet, useConnection } from '@solana/wallet-adapter-react';
+import { useSessionKeyManager } from '@magicblock-labs/gum-react-sdk';
+
+function YourComponent() {
+  const wallet = useAnchorWallet();
+  const connection = useConnection();
+  const cluster = "devnet"; // or "mainnet-beta", "testnet", "localnet"
+
+  const sessionWallet = useSessionKeyManager(wallet, connection, cluster);
+
+  // Access session wallet properties and methods here
+  // Example: sessionWallet.publicKey
+  // Example: sessionWallet.createSession
+
+  return (
+    // Your component JSX
+  );
+}
+```
+
+To use the Session Key Manager across multiple components, you can set up the Provider Component and Context in your application in the following section.
+
+
+# Wallets and Onramps for Solana Apps

@@ -1,0 +1,27 @@
+
+
+# VRF FAQ
+Source: https://docs.magicblock.gg/pages/verifiable-randomness-functions-vrfs/introduction/faq
+
+Common questions about Solana VRF
+
+Solana VRF covers the most common questions about verifiable randomness before you ship on-chain apps.
+
+### Why not use block hashes for randomness?
+
+Block hashes can be predicted or manipulated by miners and validators, making them unsuitable for fair gameplay. MagicBlock's VRF proves the randomness was generated independently of block production.
+
+### How fast is the randomness callback?
+
+The request and the callback are separate transactions, on Solana or inside an [ephemeral rollup](/pages/ephemeral-rollups-ers/introduction/ephemeral-rollup). The oracle fulfills the request in a later slot than the one it was made in, and the VRF program then calls your callback. Your program does not poll; your client can watch for the callback transaction. A request that is not fulfilled can be purged after about two minutes.
+
+### Can I audit the randomness proofs?
+
+Yes. Each request includes a proof that anyone can verify on-chain using the same cryptography as the VRF signer. This transparency ensures players can confirm fairness.
+
+### Who runs the oracles?
+
+MagicBlock Solana VRF uses a permissioned set of oracles managed through on-chain queues. You choose the queue per request with `oracle_queue`: `DEFAULT_QUEUE` on Solana, `DEFAULT_EPHEMERAL_QUEUE` inside an ephemeral rollup. The ephemeral queue is already delegated, so there is nothing to delegate on your side.
+
+
+# VRF Pricing

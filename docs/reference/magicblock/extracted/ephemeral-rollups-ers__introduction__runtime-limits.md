@@ -1,0 +1,65 @@
+
+
+# Ephemeral Rollup Runtime Limits
+Source: https://docs.magicblock.gg/pages/ephemeral-rollups-ers/introduction/runtime-limits
+
+Compute, transaction size, and account size limits on the Ephemeral Rollup compared to Solana
+
+The Ephemeral Rollup (ER) runs the **Solana Virtual Machine (SVM)**, so programs execute under the same runtime rules as on the base layer. The key difference is the transaction size limit, which the ER raises significantly.
+
+| Limit | Solana Base Layer | Ephemeral Rollup |
+| :- | :- | :- |
+| Compute units per instruction (default) | 200,000 CU | 200,000 CU |
+| Compute units per transaction (max, via `SetComputeUnitLimit`) | 1,400,000 CU | 1,400,000 CU |
+| Serialized transaction size (max) | 1,232 bytes | **64 KB** |
+| Account size (max) | 10 MiB | 10 MiB |
+| Account size that can be committed back to Solana | n/a | **10,240 bytes** |
+| Slot time | \~400 ms | \~10 ms |
+
+> [!NOTE]
+>
+> Slot times are not guaranteed and may change over time. Avoid writing logic
+> that depends on a specific slot duration — see the
+> [FAQ](/pages/ephemeral-rollups-ers/introduction/faq).
+
+## Requesting more compute
+
+As on Solana, the default compute budget is 200,000 CU per instruction. Request a higher limit (up to 1.4M CU per transaction) by prepending a `SetComputeUnitLimit` instruction:
+
+```typescript theme={null}
+import { ComputeBudgetProgram, Transaction } from "@solana/web3.js";
+
+const tx = new Transaction().add(
+  ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }),
+  yourProgramInstruction
+);
+```
+
+## Larger transactions
+
+The ER accepts serialized transactions up to **64 KB**, compared to the 1,232-byte packet limit on the base layer. This removes the need for address lookup tables or transaction splitting in most cases, and allows instructions with many accounts or large instruction data to execute in a single transaction.
+
+> [!WARNING]
+>
+> The 64 KB limit only applies to transactions executed on the ER (i.e. all
+> writable accounts are delegated). Transactions routed to the base layer,
+> including delegation transactions, remain subject to the 1,232-byte Solana
+> limit. Commit and undelegation requests are ER transactions: your program
+> schedules them on the ER, and the validator sends the base-layer settlement.
+
+## Committing large accounts
+
+The validator refuses to commit an account whose data is larger than
+**10,240 bytes**. The commit fails with `InvalidAccountData` and the log line
+`ScheduleCommit ERR: account ... is too large to be committed`. The same check
+applies to commit-and-undelegate, so a larger account cannot be undelegated
+the normal way either.
+
+> [!WARNING]
+>
+> Do not delegate an account that is, or will grow, larger than 10,240 bytes if
+> you need its state back on Solana. Split large state across several
+> accounts of 10,240 bytes or less.
+
+
+# What Is an Ephemeral Rollup?

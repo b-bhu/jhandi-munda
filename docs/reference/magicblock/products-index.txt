@@ -1,0 +1,246 @@
+# MagicBlock Documentation: English Products
+
+> MagicBlock runs Ephemeral Rollups on Solana for gasless, real-time, high-frequency transactions, with private execution in a TEE, verifiable randomness (VRF), price oracles, cranks, and session keys.
+
+## Products
+
+### Ephemeral Rollup
+
+#### Get Started
+
+- [Ephemeral Rollups Quickstart](https://docs.magicblock.gg/pages/ephemeral-rollups-ers/how-to-guide/quickstart.md): Add Ephemeral Rollups to any Solana program. Delegate accounts, run gasless transactions on the rollup, then commit and undelegate back to Solana.
+- [Run Ephemeral Rollups Locally](https://docs.magicblock.gg/pages/ephemeral-rollups-ers/how-to-guide/local-development.md): Run and test your Native Rust or Anchor programs with a fully local Ephemeral Rollup stack, Surfpool, or a local VRF oracle.
+
+#### Concepts
+
+- [What Is an Ephemeral Rollup?](https://docs.magicblock.gg/pages/ephemeral-rollups-ers/introduction/why.md): How Ephemeral Rollups run gasless, low-latency transactions for delegated Solana accounts and settle the state back to Solana.
+- [Delegating Accounts to an Ephemeral Rollup](https://docs.magicblock.gg/pages/ephemeral-rollups-ers/introduction/ephemeral-rollup.md): How to delegate a Solana account to an Ephemeral Rollup, run transactions on it, commit the state back to Solana, and undelegate.
+- [Ephemeral Accounts](https://docs.magicblock.gg/pages/ephemeral-rollups-ers/introduction/ephemeral-accounts.md): Create, resize, and close accounts that live entirely on the Ephemeral Rollup.
+- [Magic Router](https://docs.magicblock.gg/pages/ephemeral-rollups-ers/introduction/magic-router.md): Learn how Magicblock's Magic Router accelerates transactions by routing them to the right execution environment.
+- [Ephemeral Rollup Runtime Limits](https://docs.magicblock.gg/pages/ephemeral-rollups-ers/introduction/runtime-limits.md): Compute, transaction size, and account size limits on the Ephemeral Rollup compared to Solana
+- [Ephemeral Rollup Fees, Commits, and Refunds](https://docs.magicblock.gg/pages/ephemeral-rollups-ers/introduction/fees-and-commit-economics.md): A plain-language guide to ER fees, commit limits, delegation deposits, and refunds
+
+#### Guides
+
+- [Ephemeral Rollups with Anchor](https://docs.magicblock.gg/pages/ephemeral-rollups-ers/how-to-guide/anchor.md): Learn how to write a simple Anchor program that increments a counter on Solana
+- [Ephemeral Rollups with Native Rust](https://docs.magicblock.gg/pages/ephemeral-rollups-ers/how-to-guide/rust-program.md): Learn how to write a simple Rust program that delegates and increments a counter on Solana
+- [Test an Ephemeral Rollups Program](https://docs.magicblock.gg/pages/ephemeral-rollups-ers/how-to-guide/rust-tests.md): Learn how to test a simple Rust program
+
+##### Magic Actions
+
+- [Magic Actions Overview](https://docs.magicblock.gg/pages/ephemeral-rollups-ers/magic-actions/overview.md): Automatically execute base-layer actions while Delegated
+- [Magic Actions Program Implementation](https://docs.magicblock.gg/pages/ephemeral-rollups-ers/magic-actions/implementation.md): Program-side guide to building with Magic Actions
+- [Magic Actions Client Implementation](https://docs.magicblock.gg/pages/ephemeral-rollups-ers/magic-actions/client.md): Client-side guide to building with Magic Actions
+- [Magic Actions Troubleshooting](https://docs.magicblock.gg/pages/ephemeral-rollups-ers/magic-actions/troubleshooting.md): Diagnose common issues with Magic Actions
+
+##### Cranks
+
+- [Cranks: Scheduled Instructions on Solana](https://docs.magicblock.gg/pages/tools/crank/introduction.md): Run Solana instructions on a fixed schedule from inside an Ephemeral Rollup, with no offchain bot.
+- [Implement Cranks in Your Solana Program](https://docs.magicblock.gg/pages/tools/crank/implementation.md): Learn how to implement cranks in your Solana program using MagicBlock Ephemeral Rollups
+
+#### API Reference
+
+##### Router API
+
+- [Introduction](https://docs.magicblock.gg/pages/ephemeral-rollups-ers/api-reference/er/introduction.md): MagicBlock Router API documentation
+- [getRoutes](https://docs.magicblock.gg/pages/ephemeral-rollups-ers/api-reference/er/getRoutes.md): Get available ephemeral rollup nodes from the Magic Router
+- [getIdentity](https://docs.magicblock.gg/pages/ephemeral-rollups-ers/api-reference/er/getIdentity.md): Get the identity information of the current ER Validator
+- [getBlockhashForAccounts](https://docs.magicblock.gg/pages/ephemeral-rollups-ers/api-reference/er/getBlockhashForAccounts.md): Get blockhash for multiple account addresses.
+- [getSignatureStatuses](https://docs.magicblock.gg/pages/ephemeral-rollups-ers/api-reference/er/getSignatureStatuses.md): Returns the confirmation status for one or more signatures
+- [getAccountInfo](https://docs.magicblock.gg/pages/ephemeral-rollups-ers/api-reference/er/getAccountInfo.md): Get AccountInfo for a single account.
+- [getDelegationStatus](https://docs.magicblock.gg/pages/ephemeral-rollups-ers/api-reference/er/getDelegationStatus.md): Get delegation status for a single account from Magic Router.
+
+##### RPC API
+
+- [RPC API](https://docs.magicblock.gg/pages/ephemeral-rollups-ers/api-reference/rpc/introduction.md): Solana JSON-RPC HTTP methods on MagicBlock devnet RPC endpoints.
+- [getAccountInfo](https://docs.magicblock.gg/pages/ephemeral-rollups-ers/api-reference/rpc/getAccountInfo.md): Returns all information associated with an account of provided Pubkey.
+- [getBalance](https://docs.magicblock.gg/pages/ephemeral-rollups-ers/api-reference/rpc/getBalance.md): Solana JSON-RPC method getBalance.
+- [getBlock](https://docs.magicblock.gg/pages/ephemeral-rollups-ers/api-reference/rpc/getBlock.md): Returns identity and transaction information about a confirmed block in the ledger.
+- [getBlockCommitment](https://docs.magicblock.gg/pages/ephemeral-rollups-ers/api-reference/rpc/getBlockCommitment.md): Returns commitment for particular block.
+- [getBlockHeight](https://docs.magicblock.gg/pages/ephemeral-rollups-ers/api-reference/rpc/getBlockHeight.md): Returns the current block height of the node.
+- [getBlocks](https://docs.magicblock.gg/pages/ephemeral-rollups-ers/api-reference/rpc/getBlocks.md): Returns a list of confirmed blocks between two slots.
+- [getBlocksWithLimit](https://docs.magicblock.gg/pages/ephemeral-rollups-ers/api-reference/rpc/getBlocksWithLimit.md): Returns a list of confirmed blocks starting at the given slot for a given limit.
+- [getBlockTime](https://docs.magicblock.gg/pages/ephemeral-rollups-ers/api-reference/rpc/getBlockTime.md): Returns the estimated production time of a block.
+- [getFirstAvailableBlock](https://docs.magicblock.gg/pages/ephemeral-rollups-ers/api-reference/rpc/getFirstAvailableBlock.md): Solana JSON-RPC method getFirstAvailableBlock.
+- [getGenesisHash](https://docs.magicblock.gg/pages/ephemeral-rollups-ers/api-reference/rpc/getGenesisHash.md): Solana JSON-RPC method getGenesisHash.
+- [getHealth](https://docs.magicblock.gg/pages/ephemeral-rollups-ers/api-reference/rpc/getHealth.md): Solana JSON-RPC method getHealth.
+- [getIdentity](https://docs.magicblock.gg/pages/ephemeral-rollups-ers/api-reference/rpc/getIdentity.md): Solana JSON-RPC method getIdentity.
+- [getLargestAccounts](https://docs.magicblock.gg/pages/ephemeral-rollups-ers/api-reference/rpc/getLargestAccounts.md): Returns the 20 largest accounts, by lamport balance.
+- [getLatestBlockhash](https://docs.magicblock.gg/pages/ephemeral-rollups-ers/api-reference/rpc/getLatestBlockhash.md): Returns the latest blockhash.
+- [getLeaderSchedule](https://docs.magicblock.gg/pages/ephemeral-rollups-ers/api-reference/rpc/getLeaderSchedule.md): Returns the leader schedule for an epoch.
+- [getMinimumBalanceForRentExemption](https://docs.magicblock.gg/pages/ephemeral-rollups-ers/api-reference/rpc/getMinimumBalanceForRentExemption.md): Returns minimum balance required to make account rent exempt.
+- [getMultipleAccounts](https://docs.magicblock.gg/pages/ephemeral-rollups-ers/api-reference/rpc/getMultipleAccounts.md): Returns the account information for a list of Pubkeys.
+- [getProgramAccounts](https://docs.magicblock.gg/pages/ephemeral-rollups-ers/api-reference/rpc/getProgramAccounts.md): Returns all accounts owned by the provided program Pubkey.
+- [getRecentPerformanceSamples](https://docs.magicblock.gg/pages/ephemeral-rollups-ers/api-reference/rpc/getRecentPerformanceSamples.md): Returns a list of recent performance samples, in reverse slot order.
+- [getSignaturesForAddress](https://docs.magicblock.gg/pages/ephemeral-rollups-ers/api-reference/rpc/getSignaturesForAddress.md): Returns signatures for confirmed transactions that include the given address.
+- [getSignatureStatuses](https://docs.magicblock.gg/pages/ephemeral-rollups-ers/api-reference/rpc/getSignatureStatuses.md): Returns the statuses of a list of signatures.
+- [getSlot](https://docs.magicblock.gg/pages/ephemeral-rollups-ers/api-reference/rpc/getSlot.md): Returns the slot that has reached the given or default commitment level.
+- [getTokenAccountBalance](https://docs.magicblock.gg/pages/ephemeral-rollups-ers/api-reference/rpc/getTokenAccountBalance.md): Returns the token balance of an SPL Token account.
+- [getTokenAccountsByDelegate](https://docs.magicblock.gg/pages/ephemeral-rollups-ers/api-reference/rpc/getTokenAccountsByDelegate.md): Returns all SPL Token accounts by approved Delegate.
+- [getTokenAccountsByOwner](https://docs.magicblock.gg/pages/ephemeral-rollups-ers/api-reference/rpc/getTokenAccountsByOwner.md): Returns all SPL Token accounts by token owner.
+- [getTokenLargestAccounts](https://docs.magicblock.gg/pages/ephemeral-rollups-ers/api-reference/rpc/getTokenLargestAccounts.md): Returns the 20 largest accounts of a particular SPL Token type.
+- [getTokenSupply](https://docs.magicblock.gg/pages/ephemeral-rollups-ers/api-reference/rpc/getTokenSupply.md): Returns the total supply of an SPL Token type.
+- [getTransaction](https://docs.magicblock.gg/pages/ephemeral-rollups-ers/api-reference/rpc/getTransaction.md): Returns transaction details for a confirmed transaction.
+- [getTransactionCount](https://docs.magicblock.gg/pages/ephemeral-rollups-ers/api-reference/rpc/getTransactionCount.md): Returns the current transaction count from the ledger.
+- [getVersion](https://docs.magicblock.gg/pages/ephemeral-rollups-ers/api-reference/rpc/getVersion.md): Solana JSON-RPC method getVersion.
+- [isBlockhashValid](https://docs.magicblock.gg/pages/ephemeral-rollups-ers/api-reference/rpc/isBlockhashValid.md): Returns whether a blockhash is still valid or not.
+- [sendTransaction](https://docs.magicblock.gg/pages/ephemeral-rollups-ers/api-reference/rpc/sendTransaction.md): Submits a signed transaction to the cluster for processing.
+- [simulateTransaction](https://docs.magicblock.gg/pages/ephemeral-rollups-ers/api-reference/rpc/simulateTransaction.md): Simulate sending a transaction.
+
+#### Resources
+
+- [Ephemeral Rollups FAQ](https://docs.magicblock.gg/pages/ephemeral-rollups-ers/introduction/faq.md): Common questions about Ephemeral Rollups: delegating accounts and programs, composability with Solana programs, compute and account size limits, and timing.
+
+### Private Ephemeral Rollup
+
+#### Get Started
+
+- [Private Ephemeral Rollups Quickstart](https://docs.magicblock.gg/pages/private-ephemeral-rollups-pers/how-to-guide/quickstart.md): Enable privacy in any Solana program state account through MagicBlock's ER and Trusted Execution Environment on Intel TDX.
+- [Run Private Ephemeral Rollups Locally](https://docs.magicblock.gg/pages/private-ephemeral-rollups-pers/how-to-guide/local-development.md): Run and test your Private Ephemeral Rollup programs locally, with the Query Filtering Service emulating the TEE privacy layer — no hardware attestation required.
+
+#### Concepts
+
+- [Private Program State on Solana with a TEE](https://docs.magicblock.gg/pages/private-ephemeral-rollups-pers/introduction/onchain-privacy.md): Private Ephemeral Rollups keep Solana program state hidden while it runs, inside a TEE on Intel TDX, with per-account access control and no ZK circuits.
+- [Private Ephemeral Rollup Authorization](https://docs.magicblock.gg/pages/private-ephemeral-rollups-pers/introduction/authorization.md): Control who can read each delegated account through per-account permissions on the Ephemeral Rollup.
+- [Private Ephemeral Rollup Compliance Framework](https://docs.magicblock.gg/pages/private-ephemeral-rollups-pers/introduction/compliance-framework.md): MagicBlock enables confidential execution without compromising performance, compliance, or control.
+
+#### Guides
+
+- [Access Control for Private Ephemeral Rollups](https://docs.magicblock.gg/pages/private-ephemeral-rollups-pers/how-to-guide/access-control.md): Learn how to manage fine-grained access control and member permissions in Private Ephemeral Rollups.
+
+#### API Reference
+
+- [Private Payments](https://docs.magicblock.gg/pages/private-ephemeral-rollups-pers/api-reference/per/introduction.md): Private, compliant onchain payments on MagicBlock — powered by Ephemeral SPL Tokens.
+
+### Ephemeral SPL Token
+
+#### Get Started
+
+- [Ephemeral SPL Tokens](https://docs.magicblock.gg/pages/ephemeral-spl-token/overview.md): Move SPL tokens at Ephemeral Rollup speed with the Ephemeral SPL Token program — learn the eATA, Global Vault, delegation, custody, and private-payment models.
+- [Ephemeral SPL Token Quickstart](https://docs.magicblock.gg/pages/ephemeral-spl-token/quickstart.md): Delegate an SPL token account to an Ephemeral Rollup, transfer on the ER, and withdraw back to the base layer — with the ephemeral-rollups-sdk.
+
+#### Guides
+
+- [Ephemeral SPL Tokens in Your Solana Program](https://docs.magicblock.gg/pages/ephemeral-spl-token/smart-contract-integration.md): Custody and move SPL tokens from your own Solana program on an Ephemeral Rollup — PDA-signed transfers, delegation, and commit/undelegate.
+- [Private Payments with Ephemeral SPL Tokens](https://docs.magicblock.gg/pages/ephemeral-spl-token/private-payments.md): Use Ephemeral SPL Tokens for private deposits, transfers, and withdrawals — private visibility, stealth handles, and queued settlement over the hosted API.
+
+#### API Reference
+
+- [Introduction](https://docs.magicblock.gg/pages/ephemeral-spl-token/api-reference/introduction.md): Ephemeral SPL Token API documentation
+- [Health](https://docs.magicblock.gg/pages/ephemeral-spl-token/api-reference/health.md)
+- [MCP](https://docs.magicblock.gg/pages/ephemeral-spl-token/api-reference/mcp.md)
+
+##### Core Token API
+
+- [Deposit SPL Tokens](https://docs.magicblock.gg/pages/ephemeral-spl-token/api-reference/deposit.md): Wraps the SDK `delegateSpl(...)` flow. The API generates `shuttleId` server-side and pins `escrowIndex` to `0`.
+- [Transfer SPL Tokens](https://docs.magicblock.gg/pages/ephemeral-spl-token/api-reference/transfer.md): Transfer SPL tokens publicly or privately through an ephemeral rollup. Accepts an optional `Authorization: Bearer <token>` header obtained from the `/v1/spl/login` flow when the request needs to read or write data inside the Private Ephemeral Rollup.
+- [Withdraw SPL Tokens](https://docs.magicblock.gg/pages/ephemeral-spl-token/api-reference/withdraw.md): Wraps the SDK `withdrawSpl(...)` flow. The API generates `shuttleId` server-side. Accepts an optional `Authorization: Bearer <token>` header for requests that need to connect to the Private Ephemeral Rollup.
+- [Balance](https://docs.magicblock.gg/pages/ephemeral-spl-token/api-reference/balance.md): Reads the owner's associated token account on the base RPC.
+- [Initialize Mint](https://docs.magicblock.gg/pages/ephemeral-spl-token/api-reference/initialize-mint.md)
+- [Is Mint Initialized](https://docs.magicblock.gg/pages/ephemeral-spl-token/api-reference/is-mint-initialized.md)
+- [Undelegate Ephemeral ATA](https://docs.magicblock.gg/pages/ephemeral-spl-token/api-reference/undelegate-ephemeral-ata.md): Build an unsigned ephemeral-rollup transaction that undelegates a wallet's ephemeral ATA (eATA) for a mint, committing its balance back toward the base layer. Accepts an optional `Authorization: Bearer <token>` header.
+- [Send Transaction](https://docs.magicblock.gg/pages/ephemeral-spl-token/api-reference/transaction-send.md): Submit a signed, serialized transaction. Use the `sendTo` value returned by a build endpoint (deposit / transfer / withdraw / stealth-pool) to route the transaction to the base layer or the ephemeral RPC. Accepts an optional `Authorization: Bearer <token>` header for ephemeral submissions that requi…
+
+##### Private Payments
+
+- [Challenge](https://docs.magicblock.gg/pages/ephemeral-spl-token/api-reference/challenge.md): Returns a challenge string that the wallet must sign. The signature is then submitted to `/v1/spl/login` in exchange for a bearer token used to read private data.
+- [Login](https://docs.magicblock.gg/pages/ephemeral-spl-token/api-reference/login.md): Verifies the wallet's signature over the challenge issued by `/v1/spl/challenge` and returns an authentication token. Pass the token as `Authorization: Bearer <token>` on `/v1/spl/private-balance` and on `/v1/spl/transfer` requests that need to connect to the Private Ephemeral Rollup.
+- [Private Balance](https://docs.magicblock.gg/pages/ephemeral-spl-token/api-reference/private-balance.md): Reads the owner's associated token account on the ephemeral RPC. Requires an `Authorization: Bearer <token>` header obtained from `/v1/spl/login`.
+- [Create Stealth Pool](https://docs.magicblock.gg/pages/ephemeral-spl-token/api-reference/stealth-pool.md): Build unsigned stealth-pool setup and ER update transactions that map a handle to 1-10 destination owner keys. Requires an `Authorization: Bearer <token>` header from the `/v1/spl/login` flow. Once initialized, the handle can be used as the `to` value of a private `/v1/spl/transfer`.
+- [Get Stealth Pool Status](https://docs.magicblock.gg/pages/ephemeral-spl-token/api-reference/stealth-pool-status.md): Derive a stealth-pool PDA from an exact handle and report whether the base account exists. Does not return the destination keys.
+- [Ensure Transfer Queue Crank](https://docs.magicblock.gg/pages/ephemeral-spl-token/api-reference/transfer-queue-ensure-crank.md): After setup confirmation, verify that the validator-scoped transfer queue exists for a mint and force one crank attempt. Used to make sure queued private transfers make progress.
+
+##### Swap
+
+- [Swap Quote](https://docs.magicblock.gg/pages/ephemeral-spl-token/api-reference/quote.md): Returns a swap quote between two SPL mints. The quote response can be passed as-is into `POST /v1/swap/swap` to build the swap transaction.
+- [Swap](https://docs.magicblock.gg/pages/ephemeral-spl-token/api-reference/swap.md): Build an unsigned swap transaction from a quote.
+
+### Solana VRF
+
+#### Get Started
+
+- [VRF Quickstart](https://docs.magicblock.gg/pages/verifiable-randomness-functions-vrfs/how-to-guide/quickstart.md): Learn how to request and consume Solana VRF randomness onchain using the MagicBlock VRF SDK.
+
+#### Concepts
+
+- [Verifiable Randomness (VRF) on Solana](https://docs.magicblock.gg/pages/verifiable-randomness-functions-vrfs/introduction/solana-vrf.md): Get verifiable, unpredictable randomness in a Solana program. Request it onchain and receive the value in a callback with a proof, for games, raffles, and loot drops.
+- [VRF Technical Details](https://docs.magicblock.gg/pages/verifiable-randomness-functions-vrfs/introduction/technical-details.md): How Solana VRF integrates with MagicBlock
+- [VRF Security](https://docs.magicblock.gg/pages/verifiable-randomness-functions-vrfs/introduction/security.md): How Solana VRF randomness proofs are verified
+
+#### Guides
+
+- [VRF Best Practices](https://docs.magicblock.gg/pages/verifiable-randomness-functions-vrfs/how-to-guide/best-practices.md): Guidelines for integrating verifiable randomness
+
+#### Resources
+
+- [VRF Pricing](https://docs.magicblock.gg/pages/verifiable-randomness-functions-vrfs/introduction/pricing.md): Pricing for provably fair randomness requests with MagicBlock Solana VRF.
+- [VRF FAQ](https://docs.magicblock.gg/pages/verifiable-randomness-functions-vrfs/introduction/faq.md): Common questions about Solana VRF
+
+### Price Oracle
+
+#### Get Started
+
+- [Real-Time Price Feeds on Solana](https://docs.magicblock.gg/pages/tools/oracle/introduction.md): Low-latency price feeds on Ephemeral Rollups, updated every 50 to 200 ms from Pyth Lazer, for trading and other real-time apps.
+
+#### Guides
+
+- [Read Real-Time Price Feeds Onchain](https://docs.magicblock.gg/pages/tools/oracle/implementation.md): Derive the Pyth Lazer price feed account and decode its bytes
+
+## OpenAPI Specs
+
+- [openapi-getRoutes](/pages/ephemeral-rollups-ers/api-reference/er/openapi/openapi-getRoutes.json)
+- [openapi-getIdentity](/pages/ephemeral-rollups-ers/api-reference/er/openapi/openapi-getIdentity.json)
+- [openapi-getBlockhashForAccounts](/pages/ephemeral-rollups-ers/api-reference/er/openapi/openapi-getBlockhashForAccounts.json)
+- [openapi-getSignatureStatuses](/pages/ephemeral-rollups-ers/api-reference/er/openapi/openapi-getSignatureStatuses.json)
+- [openapi-getAccountInfo](/pages/ephemeral-rollups-ers/api-reference/er/openapi/openapi-getAccountInfo.json)
+- [openapi-getDelegationStatus](/pages/ephemeral-rollups-ers/api-reference/er/openapi/openapi-getDelegationStatus.json)
+- [openapi-rpc-getAccountInfo](/pages/ephemeral-rollups-ers/api-reference/rpc/openapi/openapi-rpc-getAccountInfo.json)
+- [openapi-rpc-getBalance](/pages/ephemeral-rollups-ers/api-reference/rpc/openapi/openapi-rpc-getBalance.json)
+- [openapi-rpc-getBlock](/pages/ephemeral-rollups-ers/api-reference/rpc/openapi/openapi-rpc-getBlock.json)
+- [openapi-rpc-getBlockCommitment](/pages/ephemeral-rollups-ers/api-reference/rpc/openapi/openapi-rpc-getBlockCommitment.json)
+- [openapi-rpc-getBlockHeight](/pages/ephemeral-rollups-ers/api-reference/rpc/openapi/openapi-rpc-getBlockHeight.json)
+- [openapi-rpc-getBlocks](/pages/ephemeral-rollups-ers/api-reference/rpc/openapi/openapi-rpc-getBlocks.json)
+- [openapi-rpc-getBlocksWithLimit](/pages/ephemeral-rollups-ers/api-reference/rpc/openapi/openapi-rpc-getBlocksWithLimit.json)
+- [openapi-rpc-getBlockTime](/pages/ephemeral-rollups-ers/api-reference/rpc/openapi/openapi-rpc-getBlockTime.json)
+- [openapi-rpc-getFirstAvailableBlock](/pages/ephemeral-rollups-ers/api-reference/rpc/openapi/openapi-rpc-getFirstAvailableBlock.json)
+- [openapi-rpc-getGenesisHash](/pages/ephemeral-rollups-ers/api-reference/rpc/openapi/openapi-rpc-getGenesisHash.json)
+- [openapi-rpc-getHealth](/pages/ephemeral-rollups-ers/api-reference/rpc/openapi/openapi-rpc-getHealth.json)
+- [openapi-rpc-getIdentity](/pages/ephemeral-rollups-ers/api-reference/rpc/openapi/openapi-rpc-getIdentity.json)
+- [openapi-rpc-getLargestAccounts](/pages/ephemeral-rollups-ers/api-reference/rpc/openapi/openapi-rpc-getLargestAccounts.json)
+- [openapi-rpc-getLatestBlockhash](/pages/ephemeral-rollups-ers/api-reference/rpc/openapi/openapi-rpc-getLatestBlockhash.json)
+- [openapi-rpc-getLeaderSchedule](/pages/ephemeral-rollups-ers/api-reference/rpc/openapi/openapi-rpc-getLeaderSchedule.json)
+- [openapi-rpc-getMinimumBalanceForRentExemption](/pages/ephemeral-rollups-ers/api-reference/rpc/openapi/openapi-rpc-getMinimumBalanceForRentExemption.json)
+- [openapi-rpc-getMultipleAccounts](/pages/ephemeral-rollups-ers/api-reference/rpc/openapi/openapi-rpc-getMultipleAccounts.json)
+- [openapi-rpc-getProgramAccounts](/pages/ephemeral-rollups-ers/api-reference/rpc/openapi/openapi-rpc-getProgramAccounts.json)
+- [openapi-rpc-getRecentPerformanceSamples](/pages/ephemeral-rollups-ers/api-reference/rpc/openapi/openapi-rpc-getRecentPerformanceSamples.json)
+- [openapi-rpc-getSignaturesForAddress](/pages/ephemeral-rollups-ers/api-reference/rpc/openapi/openapi-rpc-getSignaturesForAddress.json)
+- [openapi-rpc-getSignatureStatuses](/pages/ephemeral-rollups-ers/api-reference/rpc/openapi/openapi-rpc-getSignatureStatuses.json)
+- [openapi-rpc-getSlot](/pages/ephemeral-rollups-ers/api-reference/rpc/openapi/openapi-rpc-getSlot.json)
+- [openapi-rpc-getTokenAccountBalance](/pages/ephemeral-rollups-ers/api-reference/rpc/openapi/openapi-rpc-getTokenAccountBalance.json)
+- [openapi-rpc-getTokenAccountsByDelegate](/pages/ephemeral-rollups-ers/api-reference/rpc/openapi/openapi-rpc-getTokenAccountsByDelegate.json)
+- [openapi-rpc-getTokenAccountsByOwner](/pages/ephemeral-rollups-ers/api-reference/rpc/openapi/openapi-rpc-getTokenAccountsByOwner.json)
+- [openapi-rpc-getTokenLargestAccounts](/pages/ephemeral-rollups-ers/api-reference/rpc/openapi/openapi-rpc-getTokenLargestAccounts.json)
+- [openapi-rpc-getTokenSupply](/pages/ephemeral-rollups-ers/api-reference/rpc/openapi/openapi-rpc-getTokenSupply.json)
+- [openapi-rpc-getTransaction](/pages/ephemeral-rollups-ers/api-reference/rpc/openapi/openapi-rpc-getTransaction.json)
+- [openapi-rpc-getTransactionCount](/pages/ephemeral-rollups-ers/api-reference/rpc/openapi/openapi-rpc-getTransactionCount.json)
+- [openapi-rpc-getVersion](/pages/ephemeral-rollups-ers/api-reference/rpc/openapi/openapi-rpc-getVersion.json)
+- [openapi-rpc-isBlockhashValid](/pages/ephemeral-rollups-ers/api-reference/rpc/openapi/openapi-rpc-isBlockhashValid.json)
+- [openapi-rpc-sendTransaction](/pages/ephemeral-rollups-ers/api-reference/rpc/openapi/openapi-rpc-sendTransaction.json)
+- [openapi-rpc-simulateTransaction](/pages/ephemeral-rollups-ers/api-reference/rpc/openapi/openapi-rpc-simulateTransaction.json)
+- [deposit.openapi](/pages/ephemeral-spl-token/api-reference/openapi/deposit.openapi.json)
+- [transfer.openapi](/pages/ephemeral-spl-token/api-reference/openapi/transfer.openapi.json)
+- [withdraw.openapi](/pages/ephemeral-spl-token/api-reference/openapi/withdraw.openapi.json)
+- [balance.openapi](/pages/ephemeral-spl-token/api-reference/openapi/balance.openapi.json)
+- [initialize-mint.openapi](/pages/ephemeral-spl-token/api-reference/openapi/initialize-mint.openapi.json)
+- [is-mint-initialized.openapi](/pages/ephemeral-spl-token/api-reference/openapi/is-mint-initialized.openapi.json)
+- [undelegate-ephemeral-ata.openapi](/pages/ephemeral-spl-token/api-reference/openapi/undelegate-ephemeral-ata.openapi.json)
+- [transaction-send.openapi](/pages/ephemeral-spl-token/api-reference/openapi/transaction-send.openapi.json)
+- [challenge.openapi](/pages/ephemeral-spl-token/api-reference/openapi/challenge.openapi.json)
+- [login.openapi](/pages/ephemeral-spl-token/api-reference/openapi/login.openapi.json)
+- [private-balance.openapi](/pages/ephemeral-spl-token/api-reference/openapi/private-balance.openapi.json)
+- [stealth-pool.openapi](/pages/ephemeral-spl-token/api-reference/openapi/stealth-pool.openapi.json)
+- [transfer-queue-ensure-crank.openapi](/pages/ephemeral-spl-token/api-reference/openapi/transfer-queue-ensure-crank.openapi.json)
+- [quote.openapi](/pages/ephemeral-spl-token/api-reference/openapi/quote.openapi.json)
+- [swap.openapi](/pages/ephemeral-spl-token/api-reference/openapi/swap.openapi.json)
+- [health.openapi](/pages/ephemeral-spl-token/api-reference/openapi/health.openapi.json)
+- [mcp.openapi](/pages/ephemeral-spl-token/api-reference/openapi/mcp.openapi.json)

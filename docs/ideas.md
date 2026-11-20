@@ -14,3 +14,9 @@ A running dump of ideas. Add freely; nothing here is decided unless it's in the 
   - Possible borrow: Martingaler-style pool, so there's no seed capital and no hard bet cap, and the queue absorbs variance.
   - Possible borrow: "lose and you own the house" tokens, minted to losing bettors.
   - Possible borrow: take the fee from wins only.
+- (Bibhu, 20 Nov) Always-on rounds like the street game and his MagicBlock snake game: a timer runs, players join and wait for the next round. No "tap to start".
+- (Bibhu, 20 Nov) Per-round exposure cap: at round start, read reserves and set the round's max total bets dynamically (e.g. only a slice of the treasury/pool is at risk per round).
+- (Bibhu, 20 Nov) Queued win as a claim the winner holds: wait to get paid in full, or cash out early for a fee. Simple version: the queued win is a token they can hold, sell, or redeem early at a discount.
+- (Bibhu, 20 Nov) Delayed payout on EVERY win, not only when the pool is short: full payout after a lock period (e.g. 1 hour), or instant cash-out at ~95%. The insurance fund is the buyer of early claims: it pays 95% now, collects 100% later, keeps the 5%. Gives the pool breathing time.
+- (Bibhu, 20 Nov) Loser tokens with the same option layer: a loss gives a locked claim, not tokens right away. Hold it until it matures into house tokens, or exit early and pay a tax.
+- (Coach suggestion) Build ONE "claim" primitive (amount, unlock time, early-exit fee) and reuse it for both queued wins (pays USDC) and loser rewards (pays house tokens). One program path, two uses.

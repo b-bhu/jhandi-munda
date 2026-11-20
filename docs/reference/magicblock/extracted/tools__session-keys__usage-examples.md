@@ -1,0 +1,94 @@
+
+
+# Session Keys Usage Example
+Source: https://docs.magicblock.gg/pages/tools/session-keys/usage-examples
+
+Learn how to interact with your dApp using the useSessionKeyManager and SessionWalletProvider through various practical examples
+
+Now that you have set up the hooks and provider, let's look at some examples of using the provided methods.
+
+### Creating a Session
+
+To create a session, call the `createSession` method from the `sessionWallet`. This method accepts three parameters:
+
+1. `targetProgramPublicKey`: A `PublicKey` instance representing the target program you want to interact with.
+2. `topUp`: A boolean value, set to `true` if you want to top up a session keypair with `0.01 SOL` initially and \`false\` if you don't want to top up the session keypair.
+3. `expiryInMinutes`: An optional parameter, representing the session's expiry time in minutes. The default value is 60 minutes.
+
+```typescript theme={null}
+const handleCreateSession = async () => {
+  const targetProgramPublicKey = new PublicKey(
+    "your_target_program_public_key"
+  );
+  const topUp = true;
+  const expiryInMinutes = 60;
+
+  const session = await sessionWallet.createSession(
+    targetProgramPublicKey,
+    topUp,
+    expiryInMinutes
+  );
+
+  // you can also specify the amount you want to topUp the session wallet.
+  //This will top up the amount specified, and when revoked, send back to the authority
+  const session = await sessionWallet.createSession(
+    targetProgramPublicKey,
+    topUp ? 10000000 : 0, // 0.01 SOL
+    expiryInMinutes
+  );
+
+  if (session) {
+    console.log("Session created:", session);
+  } else {
+    console.error("Failed to create session");
+  }
+};
+```
+
+By calling `createSession`, a new ephemeral keypair is generated and stored on the client-side. The session token is then created and stored alongside the keypair. This enables the user to securely sign transactions using the generated keypair without revealing their actual wallet's private key.
+
+### Signing and Sending a Transaction
+
+To sign and send a transaction, use the `signAndSendTransaction` method. This method first signs the transaction using the ephemeral key pair created during the session. Then, it sends the signed transaction to the Solana network.
+
+```typescript theme={null}
+const handleSendTransaction = async () => {
+  const transaction = new Transaction();
+  // Add instructions to the transaction
+  const txids = await sessionWallet.signAndSendTransaction(transaction);
+
+  if (txids && txids.length > 0) {
+    console.log("Transaction sent:", txids);
+  } else {
+    console.error("Failed to send transaction");
+  }
+};
+```
+
+The `signAndSendTransaction` method provides an extra layer of security by ensuring that the actual wallet's private key is not exposed. The ephemeral key pair stored on the client-side is used to sign the transaction, thus keeping the user's main wallet secure.
+
+### Revoking a Session
+
+To revoke a session, call the `revokeSession` method from the `sessionWallet`. This method performs three actions:
+
+1. It removes the ephemeral key pair and the session token from the client-side storage.
+2. It revokes the session from the contract.
+3. Returns the lamports to the authority and closes the session token pda
+
+```typescript theme={null}
+const handleRevokeSession = async () => {
+  await sessionWallet.revokeSession();
+  console.log("Session revoked");
+};
+```
+
+Revoking a session ensures that the ephemeral key pair is no longer valid and usable.
+
+These examples should help you get started with implementing session management and wallet functionality in your app.
+
+***Please refer to the*** [***session-keys example***](https://github.com/magicblock-labs/magicblock-engine-examples/tree/main/session-keys) ***to see how the Session Token implementation is done.***
+
+Try it live at [counter-session-keys-example.magicblock.app](https://counter-session-keys-example.magicblock.app/) — a counter demo that runs on both the base layer and the Ephemeral Rollup using session keys.
+
+
+# Use session key manager

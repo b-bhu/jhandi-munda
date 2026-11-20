@@ -1,0 +1,31 @@
+
+
+# Session Keys for Solana Apps
+Source: https://docs.magicblock.gg/pages/tools/session-keys/introduction
+
+Let users act in your Solana app without approving every transaction, using session keys that are scoped to your program and expire.
+
+Session Keys are ephemeral keys scoped to one target program and an expiry, for tiered access in your Solana Programs.
+
+Session keys are a giant leap for improving UX for users as they take away the need for repeated wallet popups while a user performs actions in-game like purchases or on-chain interactions. The expiry and access are stored at the contract level, which reduces the exposure of session keys to potential security vulnerabilities, though it does not eliminate risks from browser compromise, malicious extensions, or application bugs. The session token stores only the user's wallet, the target program, the session signer and an expiry (at most one week). Any other limit, such as a maximum spend, a transaction count, or which instructions accept a session, is application policy: your program has to enforce it.
+
+You can also provide a layered security model which allows tiered access to a session key making sure a user’s assets are always secure and can’t be accessed by the session keys.
+This type of layered security is a standard model in web2 applications and provides a stronger defence against attacks and helps ensure the security of your users' asset. This is now possible in web3 with the use of Session Keys at the contract level.
+
+#### Example use cases for Session Keys
+
+* An uninterrupted gaming experience for an on-chain game.
+* A seamless experience for in-app NFTs purchase
+* A layered security model for your game/dApp
+
+> [card] [Prediction markets and trading](/pages/solutions/prediction-markets)
+>
+> Use scoped sessions for repeated orders, bets, and position updates without repeated wallet prompts.
+
+> [card] Program
+>
+> The original Session key program was developed by *[Gum](https://gum.fun/)*.
+> The newly deployed program is 'KeyspM2ssCJbqUhQ4k7sveSiY4WjnYsrXkC8oDbwde5'
+
+
+# Session Keys Security

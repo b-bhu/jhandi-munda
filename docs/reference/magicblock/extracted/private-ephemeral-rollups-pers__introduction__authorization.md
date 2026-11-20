@@ -1,0 +1,46 @@
+
+
+# Private Ephemeral Rollup Authorization
+Source: https://docs.magicblock.gg/pages/private-ephemeral-rollups-pers/introduction/authorization
+
+Control who can read each delegated account through per-account permissions on the Ephemeral Rollup.
+
+***
+
+### Authorization Model
+
+Private Ephemeral Rollups use MagicBlock's Permission Program (`ACLseoPoyC3cBqoUtkbjZ4aDrkurZW86v19pXz2XQnp1`) to control who can read each delegated account. Permissions are set per account. There are no groups.
+
+* **Ephemeral Permission**: Each delegated account can have one `EphemeralPermission` PDA. Your program creates, updates and closes it on the Ephemeral Rollup with `CreateEphemeralPermissionCpi`, `UpdateEphemeralPermissionCpi` and `CloseEphemeralPermissionCpi`, signed by the delegated account. There is no base-layer permission account to create or delegate.
+* **Privacy Flag**: `is_private` decides visibility. With `is_private: false` the account is public, whatever the member list holds. With `is_private: true` only members can read it.
+* **Members**: Each member is a public key with flags (`AUTHORITY`, `TX_LOGS`, `TX_BALANCES`, `TX_MESSAGE`, `ACCOUNT_SIGNATURES`). Each update replaces the whole member list and takes effect immediately on the Ephemeral Rollup.
+* **Access**: Client access to permissioned ER state requires authenticating ownership of a public key. Successful authentication yields a token used to query the ER.
+
+> [!NOTE]
+>
+> Private Ephemeral Rollup (devnet) endpoint:
+> `https://devnet-tee.magicblock.app?token=   {authToken}`. Replace `{authToken}` with your authorization token obtained
+> from the TEE RPC to send requests.
+
+See [Access Control](/pages/private-ephemeral-rollups-pers/how-to-guide/access-control) for the member flags and the create, update and close code.
+
+***
+
+> [card] [Access Control](/pages/private-ephemeral-rollups-pers/how-to-guide/access-control)
+>
+> Fine-grained Access Control
+
+> [card] [On-chain Privacy](/pages/private-ephemeral-rollups-pers/introduction/onchain-privacy)
+>
+> Privacy Mechanisms and Concepts
+
+> [card] [Authorization](/pages/private-ephemeral-rollups-pers/introduction/authorization)
+>
+> Authorization Framework
+
+> [card] [Compliance Framework](/pages/private-ephemeral-rollups-pers/introduction/compliance-framework)
+>
+> Compliance Standards and Guidelines
+
+
+# Private Ephemeral Rollup Compliance Framework

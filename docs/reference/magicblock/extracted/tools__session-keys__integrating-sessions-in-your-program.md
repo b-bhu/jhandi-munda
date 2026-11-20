@@ -1,0 +1,288 @@
+
+
+# Integrating Sessions in your Program
+Source: https://docs.magicblock.gg/pages/tools/session-keys/integrating-sessions-in-your-program
+
+Integrate and manage sessions in your Solana Programs
+
+This guide demonstrates how to integrate Session Keys into your Solana Anchor programs, using a simple counter program as an example.
+
+## Installation
+
+First, add the session-keys crate to your Cargo.toml:
+
+```toml theme={null}
+[dependencies]
+session-keys = { version = "3.1.1", features = ["no-entrypoint"] }
+```
+
+Or use the cargo command:
+
+```bash theme={null}
+cargo add session-keys --features no-entrypoint
+```
+
+> [!NOTE]
+>
+> This page uses the V1 `SessionToken`. The React hooks in
+> `@magicblock-labs/gum-react-sdk` (`useSessionKeyManager().createSession` and
+> `revokeSession`) create and revoke V1 tokens. The session program also has a
+> V2 `SessionTokenV2` (created with `create_session_v2`), which records the fee
+> payer and can only be revoked by its authority while active. The two types
+> are not interchangeable: an instruction that expects one rejects the other
+> with `AccountDiscriminatorMismatch` (error 3002). Use the token type that your
+> client creates. Any wallet can revoke an active V1 token.
+
+## Usage
+
+1. Importing session-keys:
+
+```rust theme={null}
+   use session_keys::{SessionError, SessionToken, session_auth_or, Session};
+```
+
+This line imports the necessary components from the session-keys crate.
+
+2. Deriving the Session trait:
+
+```rust theme={null}
+   #[derive(Accounts, Session)]
+   pub struct Increment<'info> {
+     #[account(
+        mut, 
+        seeds = [ COUNTER_SEED, counter.authority.key().as_ref() ], 
+        bump
+     )]
+     pub counter: Account<'info, Counter>,
+     ...
+   }
+```
+
+The `Session` trait is derived on the `Increment` struct, enabling session functionality.
+
+3. Defining the session token account:
+
+```rust theme={null}
+   #[session(
+       signer = signer,
+       authority = counter.authority.key() 
+   )]
+   pub session_token: Option<Account<'info, SessionToken>>,
+```
+
+This defines an optional `SessionToken` account, specifying the signer and authority for the session.
+
+* session_token.authority: account which created the session token
+* counter.authority.key(): account which created the counter
+  The authority condition checks if the session token is created by the same user as the counter.
+
+4. Using the `session_auth_or` macro:
+
+```rust theme={null}
+   #[session_auth_or(
+       ctx.accounts.counter.authority.key() == ctx.accounts.signer.key(),
+       SessionError::InvalidToken
+   )]
+   pub fn increment(ctx: Context<Increment>) -> Result<()> {
+       ...
+   }
+```
+
+This macro is applied to the `increment` function.
+It checks for a valid session token, or if not present, verifies that the signer is the counter's authority.
+
+## Full Example
+
+Here's a complete example of a counter program using session keys.
+Each user gets his own counter account, so we can show how authentication is done with session keys.
+
+```rust theme={null}
+use anchor_lang::prelude::*;
+use session_keys::{SessionError, SessionToken, session_auth_or, Session};
+
+declare_id!("...");
+const COUNTER_SEED: &[u8] = b"counter";
+
+#[program]
+pub mod counter_session {
+    use super::*;
+
+    pub fn initialize(ctx: Context<Initialize>) -> Result<()> {
+        let counter: &mut Counter = &mut ctx.accounts.counter;
+        counter.count = 0;
+        counter.authority = *ctx.accounts.owner.key;
+        Ok(())
+    }
+
+    #[session_auth_or(
+        ctx.accounts.counter.authority.key() == ctx.accounts.signer.key(),
+        SessionError::InvalidToken
+    )]
+    pub fn increment(ctx: Context<Increment>) -> Result<()> {
+        let counter: &mut Counter = &mut ctx.accounts.counter;
+        counter.count += 1;
+        Ok(())
+    }
+}
+
+#[derive(Accounts)]
+pub struct Initialize<'info> {
+    #[account(
+        init, 
+        payer = owner, 
+        space = Counter::INIT_SPACE + 8 , 
+        seeds = [ COUNTER_SEED, owner.key().as_ref() ], bump
+    )]
+    pub counter: Account<'info, Counter>,
+    #[account(mut)]
+    pub owner: Signer<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts, Session)]
+pub struct Increment<'info> {
+    #[account(
+        mut, 
+        seeds = [ COUNTER_SEED, counter.authority.key().as_ref() ], 
+        bump
+    )]
+    pub counter: Account<'info, Counter>,    
+    #[session(
+        signer = signer,
+        authority = counter.authority.key() 
+    )]
+    pub session_token: Option<Account<'info, SessionToken>>,
+    #[account(mut)]
+    pub signer: Signer<'info>,
+}
+
+#[account]
+#[derive(InitSpace)]
+pub struct Counter {
+    pub authority: Pubkey,
+    pub count: u64,
+}
+```
+
+## Tests
+
+Here's an example of how to test the counter program with session keys:
+
+```typescript theme={null}
+import * as anchor from "@project-serum/anchor";
+import { Program } from "@project-serum/anchor";
+import { CounterSession } from "../target/types/counter_session";
+import { createSessionToken } from "@session-keys/anchor";
+import { expect } from "chai";
+
+describe("counter_session", () => {
+  const provider = anchor.AnchorProvider.env();
+  anchor.setProvider(provider);
+
+  const program = anchor.workspace.CounterSession as Program<CounterSession>;
+
+  let counterPDA: anchor.web3.PublicKey;
+  let sessionToken: anchor.web3.PublicKey;
+
+  it("Initializes the counter", async () => {
+    const [pda] = await anchor.web3.PublicKey.findProgramAddress(
+      [Buffer.from("counter"), provider.wallet.publicKey.toBuffer()],
+      program.programId
+    );
+    counterPDA = pda;
+
+    await program.methods
+      .initialize()
+      .accounts({
+        counter: counterPDA,
+        owner: provider.wallet.publicKey,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .rpc();
+
+    const counterAccount = await program.account.counter.fetch(counterPDA);
+    expect(counterAccount.count).to.equal(0);
+    expect(counterAccount.authority.toString()).to.equal(provider.wallet.publicKey.toString());
+  });
+
+  it("Increments the counter without session", async () => {
+    await program.methods
+      .increment()
+      .accounts({
+        counter: counterPDA,
+        signer: provider.wallet.publicKey,
+      })
+      .rpc();
+
+    const counterAccount = await program.account.counter.fetch(counterPDA);
+    expect(counterAccount.count).to.equal(1);
+  });
+
+  it("Increments the counter with session token", async () => {
+    await program.methods
+      .increment()
+      .accounts({
+        counter: counterPDA,
+        sessionToken: sessionToken,
+        signer: provider.wallet.publicKey,
+      })
+      .rpc();
+
+    const counterAccount = await program.account.counter.fetch(counterPDA);
+    expect(counterAccount.count).to.equal(2);
+  });
+
+  it("fails to increment with wrong session token owner", async () => {
+    const user = anchor.web3.Keypair.generate();
+    await topUp(user);
+  
+    let counterPDA = await createCounterPDA(user.publicKey);    
+    await createCounter(user);
+
+    const secondUser = anchor.web3.Keypair.generate();
+    await topUp(secondUser);
+    const { sessionSigner, sessionToken } = await createSessionSigner(secondUser);    
+    
+    try {
+      await increment_with_session(counterPDA, sessionSigner, sessionToken);
+      assert(false, "Expected to fail");
+    } catch (err) {}
+
+    const counterData = await program.account.counter.fetch(counterPDA);
+    assert(counterData.count.eq(new anchor.BN(0)));
+  });
+});
+```
+
+This test suite demonstrates initializing the counter, incrementing it without a session, creating a session token, and then incrementing with the session token.
+The last test is important, as it ensures that only the owner of the counter can increment it.
+
+## Testing locally
+
+To test it locally with `solana-test-validator`, you need to start it with the session keys program and account.
+
+1. Make sure your Solana CLI points to DEVNET:
+
+```
+solana config set --url https://api.devnet.solana.com
+```
+
+2. Dump Session Keys program to local file:
+
+```
+solana program dump KeyspM2ssCJbqUhQ4k7sveSiY4WjnYsrXkC8oDbwde5 ./session-keys.so
+```
+
+3. Start solana-test-validator with session keys program and account:
+
+> `-r` - reset the ledger to genesis
+> `-ud` - URL for Solana's JSON RPC or moniker (-ud = DEVNET)
+> `--clone` - Copy an account from the cluster
+> `--bpf-program` - add a SBF program to the genesis configuration
+
+```
+solana-test-validator -ud --clone KeyspM2ssCJbqUhQ4k7sveSiY4WjnYsrXkC8oDbwde5 -r --bpf-program KeyspM2ssCJbqUhQ4k7sveSiY4WjnYsrXkC8oDbwde5 ./session-keys.so
+```
+
+
+# Session Keys for Solana Apps
