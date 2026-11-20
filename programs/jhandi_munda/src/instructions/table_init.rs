@@ -52,6 +52,7 @@ pub fn handler(ctx: Context<InitializeTable>) -> Result<()> {
     round.opened_at = 0;
     round.round_id = 0;
     round.players = Vec::new();
+    round.request_id = [0u8; 32];
     round.bump = ctx.bumps.round;
 
     msg!("Table config and idle round initialized");
