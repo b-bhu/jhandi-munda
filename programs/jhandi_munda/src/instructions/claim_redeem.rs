@@ -25,8 +25,9 @@ use anchor_lang::solana_program::{
 use crate::{
     error::ErrorCode,
     payout::take_now_payout,
-    state::{Claim, ClaimAsset, PoolState, ProgramConfig},
-    ATA_PROGRAM_ID, CLAIM_SEED, CONFIG_SEED, INSURANCE_SEED, INSURANCE_VAULT_SEED, MUNDA_DECIMALS,
+    instructions::payout_queue::enqueue,
+    state::{Claim, ClaimAsset, PayoutQueue, PoolState, ProgramConfig},
+    ATA_PROGRAM_ID, CLAIM_SEED, CONFIG_SEED, INSURANCE_SEED, INSURANCE_VAULT_SEED, MUNDA_DECIMALS, QUEUE_SEED,
     MUNDA_MINT_AUTHORITY_SEED, MUNDA_MINT_SEED, MUSD_MINT_SEED, MUSD_MINT_SPACE, POOL_SEED,
     POOL_VAULT_SEED, SPL_TOKEN_PROGRAM_ID, TOKEN_ACCOUNT_SPACE,
 };
@@ -44,7 +45,7 @@ const ATA_IX_CREATE_IDEMPOTENT: u8 = 1;
 /// A token account keeps its balance at bytes 64..72.
 const TOKEN_AMOUNT_OFFSET: usize = 64;
 
-fn token_balance(info: &AccountInfo) -> Result<u64> {
+pub(crate) fn token_balance(info: &AccountInfo) -> Result<u64> {
     let data = info.try_borrow_data()?;
     let bytes = data
         .get(TOKEN_AMOUNT_OFFSET..TOKEN_AMOUNT_OFFSET + 8)
@@ -54,7 +55,7 @@ fn token_balance(info: &AccountInfo) -> Result<u64> {
 
 /// SPL `Transfer` of `amount` from `from` to `to`, authorised by `authority`
 /// (a wallet that signed the transaction, or a PDA via `signer_seeds`).
-fn spl_transfer<'info>(
+pub(crate) fn spl_transfer<'info>(
     from: &AccountInfo<'info>,
     to: &AccountInfo<'info>,
     authority: &AccountInfo<'info>,
@@ -214,6 +215,10 @@ pub struct RedeemClaim<'info> {
     #[account(seeds = [POOL_SEED], bump)]
     pub pool: Account<'info, PoolState>,
 
+    /// The payout queue: a win the pool cannot pay now waits here (D4, D30).
+    #[account(mut, seeds = [QUEUE_SEED], bump)]
+    pub queue: AccountLoader<'info, PayoutQueue>,
+
     /// CHECK: the pool MUSD vault, seeds pin it.
     #[account(mut, seeds = [POOL_VAULT_SEED], bump)]
     pub pool_vault: UncheckedAccount<'info>,
@@ -340,15 +345,23 @@ pub fn handle_redeem_wait(ctx: Context<RedeemClaim>) -> Result<()> {
     check_token_program(&ctx)?;
     let claim = &ctx.accounts.claim;
     require!(!claim.redeemed, ErrorCode::ClaimAlreadyRedeemed);
+    require!(!claim.queued, ErrorCode::ClaimAlreadyQueued);
     require!(Clock::get()?.unix_timestamp >= claim.unlock_at, ErrorCode::ClaimLocked);
     let amount = claim.amount;
     match claim.asset {
         ClaimAsset::Musd => {
             check_player_musd_ata(&ctx)?;
-            require!(
-                token_balance(&ctx.accounts.pool_vault)? >= amount,
-                ErrorCode::InsufficientPoolFunds
-            );
+            {
+                // A win waits in the queue if the pool cannot pay it now, or if
+                // anyone is already waiting: nobody is paid ahead of the queue (D30).
+                let mut queue = ctx.accounts.queue.load_mut()?;
+                if queue.tail > queue.head || token_balance(&ctx.accounts.pool_vault)? < amount {
+                    enqueue(&mut queue, ctx.accounts.claim.key(), amount)?;
+                    ctx.accounts.claim.queued = true;
+                    msg!("Wait: {} base MUSD queued behind the pool", amount);
+                    return Ok(());
+                }
+            }
             ctx.accounts.claim.redeemed = true;
             let seeds: &[&[u8]] = &[POOL_SEED, &[ctx.accounts.pool.bump]];
             spl_transfer(
@@ -376,6 +389,7 @@ pub fn handle_redeem_take_now(ctx: Context<RedeemClaim>) -> Result<()> {
     check_token_program(&ctx)?;
     let claim = &ctx.accounts.claim;
     require!(!claim.redeemed, ErrorCode::ClaimAlreadyRedeemed);
+    require!(!claim.queued, ErrorCode::ClaimAlreadyQueued);
     let amount = claim.amount;
     let payout = take_now_payout(amount, claim.early_exit_bps);
     match claim.asset {

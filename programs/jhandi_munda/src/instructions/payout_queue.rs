@@ -1,6 +1,7 @@
-//! The FIFO payout queue account (D4, D30; #29). The queue is created empty here.
-//! Enqueueing a win the pool cannot pay (#30) and paying the head (#31) come in
-//! the next steps.
+//! The FIFO payout queue (D4, D30; #29, #30).
+//!
+//! When the pool cannot pay a win, the win joins the back of the queue instead of
+//! failing (`enqueue`, called from `redeem_wait`). Paying the head comes in 8.3.
 //!
 //! The queue lives on Solana (base layer). It is a single zero-copy account of
 //! about 4 KB, under the 10,240-byte ER commit cap.
@@ -8,9 +9,19 @@
 use anchor_lang::prelude::*;
 
 use crate::{
-    state::PayoutQueue,
-    QUEUE_SEED,
+    error::ErrorCode,
+    state::{PayoutQueue, QueueEntry},
+    QUEUE_CAPACITY, QUEUE_SEED,
 };
+
+/// Adds a win to the back of the queue. Fails with `QueueFull` at capacity.
+pub fn enqueue(queue: &mut PayoutQueue, claim: Pubkey, amount: u64) -> Result<()> {
+    require!(queue.tail - queue.head < QUEUE_CAPACITY as u64, ErrorCode::QueueFull);
+    let slot = (queue.tail % QUEUE_CAPACITY as u64) as usize;
+    queue.entries[slot] = QueueEntry { claim, amount };
+    queue.tail += 1;
+    Ok(())
+}
 
 #[derive(Accounts)]
 pub struct InitQueue<'info> {
