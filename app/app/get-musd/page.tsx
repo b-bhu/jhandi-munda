@@ -5,8 +5,9 @@
  *
  * One page, one button: click connects the browser wallet, then calls the
  * devnet `musd_faucet` instruction, which mints 100 MUSD to the caller's
- * canonical MUSD ATA. The mint address and an Explorer link (?cluster=devnet)
- * are shown. Devnet only — this never touches mainnet or real funds.
+ * canonical MUSD ATA (once per wallet per hour, the faucet cooldown, D33).
+ * The mint address and an Explorer link (?cluster=devnet) are shown.
+ * Devnet only — this never touches mainnet or real funds.
  */
 
 import Link from "next/link";
@@ -31,6 +32,10 @@ const MUSD_MINT_AUTHORITY = PublicKey.findProgramAddressSync(
   [seed("musd_mint_authority")],
   PROGRAM_ID,
 )[0];
+/** The wallet's faucet cooldown record (D33), seeded ["faucet", wallet]. */
+function faucetRecord(wallet: PublicKey): PublicKey {
+  return PublicKey.findProgramAddressSync([seed("faucet"), wallet.toBytes()], PROGRAM_ID)[0];
+}
 const SPL_TOKEN_PROGRAM = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
 const ATA_PROGRAM = new PublicKey("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
 const SYSTEM_PROGRAM = SystemProgram.programId;
@@ -122,6 +127,7 @@ export default function GetMusdPage() {
           { pubkey: MUSD_MINT, isSigner: false, isWritable: true },
           { pubkey: MUSD_MINT_AUTHORITY, isSigner: false, isWritable: false },
           { pubkey: publicKey, isSigner: true, isWritable: true },
+          { pubkey: faucetRecord(publicKey), isSigner: false, isWritable: true },
           { pubkey: musdAta(publicKey), isSigner: false, isWritable: true },
           { pubkey: ATA_PROGRAM, isSigner: false, isWritable: false },
           { pubkey: SPL_TOKEN_PROGRAM, isSigner: false, isWritable: false },

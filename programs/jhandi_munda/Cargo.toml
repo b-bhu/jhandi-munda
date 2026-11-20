@@ -21,7 +21,9 @@ custom-panic = []
 
 
 [dependencies]
-anchor-lang = "=1.0.2"
+# init-if-needed: the faucet's per-wallet cooldown record (D33) is created on
+# the wallet's first claim via init_if_needed. Version stays pinned.
+anchor-lang = { version = "=1.0.2", features = ["init-if-needed"] }
 ephemeral-rollups-sdk = { version = "=0.18.0", features = ["anchor", "vrf"] }
 session-keys = { version = "=3.1.1", features = ["no-entrypoint"] }
 

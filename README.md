@@ -18,7 +18,7 @@ It should be the mela street game: a flashy dealer, a worn cloth board, the bowl
 ## Decided so far
 
 - **Counterparty:** a shared house pool. Anyone can deposit into the pool and become part of the house. Players bet against the pool.
-- **Test dollar:** MUSD (Munda USD), 6 decimals like USDC (so 1 MUSD = 1_000_000 units). Our own devnet stablecoin at $1, created and controlled by the program as PDAs (D21, D26). No real USDC. The `musd_faucet` instruction mints 100 MUSD per call to the caller's associated token account (created if needed), no cap.
+- **Test dollar:** MUSD (Munda USD), 6 decimals like USDC (so 1 MUSD = 1_000_000 units). Our own devnet stablecoin at $1, created and controlled by the program as PDAs (D21, D26). No real USDC. The `musd_faucet` instruction mints 100 MUSD per call to the caller's associated token account (created if needed), at most once per wallet per hour (D33 cooldown, wallet record at `["faucet", wallet]`).
 
 ## Open for brainstorming
 

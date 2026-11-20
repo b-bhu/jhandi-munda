@@ -43,6 +43,10 @@ const MUSD_MINT_AUTHORITY_PDA = PublicKey.findProgramAddressSync(
   [seed("musd_mint_authority")],
   PROGRAM_ID,
 )[0];
+/** The wallet's faucet cooldown record (D33), seeded ["faucet", wallet]. */
+function faucetRecordPda(wallet) {
+  return PublicKey.findProgramAddressSync([seed("faucet"), wallet.toBytes()], PROGRAM_ID)[0];
+}
 const ATA_PROGRAM_ID = new PublicKey("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
 const SPL_TOKEN_PROGRAM_ID = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
 
@@ -92,7 +96,8 @@ function loadWallet(keyPath) {
 // initialize: config(mut), musd_mint(mut), musd_mint_authority, payer(mut sign),
 //             token_program, system_program
 // musd_faucet: config, musd_mint(mut), musd_mint_authority, wallet(mut sign),
-//             destination(mut), associated_token_program, token_program, system_program
+//             faucet_record(mut), destination(mut), associated_token_program,
+//             token_program, system_program
 function initializeIx(payer) {
   return new TransactionInstruction({
     programId: PROGRAM_ID,
@@ -116,6 +121,7 @@ function faucetIx(wallet) {
       { pubkey: MUSD_MINT_PDA, isSigner: false, isWritable: true },
       { pubkey: MUSD_MINT_AUTHORITY_PDA, isSigner: false, isWritable: false },
       { pubkey: wallet.publicKey, isSigner: true, isWritable: true },
+      { pubkey: faucetRecordPda(wallet.publicKey), isSigner: false, isWritable: true },
       { pubkey: musdAta(wallet.publicKey), isSigner: false, isWritable: true },
       { pubkey: ATA_PROGRAM_ID, isSigner: false, isWritable: false },
       { pubkey: SPL_TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
