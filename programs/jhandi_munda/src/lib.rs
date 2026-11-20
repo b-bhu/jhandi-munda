@@ -26,4 +26,8 @@ pub mod jhandi_munda {
     pub fn initialize_pool(ctx: Context<InitializePool>) -> Result<()> {
         pool_init::handler(ctx)
     }
+
+    pub fn deposit(ctx: Context<Deposit>, amount: u64) -> Result<()> {
+        pool_deposit::handler(ctx, amount)
+    }
 }
