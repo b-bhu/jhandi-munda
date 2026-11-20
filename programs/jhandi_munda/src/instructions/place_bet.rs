@@ -1,8 +1,9 @@
-//! `place_bet` (D3, D5, D31): the first bet of a round opens it. The round
-//! must be idle; the bet must be at least the table minimum (and under the max
-//! when that cap is switched on, D6). The stake moves from the bettor's MUSD
-//! ATA into the pool vault, and the round records `opened_at` from the Clock,
-//! the 90 s timer's start (D8). Joining an open round is a later step.
+//! `place_bet` (D3, D5, D10, D25, D31): a bet on one die face. The first bet of
+//! an idle round opens it and records `opened_at` from the Clock. Later bets
+//! join the open round: a wallet can bet on several faces (D10), and at most
+//! `MAX_PLAYERS` distinct wallets sit in one round (D25). The stake moves from
+//! the bettor's MUSD ATA into the pool vault. The 90 s timer is not enforced
+//! here yet (4.4).
 
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::{
@@ -13,28 +14,37 @@ use anchor_lang::solana_program::{
 use crate::{
     error::ErrorCode,
     state::{Bet, PoolState, Round, RoundStatus, TableConfig},
-    BET_SEED, POOL_SEED, POOL_VAULT_SEED, ROUND_SEED, SPL_TOKEN_PROGRAM_ID, TABLE_SEED,
+    BET_SEED, MAX_PLAYERS, POOL_SEED, POOL_VAULT_SEED, ROUND_SEED, SPL_TOKEN_PROGRAM_ID,
+    TABLE_SEED,
 };
 
 /// SPL token `Transfer` (opcode 3): data [3][amount u64 LE].
 const TOKEN_IX_TRANSFER: u8 = 3;
 
 #[derive(Accounts)]
+#[instruction(symbol: u8, amount: u64)]
 pub struct PlaceBet<'info> {
-    /// Table settings: round length, min bet, max-bet switch (D3, D6).
+    /// Table settings: min bet, max-bet switch (D3, D6).
     #[account(seeds = [TABLE_SEED], bump)]
     pub table: Account<'info, TableConfig>,
 
-    /// The table's round account. Opened by this bet when idle.
+    /// The table's round account. Opened by the first bet, joined by the rest.
     #[account(mut, seeds = [ROUND_SEED], bump)]
     pub round: Account<'info, Round>,
 
-    /// The bettor's bet record, created here.
+    /// This wallet's bet on this die face in this round, created here. Its
+    /// seeds include the round id and the symbol, so one wallet can hold one
+    /// bet per face per round.
     #[account(
         init,
         payer = bettor,
         space = 8 + Bet::INIT_SPACE,
-        seeds = [BET_SEED, bettor.key().as_ref()],
+        seeds = [
+            BET_SEED,
+            round.round_id.to_le_bytes().as_ref(),
+            bettor.key().as_ref(),
+            &[symbol],
+        ],
         bump
     )]
     pub bet: Account<'info, Bet>,
@@ -68,11 +78,6 @@ pub fn handler(ctx: Context<PlaceBet>, symbol: u8, amount: u64) -> Result<()> {
         SPL_TOKEN_PROGRAM_ID,
         ErrorCode::InvalidTokenProgram
     );
-    // Only a round with nobody in it can be opened; joining is a later step.
-    require!(
-        ctx.accounts.round.status == RoundStatus::Idle,
-        ErrorCode::RoundAlreadyOpen
-    );
     require!((1..=6).contains(&symbol), ErrorCode::InvalidSymbol);
     let table = &ctx.accounts.table;
     require!(amount >= table.min_bet, ErrorCode::BetBelowMinimum);
@@ -84,6 +89,14 @@ pub fn handler(ctx: Context<PlaceBet>, symbol: u8, amount: u64) -> Result<()> {
         ctx.accounts.bettor_ata.key(),
         crate::musd_ata(&bettor, &ctx.accounts.pool.musd_mint),
         ErrorCode::InvalidAtaAddress
+    );
+
+    // A wallet already in the round does not take a seat; a new wallet needs
+    // one of the MAX_PLAYERS seats (D25).
+    let is_new_player = !ctx.accounts.round.players.contains(&bettor);
+    require!(
+        !is_new_player || ctx.accounts.round.players.len() < MAX_PLAYERS,
+        ErrorCode::TableFull
     );
 
     // Stake into the pool vault, signed by the bettor.
@@ -108,12 +121,16 @@ pub fn handler(ctx: Context<PlaceBet>, symbol: u8, amount: u64) -> Result<()> {
         ],
     )?;
 
-    // The first bet opens the round and starts the 90 s timer (D31, D8).
+    // The first bet opens an idle round and starts the clock (D31, D8).
     let now = Clock::get()?.unix_timestamp;
     let round = &mut ctx.accounts.round;
-    round.status = RoundStatus::Open;
-    round.opened_at = now;
-    round.player_count = 1;
+    if is_new_player {
+        round.players.push(bettor);
+    }
+    if round.status == RoundStatus::Idle {
+        round.status = RoundStatus::Open;
+        round.opened_at = now;
+    }
 
     let bet = &mut ctx.accounts.bet;
     bet.player = bettor;
@@ -121,6 +138,6 @@ pub fn handler(ctx: Context<PlaceBet>, symbol: u8, amount: u64) -> Result<()> {
     bet.symbol = symbol;
     bet.bump = ctx.bumps.bet;
 
-    msg!("Round opened at {} by a bet of {} base MUSD", now, amount);
+    msg!("Bet of {} base MUSD on face {} in round {}", amount, symbol, round.round_id);
     Ok(())
 }

@@ -92,8 +92,13 @@ pub struct Round {
     pub status: RoundStatus,
     /// Unix timestamp the round opened (Clock, not slots). 0 while idle.
     pub opened_at: i64,
-    /// Number of players in the current round. 0 while idle.
-    pub player_count: u16,
+    /// Round counter: starts at 0, settle bumps it later. Part of every bet's
+    /// seeds, so each round's bets are separate accounts.
+    pub round_id: u64,
+    /// Distinct players in this round, at most 10 (D25). The count is
+    /// `players.len()`.
+    #[max_len(10)]
+    pub players: Vec<Pubkey>,
     /// Bump seed for the round PDA.
     pub bump: u8,
 }

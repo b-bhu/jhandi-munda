@@ -59,6 +59,6 @@ fn test_round_account_init() {
     let r = Round::try_deserialize(&mut data).expect("round must decode");
     assert_eq!(r.status, RoundStatus::Idle, "a new round must start idle");
     assert_eq!(r.opened_at, 0, "an idle round has no open timestamp");
-    assert_eq!(r.player_count, 0, "an idle round has no players");
+    assert!(r.players.is_empty(), "an idle round has no players");
     assert_eq!(r.bump, round_bump);
 }
