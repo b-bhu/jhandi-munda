@@ -15,3 +15,7 @@ Step 2: MUSD test mint + faucet on devnet, with an Explorer link. First explain 
 
 ## Notes
 - Rust/Anchor is Bibhu's stated bottleneck. In Phase 2, explain each Anchor piece in plain words, with a TypeScript comparison, before writing it.
+
+## Now (20 Nov, afternoon)
+- Hermes is on Step 2.2 (#3, faucet). Next: verify its PR on the box, then teach token accounts (ATA = a player's wallet pocket for one token) before Step 2.3.
+- Small fix pending: Anchor.toml wallet path / `anchor test` on box; misleading comment in initialize.rs.

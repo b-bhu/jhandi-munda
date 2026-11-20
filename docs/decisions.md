@@ -63,3 +63,5 @@ Answers from the planning Q&A, in order.
 32. **Demo story:** the pitch shows a 50-round simulation where the pool survives a 101x jackpot.
    - *Why:* it answers the judge's "the pool just paid 101x, now what?" with something they can see.
    - *Why (29–32):* coach recommendations accepted in rapid fire (20 Nov).
+33. **Faucet limit:** the MUSD faucet gives 100 MUSD per call, with a 1-hour cooldown per wallet (added as Step 2.4, after the basic faucet works).
+   - *Why:* a PDA locks *who* can print, but not *how often*. Without a rule in the faucet, one script could print unlimited chips and fake pool deposits or wins. Coach recommendation after Bibhu's PDA answer (20 Nov).

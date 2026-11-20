@@ -53,3 +53,9 @@
 - Wrap-up Q2 (explain without looking): core flow right (pick symbol, bet, dealer rolls, paid by math after some time). Missing unprompted: the claim (wait 90 s or 95% now), 2% fee on profit, loss -> MUNDA claim, pool/queue paying. Partial. Add to spaced recall.
 - Wrap-up Q3 (apply today): Bibhu fuzzy on how to start; handed lead to me. Explained Step 1 spec (scaffold, pinned versions) and Step 2 (MUSD faucet = first visible thing). Phase 1 CLOSED. Phase 2 Step 1 started on the box.
 - Step 1 DONE: anchor build + test pass, next build pass, pinned versions in README, commits 8b5b98b, da4c30e. Box ran low on inodes mid-build (other projects' node_modules); caches cleared, nothing deleted.
+
+## 2026-11-20 (afternoon): first Hermes loop
+- Repo issue-driven: 3 milestones, 22 epics, 62 small jobs. Hermes on VPS takes the `next-up` issue, opens a PR; coach builds/tests on the box.
+- Step 2.1 (PR #85) verified: build ok, 3 LiteSVM tests pass, mint authority is a PDA. Merged. `next-up` moved to #3 (Step 2.2 faucet).
+- Taught: accounts as "boxes" (DB rows owned by a program), mint vs config, PDAs. Bibhu: only the program mints (demonstrated). PDA question: half right, derive vs sign corrected.
+- Decision 33: faucet cooldown, new issue Step 2.4.
