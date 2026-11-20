@@ -1,0 +1,25 @@
+# Rust / Anchor
+target/
+.anchor/
+test-ledger/
+.surfpool/
+**/*.rs.bk
+
+# Keys (never commit). Program/wallet keypairs live in target/deploy, keys/ or ~/.config/solana
+keys/
+*-keypair.json
+
+# JS
+node_modules/
+.next/
+out/
+.pnpm-store/
+*.tsbuildinfo
+next-env.d.ts
+
+# Env / secrets
+.env*
+!.env.example
+
+# OS
+.DS_Store

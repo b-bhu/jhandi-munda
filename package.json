@@ -3,11 +3,14 @@
   "version": "1.0.0",
   "description": "Jhandi Munda Casino: the street dice game, onchain.",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "program:build": "bash -c 'source scripts/env.sh && anchor build'",
+    "program:test": "bash -c 'source scripts/env.sh && cargo test'",
+    "app:dev": "pnpm --dir app dev",
+    "app:build": "pnpm --dir app build"
   },
   "keywords": [],
   "author": "",
-  "license": "ISC",
+  "license": "UNLICENSED",
   "packageManager": "pnpm@10.34.6",
   "private": true
 }
