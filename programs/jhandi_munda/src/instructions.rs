@@ -5,6 +5,7 @@ pub mod pool_init;
 pub mod place_bet;
 pub mod callback_roll;
 pub mod request_roll;
+pub mod settle;
 pub mod pool_withdraw;
 pub mod table_init;
 
@@ -26,6 +27,8 @@ pub use place_bet::*;
 pub use callback_roll::*;
 #[allow(ambiguous_glob_reexports)]
 pub use request_roll::*;
+#[allow(ambiguous_glob_reexports)]
+pub use settle::*;
 #[allow(ambiguous_glob_reexports)]
 pub use pool_withdraw::*;
 #[allow(ambiguous_glob_reexports)]

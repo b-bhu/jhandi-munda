@@ -1,9 +1,11 @@
 use {
     anchor_lang::{
-        prelude::*, solana_program::instruction::Instruction, InstructionData, ToAccountMetas,
+        prelude::*,
+        solana_program::instruction::{AccountMeta, Instruction},
+        InstructionData, ToAccountMetas,
     },
     jhandi_munda::{
-        state::{Bet, Round, RoundStatus},
+        state::{Bet, Round, RoundStatus, TableConfig},
         BET_SEED, CONFIG_SEED, FAUCET_RECORD_SEED, MUSD_MINT_AUTHORITY_SEED, MUSD_MINT_SEED,
         POOL_SEED, POOL_VAULT_SEED, ROUND_SEED, SHARE_MINT_SEED, SPL_TOKEN_PROGRAM_ID, TABLE_SEED,
     },
@@ -423,4 +425,82 @@ fn test_unexpected_vrf_callback_rejected() {
     assert!(send_callback(&mut t, &bob, counting_randomness(), request_id).is_ok());
     assert!(send_callback(&mut t, &bob, counting_randomness(), request_id).is_err());
     assert_eq!(round(&t).status, RoundStatus::Rolled);
+}
+
+// Settles round 0 with the given bet accounts as remaining accounts.
+fn settle(t: &mut Table, signer: &Keypair, bets: &[Pubkey]) -> TransactionResult {
+    let mut instruction = ix(
+        jhandi_munda::accounts::Settle { table: t.table, round: t.round },
+        jhandi_munda::instruction::Settle {},
+    );
+    for bet in bets {
+        instruction.accounts.push(AccountMeta::new(*bet, false));
+    }
+    send(&mut t.svm, signer, instruction)
+}
+
+fn bet_pda(wallet: &Keypair, symbol: u8) -> Pubkey {
+    pda(&[BET_SEED, &0u64.to_le_bytes(), wallet.pubkey().as_ref(), &[symbol]])
+}
+
+#[test]
+fn test_settle_known_dice() {
+    let mut t = setup();
+    stub_vrf(&mut t);
+    let alice = new_player(&mut t);
+    let bob = new_player(&mut t);
+    let carol = new_player(&mut t);
+
+    // Three bets: Alice $10 on face 2, Bob $1 on face 4, Carol $1 on face 2.
+    assert!(place(&mut t, &alice, 2, 10_000_000).is_ok());
+    assert!(place(&mut t, &bob, 4, 1_000_000).is_ok());
+    assert!(place(&mut t, &carol, 2, 1_000_000).is_ok());
+    let bets = [bet_pda(&alice, 2), bet_pda(&bob, 4), bet_pda(&carol, 2)];
+
+    // Settle before the faces exist (round still open) is rejected.
+    assert!(settle(&mut t, &bob, &bets).is_err(), "no settle before the window closes");
+
+    set_time(&mut t, BASE_TIME + 90);
+    assert!(request_roll(&mut t, &bob).is_ok());
+    assert!(settle(&mut t, &bob, &bets).is_err(), "no settle while the roll is pending");
+
+    // Known dice: bytes 1,1,4,5,0,2 map to faces 2,2,5,6,1,3 (face = byte % 6 + 1).
+    let mut randomness = [0u8; 32];
+    randomness[..6].copy_from_slice(&[1, 1, 4, 5, 0, 2]);
+    let request_id = round(&t).request_id;
+    assert!(send_callback(&mut t, &bob, randomness, request_id).is_ok());
+    assert_eq!(round(&t).faces, [2, 2, 5, 6, 1, 3]);
+
+    // Settle with every bet: a 2-match win, a loss and a 2-match win.
+    let res = settle(&mut t, &bob, &bets);
+    assert!(res.is_ok(), "settle failed: {:?}", res.err());
+
+    // Alice $10 on face 2 (two matches, 3x): owed $29.60, fee $0.40.
+    // Carol $1 on face 2 (two matches, 3x): owed $2.96, fee $0.04.
+    // Bob $1 on face 4 (no matches): loses, owed $0, no fee.
+    assert_eq!(bet(&t, &alice, 2).owed, 29_600_000);
+    assert_eq!(bet(&t, &bob, 4).owed, 0);
+    assert_eq!(bet(&t, &carol, 2).owed, 2_960_000);
+    assert!(bet(&t, &alice, 2).settled && bet(&t, &bob, 4).settled && bet(&t, &carol, 2).settled);
+
+    // Fees: 0.44 in total, split 20/10/70 per win (D15).
+    let table = TableConfig::try_deserialize(
+        &mut t.svm.get_account(&t.table).unwrap().data.as_slice(),
+    )
+    .unwrap();
+    assert_eq!(table.fee_treasury, 88_000, "20% pot: 80,000 + 8,000");
+    assert_eq!(table.fee_devs, 44_000, "10% pot: 40,000 + 4,000");
+    assert_eq!(table.fee_stakers, 308_000, "70% pot: 280,000 + 28,000");
+
+    // Nothing moved: all $12 of stakes, winners and losers alike, stay in the pool vault.
+    assert_eq!(token_amount(&t.svm, &t.vault), 12_000_000);
+
+    // The round is idle again for the next round.
+    let r = round(&t);
+    assert_eq!(r.status, RoundStatus::Idle);
+    assert_eq!(r.round_id, 1, "settle bumps the round id");
+    assert_eq!(r.bet_count, 0);
+
+    // A second settle of the same round is rejected.
+    assert!(settle(&mut t, &bob, &bets).is_err(), "a second settle must be rejected");
 }

@@ -1,6 +1,7 @@
 pub mod constants;
 pub mod error;
 pub mod instructions;
+pub mod payout;
 pub mod state;
 
 use anchor_lang::prelude::*;
@@ -45,6 +46,10 @@ pub mod jhandi_munda {
 
     pub fn request_roll(ctx: Context<RequestRoll>) -> Result<()> {
         request_roll::handler(ctx)
+    }
+
+    pub fn settle(ctx: Context<Settle>) -> Result<()> {
+        settle::handler(ctx)
     }
 
     pub fn callback_roll_dice(
