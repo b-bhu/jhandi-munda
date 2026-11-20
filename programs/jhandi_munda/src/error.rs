@@ -26,4 +26,6 @@ pub enum ErrorCode {
     InvalidSymbol,
     #[msg("The table already has its maximum of 10 players this round")]
     TableFull,
+    #[msg("The 90-second join window for this round has closed")]
+    BettingClosed,
 }

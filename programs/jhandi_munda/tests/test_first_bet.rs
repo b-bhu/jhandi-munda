@@ -251,3 +251,32 @@ fn test_eleventh_player_rejected() {
     assert!(place(&mut t, &players[0], 2, 1_000_000).is_ok());
     assert_eq!(round(&t).players.len(), 10);
 }
+
+// Clock warp: rewrites the Clock sysvar that `Clock::get()` reads inside the
+// program. Only `unix_timestamp` moves; the timer never looks at slots (D8).
+fn set_time(t: &mut Table, unix_timestamp: i64) {
+    let mut clock = t.svm.get_sysvar::<Clock>();
+    clock.unix_timestamp = unix_timestamp;
+    t.svm.set_sysvar::<Clock>(&clock);
+}
+
+#[test]
+fn test_bet_rejected_after_90s() {
+    let mut t = setup();
+    let alice = new_player(&mut t);
+    let bob = new_player(&mut t);
+    let carol = new_player(&mut t);
+
+    // Alice opens the round at BASE_TIME.
+    assert!(place(&mut t, &alice, 3, 10_000_000).is_ok());
+
+    // Bob bets at 89 s, one second before the deadline: it still counts.
+    set_time(&mut t, BASE_TIME + 89);
+    assert!(place(&mut t, &bob, 5, 1_000_000).is_ok(), "a bet at 89 s must count");
+
+    // Carol bets at 90 s, the deadline: the window is closed.
+    set_time(&mut t, BASE_TIME + 90);
+    assert!(place(&mut t, &carol, 5, 1_000_000).is_err(), "a bet at 90 s must be rejected");
+    assert_eq!(round(&t).players, vec![alice.pubkey(), bob.pubkey()]);
+    assert_eq!(round(&t).opened_at, BASE_TIME, "closing must not move opened_at");
+}
