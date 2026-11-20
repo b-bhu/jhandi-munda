@@ -33,6 +33,9 @@ pub const ROUND_SEED: &[u8] = b"round";
 /// Round length: 90 seconds start to finish (D8). Stored in `TableConfig`.
 pub const ROUND_LENGTH_SECS: i64 = 90;
 
+/// Bet record PDA seed: `["bet", player_pubkey]` (one bet per wallet for now).
+pub const BET_SEED: &[u8] = b"bet";
+
 /// Minimum bet: $1 MUSD in base units (D3).
 pub const MIN_BET: u64 = 1_000_000;
 
