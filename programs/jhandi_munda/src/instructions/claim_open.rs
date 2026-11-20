@@ -58,6 +58,7 @@ pub fn handle_open_claim(ctx: Context<OpenClaim>) -> Result<()> {
     claim.unlock_at = unlock_at;
     claim.early_exit_bps = early_exit_bps;
     claim.redeemed = false;
+    claim.queued = false;
     claim.insurance_owed = 0;
     claim.bump = ctx.bumps.claim;
 

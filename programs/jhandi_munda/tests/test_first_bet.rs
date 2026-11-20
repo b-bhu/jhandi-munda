@@ -8,7 +8,7 @@ use {
         state::{Bet, Claim, ClaimAsset, Round, RoundStatus, TableConfig},
         BET_SEED, CLAIM_SEED, CONFIG_SEED, INSURANCE_SEED, INSURANCE_VAULT_SEED, MUNDA_MINT_AUTHORITY_SEED,
         MUNDA_MINT_SEED, FAUCET_RECORD_SEED, MUSD_MINT_AUTHORITY_SEED, MUSD_MINT_SEED,
-        POOL_SEED, POOL_VAULT_SEED, ROUND_SEED, SHARE_MINT_SEED, SPL_TOKEN_PROGRAM_ID, TABLE_SEED,
+        POOL_SEED, POOL_VAULT_SEED, QUEUE_SEED, ROUND_SEED, SHARE_MINT_SEED, SPL_TOKEN_PROGRAM_ID, TABLE_SEED,
     },
     litesvm::{types::TransactionResult, LiteSVM},
     solana_keypair::Keypair,
@@ -114,6 +114,14 @@ fn setup() -> Table {
                 system_program: SYS,
             },
             jhandi_munda::instruction::InitializeTable {},
+        ),
+        ix(
+            jhandi_munda::accounts::InitQueue {
+                queue: pda(&[QUEUE_SEED]),
+                payer: a.pubkey(),
+                system_program: SYS,
+            },
+            jhandi_munda::instruction::InitQueue {},
         ),
     ];
     for step in steps {
@@ -901,4 +909,18 @@ fn test_loss_redeem_now_10_percent_tax() {
     assert_eq!(munda_supply(&t), 900_000, "only the 90% is ever minted");
     assert!(claim(&t, &bet).redeemed);
     assert!(take_now(&mut t, &bob, &bet).is_err(), "a claim redeems once");
+}
+
+#[test]
+fn test_queue_init_empty() {
+    let t = setup();
+    let acc = t.svm.get_account(&pda(&[QUEUE_SEED])).expect("queue PDA must exist");
+    assert_eq!(acc.owner, jhandi_munda::id(), "queue belongs to the program");
+    // Layout: 8-byte discriminator, then head (u64) and tail (u64).
+    let head = u64::from_le_bytes(acc.data[8..16].try_into().unwrap());
+    let tail = u64::from_le_bytes(acc.data[16..24].try_into().unwrap());
+    assert_eq!(head, 0, "an empty queue has head 0");
+    assert_eq!(tail, head, "an empty queue has tail == head");
+    assert_eq!(tail - head, 0, "length is 0");
+    assert!(acc.data.len() < 10_240, "the queue fits the 10,240-byte ER cap");
 }

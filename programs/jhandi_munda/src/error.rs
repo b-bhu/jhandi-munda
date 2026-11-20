@@ -60,6 +60,12 @@ pub enum ErrorCode {
     NothingToCollect,
     #[msg("A token account does not have the expected layout")]
     InvalidTokenAccount,
+    #[msg("The payout queue is full")]
+    QueueFull,
+    #[msg("Queue payouts must be passed in strict first-in, first-out order")]
+    QueueOrderMismatch,
+    #[msg("This claim is waiting in the payout queue")]
+    ClaimAlreadyQueued,
     #[msg("A payout or fee amount overflowed")]
     MathOverflow,
 }
