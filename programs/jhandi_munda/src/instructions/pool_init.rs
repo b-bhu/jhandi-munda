@@ -12,9 +12,9 @@ use anchor_lang::solana_program::{
 };
 
 use crate::{
-    error::ErrorCode, state::PoolState, CONFIG_SEED, MUSD_DECIMALS, MUSD_MINT_SEED,
-    MUSD_MINT_SPACE, POOL_SEED, POOL_VAULT_SEED, SHARE_MINT_SEED, SPL_TOKEN_PROGRAM_ID,
-    TOKEN_ACCOUNT_SPACE,
+    error::ErrorCode, state::{PoolState, ProgramConfig}, CONFIG_SEED, MUSD_DECIMALS,
+    MUSD_MINT_SEED, MUSD_MINT_SPACE, POOL_SEED, POOL_VAULT_SEED, SHARE_MINT_SEED,
+    SPL_TOKEN_PROGRAM_ID, TOKEN_ACCOUNT_SPACE,
 };
 
 /// SPL token `InitializeAccount3` (opcode 18): data [18][authority 32 bytes].

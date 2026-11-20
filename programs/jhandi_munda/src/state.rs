@@ -47,10 +47,13 @@ pub fn nav_per_share(vault_amount: u64, share_supply: u64) -> u64 {
         // Empty pool: NAV is $1.00 by definition.
         return 1_000_000;
     }
-    // NAV = vault / shares. The multiply overflows only above ~$18.4M of MUSD
-    // per share, unreachable with the 100 MUSD/hour faucet on devnet; the
-    // deposit step should use checked math for pricing shares anyway.
-    (vault_amount * 1_000_000) / share_supply
+    // NAV = vault / shares, scaled x1_000_000. The multiply runs in u128: in
+    // plain u64 it already overflows once the *whole vault* passes ~18.4M
+    // MUSD (u64::MAX / 1_000_000 base units), whatever the share count. Only
+    // then could the final value also miss u64, so it saturates. The deposit
+    // step should use checked math for pricing shares anyway.
+    let nav = (vault_amount as u128 * 1_000_000) / share_supply as u128;
+    u64::try_from(nav).unwrap_or(u64::MAX)
 }
 
 /// The MUSD faucet cooldown record for one wallet (D33): a small PDA at
