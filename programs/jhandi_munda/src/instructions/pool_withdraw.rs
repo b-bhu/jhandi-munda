@@ -1,7 +1,9 @@
 //! The pool withdraw instruction (D4, D27): the holder burns pool shares and
-//! receives MUSD from the vault at the current NAV. The NAV is still the $1.00
-//! happy path (a profit mock is a later step), so shares pay out 1:1: 40
-//! shares back = 40 MUSD. Zero and over-balance withdraws are rejected.
+//! receives MUSD from the vault at the current NAV: `shares × vault / supply`,
+//! floored in the pool's favour. The payout is 1:1 only while the pool itself
+//! is 1:1 (40 shares back = 40 MUSD); MUSD transferred straight into the
+//! vault (Step 3.4's mocked pool profit) reprices every withdraw above 1:1.
+//! Zero and over-balance withdraws are rejected.
 
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::{
@@ -121,8 +123,9 @@ pub fn handler(ctx: Context<Withdraw>, amount: u64) -> Result<()> {
     // Price before any token moves (D27): `amount × vault / supply`, floored
     // in the pool's favour. The supply cannot be zero here — the balance
     // check above proves the holder owns real shares — but an odd state is
-    // guarded anyway. NAV is still $1.00 in the happy path, so the payout is
-    // 1:1 with the shares burnt.
+    // guarded anyway. The payout is 1:1 only while vault == supply; any extra
+    // vaulted MUSD (Step 3.4's mocked profit, later a real one) prices it
+    // above 1:1.
     let vault_amount = token_u64(&ctx.accounts.vault.to_account_info(), TOKEN_AMOUNT_OFFSET)?;
     let share_supply = token_u64(
         &ctx.accounts.share_mint.to_account_info(),
