@@ -115,6 +115,8 @@ pub struct Round {
     pub faces: [u8; 6],
     /// Number of bets in this round. Settle must see exactly this many.
     pub bet_count: u16,
+    /// Bets settled so far, across however many `settle_bets` calls.
+    pub settled_count: u16,
     /// Bump seed for the round PDA.
     pub bump: u8,
 }

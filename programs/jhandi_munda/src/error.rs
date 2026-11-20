@@ -42,8 +42,10 @@ pub enum ErrorCode {
     RoundNotRolled,
     #[msg("A bet account passed to settle is not an unsettled bet of this round")]
     BetAccountMismatch,
-    #[msg("Settle must pass every bet of the round")]
+    #[msg("Finish the round only after every bet of it is settled")]
     IncompleteSettle,
+    #[msg("This bet is already settled")]
+    BetAlreadySettled,
     #[msg("A payout or fee amount overflowed")]
     MathOverflow,
 }

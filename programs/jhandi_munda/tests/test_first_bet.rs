@@ -427,16 +427,28 @@ fn test_unexpected_vrf_callback_rejected() {
     assert_eq!(round(&t).status, RoundStatus::Rolled);
 }
 
-// Settles round 0 with the given bet accounts as remaining accounts.
-fn settle(t: &mut Table, signer: &Keypair, bets: &[Pubkey]) -> TransactionResult {
+// Settles some of round 0's bets: the given bet accounts are remaining accounts.
+fn settle_bets(t: &mut Table, signer: &Keypair, bets: &[Pubkey]) -> TransactionResult {
     let mut instruction = ix(
-        jhandi_munda::accounts::Settle { table: t.table, round: t.round },
-        jhandi_munda::instruction::Settle {},
+        jhandi_munda::accounts::SettleBets { table: t.table, round: t.round },
+        jhandi_munda::instruction::SettleBets {},
     );
     for bet in bets {
         instruction.accounts.push(AccountMeta::new(*bet, false));
     }
     send(&mut t.svm, signer, instruction)
+}
+
+// Closes round 0 once every bet is settled.
+fn finish_round(t: &mut Table, signer: &Keypair) -> TransactionResult {
+    send(
+        &mut t.svm,
+        signer,
+        ix(
+            jhandi_munda::accounts::FinishRound { round: t.round },
+            jhandi_munda::instruction::FinishRound {},
+        ),
+    )
 }
 
 fn bet_pda(wallet: &Keypair, symbol: u8) -> Pubkey {
@@ -458,11 +470,11 @@ fn test_settle_known_dice() {
     let bets = [bet_pda(&alice, 2), bet_pda(&bob, 4), bet_pda(&carol, 2)];
 
     // Settle before the faces exist (round still open) is rejected.
-    assert!(settle(&mut t, &bob, &bets).is_err(), "no settle before the window closes");
+    assert!(settle_bets(&mut t, &bob, &bets).is_err(), "no settle before the window closes");
 
     set_time(&mut t, BASE_TIME + 90);
     assert!(request_roll(&mut t, &bob).is_ok());
-    assert!(settle(&mut t, &bob, &bets).is_err(), "no settle while the roll is pending");
+    assert!(settle_bets(&mut t, &bob, &bets).is_err(), "no settle while the roll is pending");
 
     // Known dice: bytes 1,1,4,5,0,2 map to faces 2,2,5,6,1,3 (face = byte % 6 + 1).
     let mut randomness = [0u8; 32];
@@ -472,8 +484,9 @@ fn test_settle_known_dice() {
     assert_eq!(round(&t).faces, [2, 2, 5, 6, 1, 3]);
 
     // Settle with every bet: a 2-match win, a loss and a 2-match win.
-    let res = settle(&mut t, &bob, &bets);
+    let res = settle_bets(&mut t, &bob, &bets);
     assert!(res.is_ok(), "settle failed: {:?}", res.err());
+    assert!(finish_round(&mut t, &bob).is_ok(), "finish after full settle");
 
     // Alice $10 on face 2 (two matches, 3x): owed $29.60, fee $0.40.
     // Carol $1 on face 2 (two matches, 3x): owed $2.96, fee $0.04.
@@ -501,6 +514,55 @@ fn test_settle_known_dice() {
     assert_eq!(r.round_id, 1, "settle bumps the round id");
     assert_eq!(r.bet_count, 0);
 
-    // A second settle of the same round is rejected.
-    assert!(settle(&mut t, &bob, &bets).is_err(), "a second settle must be rejected");
+    // The round is closed: settling or finishing it again is rejected.
+    assert!(settle_bets(&mut t, &bob, &bets).is_err(), "a second settle must be rejected");
+    assert!(finish_round(&mut t, &bob).is_err(), "a second finish must be rejected");
+}
+
+#[test]
+fn test_settle_full_table_in_chunks() {
+    let mut t = setup();
+    stub_vrf(&mut t);
+    // A full table: 10 players, each on all six faces, $1 each = 60 bets.
+    let players: Vec<Keypair> = (0..10).map(|_| new_player(&mut t)).collect();
+    for p in &players {
+        for symbol in 1..=6u8 {
+            assert!(place(&mut t, p, symbol, 1_000_000).is_ok());
+        }
+    }
+    assert_eq!(round(&t).bet_count, 60);
+    let bets: Vec<Pubkey> = players
+        .iter()
+        .flat_map(|p| (1..=6u8).map(move |s| bet_pda(p, s)))
+        .collect();
+
+    set_time(&mut t, BASE_TIME + 90);
+    assert!(request_roll(&mut t, &players[0]).is_ok());
+    let request_id = round(&t).request_id;
+    assert!(send_callback(&mut t, &players[0], counting_randomness(), request_id).is_ok());
+
+    // Nothing is settled yet: finishing the round is rejected.
+    assert!(finish_round(&mut t, &players[0]).is_err());
+
+    // Six chunks of ten bets. Each chunk adds to the settled count.
+    let chunks: Vec<&[Pubkey]> = bets.chunks(10).collect();
+    assert!(settle_bets(&mut t, &players[0], chunks[0]).is_ok());
+    assert_eq!(round(&t).settled_count, 10);
+    assert!(finish_round(&mut t, &players[0]).is_err(), "finish before every bet is settled");
+
+    // Settling the same bets again is rejected, and the count does not move.
+    assert!(settle_bets(&mut t, &players[0], chunks[0]).is_err(), "a bet is settled once");
+    assert_eq!(round(&t).settled_count, 10);
+
+    for chunk in &chunks[1..] {
+        assert!(settle_bets(&mut t, &players[0], chunk).is_ok());
+    }
+    assert_eq!(round(&t).settled_count, 60);
+    assert!(finish_round(&mut t, &players[0]).is_ok());
+
+    let r = round(&t);
+    assert_eq!(r.status, RoundStatus::Idle);
+    assert_eq!(r.round_id, 1);
+    assert_eq!(r.bet_count, 0);
+    assert_eq!(r.settled_count, 0);
 }

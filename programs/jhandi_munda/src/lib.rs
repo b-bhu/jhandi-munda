@@ -48,8 +48,12 @@ pub mod jhandi_munda {
         request_roll::handler(ctx)
     }
 
-    pub fn settle(ctx: Context<Settle>) -> Result<()> {
-        settle::handler(ctx)
+    pub fn settle_bets(ctx: Context<SettleBets>) -> Result<()> {
+        settle::handle_settle_bets(ctx)
+    }
+
+    pub fn finish_round(ctx: Context<FinishRound>) -> Result<()> {
+        settle::handle_finish_round(ctx)
     }
 
     pub fn callback_roll_dice(
