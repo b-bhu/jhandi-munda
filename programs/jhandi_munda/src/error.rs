@@ -68,6 +68,14 @@ pub enum ErrorCode {
     QueueOrderMismatch,
     #[msg("This claim is waiting in the payout queue")]
     ClaimAlreadyQueued,
+    #[msg("A stake must be greater than zero")]
+    ZeroStake,
+    #[msg("The stake is smaller than the amount to unstake")]
+    InsufficientStake,
+    #[msg("Pass every stake account, exactly once, to distribute the stakers' slice")]
+    StakerSetMismatch,
+    #[msg("There is nothing to claim")]
+    NothingToClaim,
     #[msg("A payout or fee amount overflowed")]
     MathOverflow,
 }

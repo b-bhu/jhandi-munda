@@ -202,6 +202,36 @@ pub struct PayoutQueue {
     pub entries: [QueueEntry; QUEUE_CAPACITY],
 }
 
+/// Pool-wide MUNDA staking totals (D15). `stakers` counts every stake account
+/// ever created, so the fee crank can check it was given all of them.
+#[account]
+#[derive(InitSpace)]
+pub struct StakePool {
+    /// MUNDA staked across all wallets, in base units.
+    pub total_staked: u64,
+    /// Number of stake accounts created.
+    pub stakers: u32,
+    /// Bump seed for the stake pool PDA.
+    pub bump: u8,
+}
+
+/// One wallet's MUNDA stake (D15, D27). Holding MUNDA alone earns nothing: only
+/// the staked amount takes part in the 70% fee slice.
+#[account]
+#[derive(InitSpace)]
+pub struct Stake {
+    /// The wallet that staked.
+    pub owner: Pubkey,
+    /// MUNDA staked, in base units.
+    pub amount: u64,
+    /// Clock time of the latest stake. Used by the 24-hour rule (Step 10).
+    pub staked_at: i64,
+    /// Fee rewards credited to this stake, in MUSD base units, not yet claimed.
+    pub pending: u64,
+    /// Bump seed for the stake PDA.
+    pub bump: u8,
+}
+
 /// The MUSD faucet cooldown record for one wallet (D33): a small PDA at
 /// `["faucet", user_pubkey]`, created by the wallet's first faucet call, that
 /// stores when that wallet last claimed. One record per wallet, so every

@@ -1152,3 +1152,113 @@ fn test_lp_withdraw_waits_for_queue() {
     assert_eq!(token_amount(&t.svm, &lp_ata), 95_000_000 + 1_080_000);
     assert_eq!(token_amount(&t.svm, &t.vault), 4_320_000);
 }
+
+// --- Staking helpers (Steps 9 and 10) ---
+
+fn munda_ata(wallet: &Keypair) -> Pubkey {
+    jhandi_munda::musd_ata(&wallet.pubkey(), &pda(&[MUNDA_MINT_SEED]))
+}
+
+fn clock_now(t: &Table) -> i64 {
+    t.svm.get_sysvar::<Clock>().unix_timestamp
+}
+
+fn init_staking(t: &mut Table, payer: &Keypair) {
+    let res = send(
+        &mut t.svm,
+        payer,
+        ix(
+            jhandi_munda::accounts::InitStaking {
+                stake_pool: pda(&[jhandi_munda::STAKE_POOL_SEED]),
+                stake_vault: pda(&[jhandi_munda::STAKE_VAULT_SEED]),
+                munda_mint: pda(&[MUNDA_MINT_SEED]),
+                stake_authority: pda(&[jhandi_munda::STAKE_AUTHORITY_SEED]),
+                payer: payer.pubkey(),
+                token_program: SPL_TOKEN_PROGRAM_ID,
+                system_program: SYS,
+            },
+            jhandi_munda::instruction::InitStaking {},
+        ),
+    );
+    assert!(res.is_ok(), "init_staking failed: {:?}", res.err());
+}
+
+fn stake(t: &mut Table, owner: &Keypair, amount: u64) -> TransactionResult {
+    send(
+        &mut t.svm,
+        owner,
+        ix(
+            jhandi_munda::accounts::StakeMunda {
+                stake_pool: pda(&[jhandi_munda::STAKE_POOL_SEED]),
+                stake: pda(&[jhandi_munda::STAKE_SEED, owner.pubkey().as_ref()]),
+                stake_vault: pda(&[jhandi_munda::STAKE_VAULT_SEED]),
+                owner: owner.pubkey(),
+                owner_munda_ata: munda_ata(owner),
+                munda_mint: pda(&[MUNDA_MINT_SEED]),
+                token_program: SPL_TOKEN_PROGRAM_ID,
+                system_program: SYS,
+            },
+            jhandi_munda::instruction::Stake { amount },
+        ),
+    )
+}
+
+fn stake_account(t: &Table, owner: &Keypair) -> jhandi_munda::state::Stake {
+    let data = t.svm.get_account(&pda(&[jhandi_munda::STAKE_SEED, owner.pubkey().as_ref()])).unwrap().data;
+    jhandi_munda::state::Stake::try_deserialize(&mut data.as_slice()).unwrap()
+}
+
+fn stake_pool(t: &Table) -> jhandi_munda::state::StakePool {
+    let data = t.svm.get_account(&pda(&[jhandi_munda::STAKE_POOL_SEED])).unwrap().data;
+    jhandi_munda::state::StakePool::try_deserialize(&mut data.as_slice()).unwrap()
+}
+
+// Mints MUNDA the real way: each holder loses a bet on face 4 (the dice below
+// have no 4), the loss claims open, and after the 24 h unlock each holder
+// redeems with Wait, which mints 1 MUNDA per 1 MUSD lost (D26).
+fn mint_munda(t: &mut Table, holders: &[(&Keypair, u64)]) {
+    init_munda(t, holders[0].0);
+    let start = clock_now(t);
+    for (h, amount) in holders {
+        assert!(place(t, h, 4, *amount).is_ok());
+    }
+    set_time(t, start + 90);
+    assert!(request_roll(t, holders[0].0).is_ok());
+    let mut randomness = [0u8; 32];
+    randomness[..6].copy_from_slice(&[1, 1, 4, 5, 0, 2]);
+    let request_id = round(t).request_id;
+    assert!(send_callback(t, holders[0].0, randomness, request_id).is_ok());
+    set_time(t, start + 100);
+    let bets: Vec<Pubkey> = holders.iter().map(|(h, _)| bet_pda(h, 4)).collect();
+    assert!(settle_bets(t, holders[0].0, &bets).is_ok());
+    assert!(finish_round(t, holders[0].0).is_ok());
+    for (h, _) in holders {
+        assert!(open_claim(t, h, &bet_pda(h, 4)).is_ok());
+    }
+    set_time(t, start + 100 + 86_400);
+    for (h, _) in holders {
+        assert!(wait(t, h, &bet_pda(h, 4)).is_ok());
+    }
+}
+
+#[test]
+fn test_stake_munda() {
+    let mut t = setup();
+    stub_vrf(&mut t);
+    let a = new_player(&mut t);
+    mint_munda(&mut t, &[(&a, 70_000_000)]);
+    assert_eq!(token_amount(&t.svm, &munda_ata(&a)), 70_000_000, "70 MUNDA from the loss");
+    init_staking(&mut t, &a);
+
+    // A zero stake is rejected.
+    assert!(stake(&mut t, &a, 0).is_err(), "a zero stake is rejected");
+
+    // Staking 40 MUNDA: the wallet's free MUNDA falls by what the vault gains.
+    assert!(stake(&mut t, &a, 40_000_000).is_ok());
+    assert_eq!(token_amount(&t.svm, &munda_ata(&a)), 30_000_000);
+    assert_eq!(token_amount(&t.svm, &pda(&[jhandi_munda::STAKE_VAULT_SEED])), 40_000_000);
+    let s = stake_account(&t, &a);
+    assert_eq!((s.owner, s.amount), (a.pubkey(), 40_000_000));
+    let p = stake_pool(&t);
+    assert_eq!((p.total_staked, p.stakers), (40_000_000, 1));
+}

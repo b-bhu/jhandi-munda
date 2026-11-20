@@ -64,6 +64,14 @@ pub mod jhandi_munda {
         payout_queue::handle_pay_queue(ctx)
     }
 
+    pub fn init_staking(ctx: Context<InitStaking>) -> Result<()> {
+        staking::handle_init_staking(ctx)
+    }
+
+    pub fn stake(ctx: Context<StakeMunda>, amount: u64) -> Result<()> {
+        staking::handle_stake(ctx, amount)
+    }
+
     pub fn init_munda(ctx: Context<InitMunda>) -> Result<()> {
         claim_redeem::handle_init_munda(ctx)
     }
