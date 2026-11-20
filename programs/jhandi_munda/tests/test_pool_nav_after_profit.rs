@@ -382,6 +382,8 @@ fn test_pool_nav_after_profit() {
     // floored in the pool's favour): 100_000_000 × 225_000_000 / 180_000_000
     // = 125_000_000 exactly — `shares × NAV`, i.e. 100_000_000 shares ×
     // 1_250_000 scaled / 1_000_000 = the 125 MUSD the pool now owes.
+    // Read the balance BEFORE the withdraw so the delta is what the pool paid.
+    let (musd_before, _, _) = token_account(&svm, &payer_ata, "first depositor MUSD ATA");
     let res = try_withdraw(&mut svm, &payer, &pool, &musd_mint, &vault, &share_mint, DEPOSIT_AMOUNT);
     assert!(res.is_ok(), "the first depositor's withdraw failed: {:?}", res.err());
 
@@ -389,7 +391,6 @@ fn test_pool_nav_after_profit() {
     // balance: A's ATA still holds 75 MUSD here — what stayed of the second
     // faucet claim after A funded the 25 MUSD mock out of it (200 after =
     // 75 before + 125 paid).
-    let (musd_before, _, _) = token_account(&svm, &payer_ata, "first depositor MUSD ATA");
     let expected = DEPOSIT_AMOUNT * NAV_AFTER / 1_000_000;
     assert_eq!(expected, 125_000_000, "sanity: 100 shares × $1.25 = 125 MUSD");
     let (musd_back, _, _) = token_account(&svm, &payer_ata, "first depositor MUSD ATA");
@@ -416,12 +417,13 @@ fn test_pool_nav_after_profit() {
     // 100_000_000 / 80_000_000 = 100_000_000 exactly — `shares × NAV`, 80
     // shares × $1.25. A full withdraw of the last shares (shares == supply)
     // prices the whole remaining vault, so no MUSD can be stranded.
+    // Read the balance BEFORE the withdraw so the delta is what the pool paid.
+    let (musd_before, _, _) = token_account(&svm, &payer_b_ata, "second depositor MUSD ATA");
     let res = try_withdraw(&mut svm, &payer_b, &pool, &musd_mint, &vault, &share_mint, SHARES_SECOND);
     assert!(res.is_ok(), "the second depositor's withdraw failed: {:?}", res.err());
 
     // Same delta readback as A's, so the pay check never depends on leftover
     // faucet MUSD sitting in the ATA (this story happens to start B at 0).
-    let (musd_before, _, _) = token_account(&svm, &payer_b_ata, "second depositor MUSD ATA");
     let expected = SHARES_SECOND * NAV_AFTER / 1_000_000;
     assert_eq!(expected, 100_000_000, "sanity: 80 shares × $1.25 = 100 MUSD");
     let (musd_back, _, _) = token_account(&svm, &payer_b_ata, "second depositor MUSD ATA");
