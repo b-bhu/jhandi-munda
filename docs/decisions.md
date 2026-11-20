@@ -65,3 +65,9 @@ Answers from the planning Q&A, in order.
    - *Why (29–32):* coach recommendations accepted in rapid fire (20 Nov).
 33. **Faucet limit:** the MUSD faucet gives 100 MUSD per call, with a 1-hour cooldown per wallet (added as Step 2.4, after the basic faucet works).
    - *Why:* a PDA locks *who* can print, but not *how often*. Without a rule in the faucet, one script could print unlimited chips and fake pool deposits or wins. Coach recommendation after Bibhu's PDA answer (20 Nov).
+
+## D34: Program side first, UI after
+Date: 20 Nov 2026. Decided by Bibhu.
+Build every program (Rust/Anchor) step first, then the UI steps. Frontend-only sub-issues (#10, #36, #47, #48, #51, #54) are labeled `ui-later` and skipped until the program side is done.
+Reason: the UI reads program accounts. If we build screens while the accounts are still changing, we rebuild them. Locking the program first means the UI is built once against a stable shape.
+Also from 20 Nov: Hermes is retired for this repo (out of Ollama credits). Bibhu codes the steps with Claude Code on his Mac, and Blitz Builder still builds, tests and merges each PR.
