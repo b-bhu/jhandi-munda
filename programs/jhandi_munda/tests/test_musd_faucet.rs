@@ -76,6 +76,9 @@ fn faucet(svm: &mut LiteSVM, setup: (&Keypair, &Pubkey, &Pubkey, &Pubkey, &Pubke
         .to_account_metas(None),
     );
 
+    // A fresh blockhash per call: two identical faucet transactions with the
+    // same blockhash collide on signature and the second is AlreadyProcessed.
+    svm.expire_blockhash();
     let blockhash = svm.latest_blockhash();
     let msg = Message::new_with_blockhash(&[instruction], Some(&payer.pubkey()), &blockhash);
     let tx = VersionedTransaction::try_new(VersionedMessage::Legacy(msg), &[payer]).unwrap();
