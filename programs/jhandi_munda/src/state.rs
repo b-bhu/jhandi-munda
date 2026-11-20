@@ -184,17 +184,11 @@ pub struct Claim {
 
 /// One unpaid win waiting in the payout queue: the claim, and what it is owed.
 /// Plain fixed-size data (40 bytes, no padding), so it can be stored zero-copy.
-#[derive(Clone, Copy)]
-#[repr(C)]
+#[zero_copy(unsafe)]
 pub struct QueueEntry {
     pub claim: Pubkey,
     pub amount: u64,
 }
-
-// SAFETY: QueueEntry is #[repr(C)] with only a Pubkey and a u64: no padding and
-// no invalid bit patterns, so all-zero bytes are a valid entry.
-unsafe impl anchor_lang::__private::bytemuck::Zeroable for QueueEntry {}
-unsafe impl anchor_lang::__private::bytemuck::Pod for QueueEntry {}
 
 /// FIFO payout queue (D4, D30). A ring buffer: `head` is the oldest entry and
 /// `tail` the next free slot, both counted up forever and taken modulo

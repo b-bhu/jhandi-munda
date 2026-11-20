@@ -87,13 +87,15 @@ pub fn handle_pay_queue<'info>(ctx: Context<'info, PayQueue<'info>>) -> Result<(
 
     while queue.head < queue.tail {
         let entry = queue.entries[(queue.head % QUEUE_CAPACITY as u64) as usize];
+        // Copy the packed fields out: references to them are not allowed.
+        let (entry_claim, entry_amount) = (entry.claim, entry.amount);
         // Strict FIFO: if the head cannot be paid in full, stop here.
-        if token_balance(&ctx.accounts.pool_vault)? < entry.amount {
+        if token_balance(&ctx.accounts.pool_vault)? < entry_amount {
             break;
         }
         let Some(pair) = pairs.next() else { break };
         let (claim_info, ata_info) = (&pair[0], &pair[1]);
-        require_keys_eq!(claim_info.key(), entry.claim, ErrorCode::QueueOrderMismatch);
+        require_keys_eq!(claim_info.key(), entry_claim, ErrorCode::QueueOrderMismatch);
 
         let mut claim: Account<Claim> = Account::try_from(claim_info)?;
         require!(claim.queued && !claim.redeemed, ErrorCode::QueueOrderMismatch);
@@ -109,9 +111,9 @@ pub fn handle_pay_queue<'info>(ctx: Context<'info, PayQueue<'info>>) -> Result<(
         let seeds: &[&[u8]] = &[POOL_SEED, &[pool.bump]];
         let (vault_info, pool_info) = (ctx.accounts.pool_vault.to_account_info(), pool.to_account_info());
         let ata_owned = ata_info.clone();
-        spl_transfer(&vault_info, &ata_owned, &pool_info, entry.amount, &[seeds])?;
+        spl_transfer(&vault_info, &ata_owned, &pool_info, entry_amount, &[seeds])?;
         queue.head += 1;
-        msg!("Queue paid {} base MUSD; {} left in queue", entry.amount, queue.tail - queue.head);
+        msg!("Queue paid {} base MUSD; {} left in queue", entry_amount, queue.tail - queue.head);
     }
     Ok(())
 }
