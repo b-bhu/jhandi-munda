@@ -10,4 +10,8 @@ pub enum ErrorCode {
     InvalidAtaAddress,
     #[msg("This wallet already claimed MUSD in the last hour — wait for the cooldown to pass")]
     FaucetCooldown,
+    #[msg("A pool deposit must be greater than zero")]
+    ZeroDeposit,
+    #[msg("The pool is in a state its own instructions cannot create (shares without vaulted MUSD, or the reverse)")]
+    InvalidPoolState,
 }
