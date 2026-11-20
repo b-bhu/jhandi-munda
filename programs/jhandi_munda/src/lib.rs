@@ -42,4 +42,8 @@ pub mod jhandi_munda {
     pub fn place_bet(ctx: Context<PlaceBet>, symbol: u8, amount: u64) -> Result<()> {
         place_bet::handler(ctx, symbol, amount)
     }
+
+    pub fn request_roll(ctx: Context<RequestRoll>) -> Result<()> {
+        request_roll::handler(ctx)
+    }
 }

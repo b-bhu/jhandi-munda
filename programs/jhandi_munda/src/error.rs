@@ -28,4 +28,10 @@ pub enum ErrorCode {
     TableFull,
     #[msg("The 90-second join window for this round has closed")]
     BettingClosed,
+    #[msg("The join window is still open; the roll can be requested once it closes")]
+    WindowStillOpen,
+    #[msg("There is no open round to roll")]
+    NoRoundToRoll,
+    #[msg("A VRF roll is already pending for this round")]
+    RollAlreadyPending,
 }

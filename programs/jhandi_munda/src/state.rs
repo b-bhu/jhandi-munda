@@ -81,6 +81,8 @@ pub enum RoundStatus {
     Idle,
     /// A round is running and its 90 s timer has started (D31).
     Open,
+    /// The join window has closed and a VRF roll is pending (D11, Step 5.1).
+    Rolling,
 }
 
 /// The table's round account (D5, D25): one per table, reused round after
@@ -99,6 +101,9 @@ pub struct Round {
     /// `players.len()`.
     #[max_len(10)]
     pub players: Vec<Pubkey>,
+    /// The caller seed of the pending VRF request, which is its id. Zero when
+    /// no roll is pending.
+    pub request_id: [u8; 32],
     /// Bump seed for the round PDA.
     pub bump: u8,
 }

@@ -280,3 +280,67 @@ fn test_bet_rejected_after_90s() {
     assert_eq!(round(&t).players, vec![alice.pubkey(), bob.pubkey()]);
     assert_eq!(round(&t).opened_at, BASE_TIME, "closing must not move opened_at");
 }
+
+// The VRF program is not loaded in LiteSVM. Stand in for it with
+// tests/fixtures/vrf_stub.so (source in tests/fixtures/vrf_stub), a BPF program
+// that accepts every call. The request CPI then runs for real, and the request
+// accounts and every check in the program stay the real ones; only the
+// oracle's own work is mocked.
+const VRF_PROGRAM: &str = "Vrf1RNUjXmQGjmQrQLvJHs9SNkvDJEsRVFPkfSQUwGz";
+const DEFAULT_QUEUE_ID: &str = "Cuj97ggrhhidhbu39TijNVqE74xvKJ69gDervRUXAxGh";
+const SLOT_HASHES: &str = "SysvarS1otHashes111111111111111111111111111";
+
+fn stub_vrf(t: &mut Table) {
+    let bytes = include_bytes!("fixtures/vrf_stub.so");
+    t.svm.add_program(VRF_PROGRAM.parse::<Pubkey>().unwrap(), bytes).unwrap();
+}
+
+// Requests a VRF roll for the open round, signed by `payer`.
+fn request_roll(t: &mut Table, payer: &Keypair) -> TransactionResult {
+    send(
+        &mut t.svm,
+        payer,
+        ix(
+            jhandi_munda::accounts::RequestRoll {
+                table: t.table,
+                round: t.round,
+                payer: payer.pubkey(),
+                oracle_queue: DEFAULT_QUEUE_ID.parse().unwrap(),
+                program_identity: pda(&[b"identity"]),
+                vrf_program: VRF_PROGRAM.parse().unwrap(),
+                slot_hashes: SLOT_HASHES.parse().unwrap(),
+                system_program: SYS,
+            },
+            jhandi_munda::instruction::RequestRoll {},
+        ),
+    )
+}
+
+#[test]
+fn test_request_vrf_after_window() {
+    let mut t = setup();
+    stub_vrf(&mut t);
+    let alice = new_player(&mut t);
+    let bob = new_player(&mut t);
+
+    // Alice opens the round at BASE_TIME.
+    assert!(place(&mut t, &alice, 3, 10_000_000).is_ok());
+
+    // Still inside the window (89 s): the roll request is rejected.
+    set_time(&mut t, BASE_TIME + 89);
+    assert!(request_roll(&mut t, &bob).is_err(), "a roll inside the window must be rejected");
+    assert_eq!(round(&t).status, RoundStatus::Open);
+    assert_eq!(round(&t).request_id, [0u8; 32], "a rejected request stores nothing");
+
+    // Window closed (90 s): the request goes out and the round stores its id.
+    set_time(&mut t, BASE_TIME + 90);
+    let res = request_roll(&mut t, &bob);
+    assert!(res.is_ok(), "roll after the window failed: {:?}", res.err());
+    let r = round(&t);
+    assert_eq!(r.status, RoundStatus::Rolling);
+    assert_ne!(r.request_id, [0u8; 32], "the pending request id must be stored");
+
+    // A second request while one is pending is rejected, and so is a bet.
+    assert!(request_roll(&mut t, &alice).is_err(), "a second pending roll must be rejected");
+    assert!(place(&mut t, &bob, 5, 1_000_000).is_err(), "no bets once the roll is pending");
+}

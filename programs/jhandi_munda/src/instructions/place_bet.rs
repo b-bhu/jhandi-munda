@@ -96,7 +96,7 @@ pub fn handler(ctx: Context<PlaceBet>, symbol: u8, amount: u64) -> Result<()> {
     // only: slots are never the timer.
     let now = Clock::get()?.unix_timestamp;
     let round = &ctx.accounts.round;
-    if round.status == RoundStatus::Open {
+    if round.status != RoundStatus::Idle {
         require!(
             now < round.opened_at + ctx.accounts.table.round_length_secs,
             ErrorCode::BettingClosed
