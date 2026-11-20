@@ -65,3 +65,9 @@
 - Merged: #87 faucet (3 tries), #88 Get MUSD page, #89 faucet cooldown (D33), #90 pool vault + share mint, #91 deposit.
 - Devnet deploy done (program 4nsQ6ntZgpBhsDJt4bN5nu4bBvyqXtD4ReQdhAdSRhtH); faucet tx gave 100 MUSD. Links in README.
 - Teaching: why accounts are listed up front (Bibhu didn't know; taught parallel execution). NAV: Bibhu first said 110 shares for 110 MUSD at $1.10 NAV (wrong), then said he understood after explanation (claimed). Skipped "price before transfer" question (answer given).
+
+## 20 Nov 2026, evening: switch to Claude Code, steps 3.4 to 4.3
+- Hermes retired (Ollama credits ran out). Bibhu now codes each step with Claude Code on his Mac, and Blitz verifies and merges.
+- D34: Bibhu decided program steps go first and the UI comes after. Demonstrated systems thinking: the UI depends on the account shape, so build it once the shape is stable.
+- Merged: 3.4 NAV after profit (#93), 4.1 table and round (#94), 4.2 first bet (#95), 4.3 multi-player and multi-symbol (#96). 17 tests passing.
+- Lessons shown on real PRs: check the change, not the total (3.4). Order of reads matters (3.4). Init front-running, where anyone can set up the table first (4.1). The PDA seed decides what is unique: `["bet", wallet]` meant one bet for life (4.2 to 4.3).

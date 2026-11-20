@@ -23,3 +23,8 @@ Step 2: MUSD test mint + faucet on devnet, with an Explorer link. First explain 
 ## Now (20 Nov, 5:20 PM IST)
 - Program on devnet. Hermes on Step 3.3 withdraw (#8). Loop auto-merges passing PRs.
 - Next teaching: Step 4 round/bet accounts; open with spaced recall (NAV at 90/100, accounts up front).
+
+## Next (20 Nov, 8 pm)
+- Build: Step 4.4, reject bets after the 90-second timer (#15), being coded by Claude Code.
+- Recall question for next session: "Why did `[\"bet\", wallet]` as a bet address break multi-symbol bets? What did we add to the seeds?"
+- Open item: an admin-only check on initialize_table/initialize_pool before the demo (Bibhu not asked yet to confirm).
