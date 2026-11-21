@@ -10,24 +10,30 @@
  *   1. migrate_config, if the config is still in the old 42-byte layout (upgrade authority).
  *   2. init_cage, if the cage vault does not exist.
  *   3. musd_faucet, if the wallet has no MUSD account.
- *   4a. undelegate_chips FIRST, if the chip stack is delegated. It must come home to Solana: that
- *       is the real-validator proof of the #[ephemeral] callback. If it does not, print the failed
- *       Solana tx and stop (round_v2 is not touched).
- *   4b/4c. buy_chips if short, then delegate_chip_stack.
+ *   4a. undelegate_chips only if the chip stack is delegated to a DIFFERENT validator than round_v2
+ *       (or the router cannot say). Not at the start of every run. If it does not come home, print
+ *       the failed Solana tx and stop (round_v2 is not touched).
+ *   4b/4c. resume: read the balance on the validator while delegated; buy_chips only if short;
+ *       delegate_chip_stack if it is on Solana.
  *   5. init_round (table authority, if round_v2 is missing), then delegate_round.
- *   6. place_bet_chips on the rollup (no token transfer).
- *   7. request_roll on DEFAULT_EPHEMERAL_QUEUE after the 90 s window.
- *   8. wait for the VRF callback: round_v2 turns Rolled with six faces.
+ *   6. Read the validator's state. place_bet_chips only if the slip is empty (no token transfer).
+ *   7. request_roll on DEFAULT_EPHEMERAL_QUEUE after the 90 s window, only while the round is open.
+ *   8. wait for the VRF callback (skipped when round_v2 is already Rolled).
  *   9. undelegate_round and undelegate_chips (rollup), wait until Solana owns them, then
  *      settle_chip_bets and finish_round on Solana (only for a one-bet round).
+ *
+ * Transport: every rollup transaction goes straight to the validator (the fqdn from the router's
+ * getDelegationStatus, normally https://devnet-as.magicblock.app), not to the Magic Router. The
+ * router refuses a tx that mixes accounts delegated to different ER nodes, because the ephemeral VRF
+ * queue is not delegated to one node (PR #109 devnet run). The blockhash comes from the validator.
  *
  * Stuck undelegate: if Solana still does not own an account after the wait, the rollup
  * undelegate is sent once more (2 tries in all), and the Solana-side commit signature from the
  * rollup log is printed (UNVERIFIED). If that also fails, the script stops with the error.
  *
  * Retries: a rollup call that fails with InstructionFallbackNotFound (error 101) is retried,
- * 30 s apart, up to 4 tries (the rollup takes about 2 minutes to load an upgrade). Every other
- * error is final. Every Solana transaction and the rollup signatures are printed in the summary.
+ * 30 s apart, up to 4 tries. The first rollup call after an upgrade also retries for up to 5 minutes
+ * on a seeds error or "already in use" (the old program still running). Other errors are final. Every Solana transaction and the rollup signatures are printed in the summary.
  *
  * Devnet only: any URL that mentions mainnet is refused. The keypair is a gitignored wallet
  * (keys/); its secret is never printed or logged.
@@ -86,6 +92,8 @@ const FALLBACK_WAIT_MS = 30_000;
 // on a seeds error. UNVERIFIED: the time it takes the rollup to load the new program.
 const WARMUP_MS = 5 * 60 * 1000;
 const SEEDS_PATTERNS = ["ConstraintSeeds", "Error Number: 2006", "seeds constraint was violated"];
+// Right after an upgrade the old program can still run: its init shows as "already in use" (System Allocate).
+const WARMUP_PATTERNS = [...SEEDS_PATTERNS, "already in use"];
 let rollupWarm = false;
 // Rounds in the current layout: 392 bytes (see migrate.rs). Old: 388.
 
@@ -172,27 +180,11 @@ async function send(label, conn, wallet, instruction) {
   }
 }
 
-// Rollup: one transaction through the router, confirmed. Retries on the post-upgrade fallback error.
-async function sendEr(label, routerUrl, conn, wallet, instruction, routedAccounts) {
-  const warm = !rollupWarm;
-  const budget = warm ? WARMUP_MS : FALLBACK_TRIES * FALLBACK_WAIT_MS;
-  const started = Date.now();
-  for (let attempt = 1; ; attempt++) {
-    try {
-      const sig = await sendErOnce(label, routerUrl, conn, wallet, instruction, routedAccounts);
-      rollupWarm = true;
-      return sig;
-    } catch (err) {
-      const msg = String(err.message ?? err);
-      const fallback = FALLBACK_PATTERNS.some((p) => msg.includes(p));
-      const seeds = warm && SEEDS_PATTERNS.some((p) => msg.includes(p));
-      if (!(fallback || seeds) || Date.now() - started >= budget) throw err;
-      const why = fallback ? "InstructionFallbackNotFound (the rollup is still loading the upgrade)" : "a seeds error (the rollup may still run the old program)";
-      console.log(`  ${label}: try ${attempt} hit ${why}; waiting 30 s, then retrying`);
-      await sleep(FALLBACK_WAIT_MS);
-    }
-  }
-}
+// Validator (ER) URL for every rollup transaction. Resolved in main from the router's
+// getDelegationStatus (its fqdn). Rollup transactions go straight to the validator: the router
+// refuses a tx that mixes accounts delegated to different ER nodes (the ephemeral VRF queue is not
+// delegated to one node; PR #109 devnet run). UNVERIFIED: the fqdn field name in the router reply.
+const ASIA_VALIDATOR_URL = "https://devnet-as.magicblock.app";
 
 async function routerRpc(routerUrl, method, params) {
   const res = await fetch(routerUrl, {
@@ -205,12 +197,55 @@ async function routerRpc(routerUrl, method, params) {
   return json.result;
 }
 
-async function sendErOnce(label, routerUrl, conn, wallet, instruction, routedAccounts) {
+// The router's view of one account: delegated?, and the ER node's fqdn. UNVERIFIED params/fields.
+async function delegationStatus(routerUrl, account) {
   try {
-    // UNVERIFIED: that the router answers getBlockhashForAccounts for these accounts (notes.md).
-    const { blockhash } = await routerRpc(routerUrl, "getBlockhashForAccounts", [
-      routedAccounts.map((p) => p.toBase58()),
-    ]);
+    const s = await routerRpc(routerUrl, "getDelegationStatus", [account.toBase58()]);
+    return { delegated: !!s?.isDelegated, fqdn: s?.fqdn ?? null, raw: s };
+  } catch (err) {
+    return { delegated: null, fqdn: null, error: String(err.message ?? err) };
+  }
+}
+
+async function resolveValidatorUrl(routerUrl, account) {
+  const st = await delegationStatus(routerUrl, account);
+  if (st.fqdn) return { url: st.fqdn, source: "router getDelegationStatus" };
+  return { url: ASIA_VALIDATOR_URL, source: `fallback (UNVERIFIED: ${st.error ?? "the router reply had no fqdn"})` };
+}
+
+const sameNode = (a, b) => !!a && !!b && a.replace(/\/+$/, "") === b.replace(/\/+$/, "");
+
+// Rollup: one transaction to the validator, confirmed. Retries (30 s apart):
+//  - always on InstructionFallbackNotFound (error 101), up to FALLBACK_TRIES;
+//  - on the first rollup call after an upgrade (rollupWarm false), for up to WARMUP_MS, also on a
+//    seeds error and on "already in use" (the old program's init still running; PR #109 devnet run).
+async function sendEr(label, conn, wallet, instruction) {
+  const warm = !rollupWarm;
+  const budget = warm ? WARMUP_MS : FALLBACK_TRIES * FALLBACK_WAIT_MS;
+  const started = Date.now();
+  for (let attempt = 1; ; attempt++) {
+    try {
+      const sig = await sendErOnce(label, conn, wallet, instruction);
+      rollupWarm = true;
+      return sig;
+    } catch (err) {
+      const msg = String(err.message ?? err);
+      const fallback = FALLBACK_PATTERNS.some((p) => msg.includes(p));
+      const stale = warm && WARMUP_PATTERNS.some((p) => msg.includes(p));
+      if (!(fallback || stale) || Date.now() - started >= budget) throw err;
+      const why = fallback
+        ? "InstructionFallbackNotFound (the validator is still loading the upgrade)"
+        : "an error from the old program after the upgrade (seeds / already in use)";
+      console.log(`  ${label}: try ${attempt} hit ${why}; waiting 30 s, then retrying`);
+      await sleep(FALLBACK_WAIT_MS);
+    }
+  }
+}
+
+async function sendErOnce(label, conn, wallet, instruction) {
+  try {
+    // UNVERIFIED: that the validator answers getLatestBlockhash (the router did not give one for these accounts).
+    const { blockhash } = await conn.getLatestBlockhash("confirmed");
     const tx = new Transaction({ recentBlockhash: blockhash, feePayer: wallet.publicKey }).add(instruction);
     tx.sign(wallet);
     const sig = await conn.sendRawTransaction(tx.serialize(), { skipPreflight: true });
@@ -263,27 +298,27 @@ async function commitLogSigs(er, sig) {
 
 // Takes `account` home from the rollup: undelegate, then wait for Solana to own it. If Solana
 // still does not own it after the wait, send the undelegate once more (UNDELEGATE_TRIES in all).
-// If the rollup refuses the second one, or Solana still does not own it, stop with the path note.
-// UNVERIFIED: whether the rollup accepts a second undelegate for a round it has already scheduled.
-async function undelegateHome({ label, account, instruction, routerUrl, er, base, wallet, record }) {
+// If the validator refuses the second one, or Solana still does not own it, stop with the path note.
+// UNVERIFIED: whether the validator accepts a second undelegate for an account it has already scheduled.
+async function undelegateHome({ label, account, instruction, er, base, wallet, record }) {
   for (let attempt = 1; attempt <= UNDELEGATE_TRIES; attempt++) {
-    console.log(`  ${label}: undelegate try ${attempt} of ${UNDELEGATE_TRIES} on the rollup`);
+    console.log(`  ${label}: undelegate try ${attempt} of ${UNDELEGATE_TRIES} on the validator`);
     let sig;
     try {
-      sig = await sendEr(`${label} undelegate try ${attempt}`, routerUrl, er, wallet, instruction(), [account]);
+      sig = await sendEr(`${label} undelegate try ${attempt}`, er, wallet, instruction());
     } catch (err) {
-      console.error(`  ${label}: the rollup refused undelegate try ${attempt}: ${err.message ?? err}`);
+      console.error(`  ${label}: the validator refused undelegate try ${attempt}: ${err.message ?? err}`);
       break;
     }
     record(`${label} undelegate try ${attempt}`, sig, "rollup");
     const commit = await commitLogSigs(er, sig);
-    commit.lines.forEach((l) => console.log(`    rollup log: ${l}`));
+    commit.lines.forEach((l) => console.log(`    validator log: ${l}`));
     for (const s of commit.sigs) {
       console.log(`    Solana-side commit tx (UNVERIFIED that it is the undelegate): ${explorer(s)}`);
-      record(`${label} Solana-side commit (from rollup log)`, s, "solana");
+      record(`${label} Solana-side commit (from validator log)`, s, "solana");
     }
     if (await waitForOwner(base, account, PROGRAM_ID, label)) {
-      console.log(`  PATH: ${label} came home by retrying the undelegate (attempt ${attempt})`);
+      console.log(`  PATH: ${label} came home by ${attempt === 1 ? "the first undelegate" : "a retried undelegate"}`);
       return;
     }
   }
@@ -400,12 +435,15 @@ async function main() {
   const idl = loadIdl();
   const wallet = loadWallet(keyArg ?? DEFAULT_KEYPAIR);
   const base = new Connection(rpc, "confirmed");
-  const er = new Connection(routerUrl, "confirmed");
+  // Every rollup transaction goes straight to the validator (not the router); the router is only
+  // asked where round_v2 lives.
+  const validator = await resolveValidatorUrl(routerUrl, ROUND);
+  const er = new Connection(validator.url, "confirmed");
   console.log(`Devnet RPC: ${rpc}`);
-  console.log(`Rollup router: ${routerUrl} (region: Asia, validator ${ASIA_VALIDATOR}, validator 1.1.1)`);
+  console.log(`Router (getDelegationStatus only): ${routerUrl}`);
+  console.log(`Validator for rollup transactions: ${validator.url} (source: ${validator.source})`);
   console.log(`Wallet: ${wallet.publicKey.toBase58()}`);
   console.log(`Round PDA: ${ROUND.toBase58()} (round_v2, D41). The old v1 round is not touched.`);
-  console.log("PATH: 1) undelegate the chip stack (proves the #[ephemeral] callback), 2) round_v2 end to end.");
   if ((await base.getBalance(wallet.publicKey)) < 0.05 * 1e9) throw new Error("The wallet needs more devnet SOL (at least 0.05).");
 
   const sigs = [];
@@ -455,44 +493,67 @@ async function main() {
     console.log("3. MUSD account exists");
   }
 
-  // 4. The chip stack first. If it is delegated, undelegate it: this is the real-validator proof
-  // of the #[ephemeral] callback. If it does not come home, print the Solana failure and stop; the
-  // round is not touched.
+  // 4a. The chip stack. It is NOT undelegated at the start of every run. Only when it is delegated
+  // to a different validator than round_v2 (or the router cannot say) is it brought home first.
   const chips = chipsPda(wallet.publicKey);
   const chipsUndelegate = () => ({
-    label: "undelegate_chips", account: chips, routerUrl, er, base, wallet, record,
+    label: "undelegate_chips", account: chips, er, base, wallet, record,
     instruction: () => buildIx(idl, "undelegate_chips", { payer: wallet.publicKey, config: CONFIG, chips },
       wallet.publicKey.toBuffer()),
   });
-  const chipsBase = await base.getAccountInfo(chips);
-  if (chipsBase && chipsBase.owner.equals(DLP_ID)) {
-    console.log("4a. chip stack is delegated: undelegate_chips first (proves the callback on a real validator)");
-    try {
-      await undelegateHome(chipsUndelegate());
-    } catch (err) {
-      console.error("  STOP: the chip stack did not come home. The round was not touched.");
-      await printSolanaFailures(base, chips);
-      throw err;
+  const chipsOnSolana = await base.getAccountInfo(chips);
+  if (chipsOnSolana && chipsOnSolana.owner.equals(DLP_ID)) {
+    const node = await delegationStatus(routerUrl, chips);
+    if (node.delegated === true && sameNode(node.fqdn, validator.url)) {
+      console.log("4a. chip stack is delegated to round_v2's validator: no undelegate at the start of this run");
+    } else {
+      const why = node.delegated === null ? `router status unavailable (${node.error})`
+        : node.fqdn ? `delegated to ${node.fqdn}` : "delegated, node unknown (UNVERIFIED fqdn field)";
+      console.log(`4a. chip stack is delegated but not to round_v2's validator (${why}): undelegate it first`);
+      try {
+        await undelegateHome(chipsUndelegate());
+      } catch (err) {
+        console.error("  STOP: the chip stack did not come home. The round was not touched.");
+        await printSolanaFailures(base, chips);
+        throw err;
+      }
+      console.log("  PROOF: the chip stack came home through the callback (Solana owns it again).");
     }
-    console.log("  PROOF: the chip stack came home through the callback (Solana owns it again).");
   } else {
-    console.log("4a. chip stack is not delegated; no undelegate needed");
+    console.log("4a. chip stack is not delegated; nothing to undelegate");
   }
 
-  // 4b. Chips: buy if short, then delegate (Solana).
-  const chipsNow = await base.getAccountInfo(chips);
-  const balance = chipsNow && chipsNow.owner.equals(PROGRAM_ID) ? decodeChips(chipsNow.data).balance : 0n;
-  if (balance >= BET_AMOUNT) {
-    console.log(`4b. chip stack holds ${balance} base units; skipping buy`);
+  // 4b. Chips: while delegated the balance is on the validator's copy; otherwise on Solana.
+  const solanaChipBalance = async () => {
+    const acc = await base.getAccountInfo(chips);
+    return acc && acc.owner.equals(PROGRAM_ID) ? decodeChips(acc.data).balance : 0n;
+  };
+  let chipsDelegated = (await base.getAccountInfo(chips))?.owner.equals(DLP_ID) ?? false;
+  let balance = 0n;
+  if (chipsDelegated) {
+    const copy = await er.getAccountInfo(chips);
+    balance = copy ? decodeChips(copy.data).balance : 0n;
   } else {
-    console.log("4b. buy_chips (10 MUSD) into the cage vault");
-    record("buy_chips", await send("buy_chips", base, wallet, buildIx(idl, "buy_chips", {
-      pool: POOL, cage_vault: CAGE, chips, owner: wallet.publicKey, owner_musd_ata: musdAta,
-      token_program: TOKEN_PROGRAM, system_program: SystemProgram.programId,
-    }, u64(BUY_AMOUNT))), "solana");
+    balance = await solanaChipBalance();
   }
-  const chipsAfterBuy = await base.getAccountInfo(chips);
-  if (chipsAfterBuy.owner.equals(PROGRAM_ID)) {
+  if (chipsDelegated && balance < BET_AMOUNT) {
+    console.log(`4b. chip stack is delegated but holds ${balance} base units: undelegate it to buy more`);
+    await undelegateHome(chipsUndelegate());
+    chipsDelegated = false;
+    balance = await solanaChipBalance();
+  }
+  if (chipsDelegated) {
+    console.log(`4b. chip stack is delegated and holds ${balance} base units; skipping buy and delegate`);
+  } else {
+    if (balance >= BET_AMOUNT) {
+      console.log(`4b. chip stack holds ${balance} base units; skipping buy`);
+    } else {
+      console.log("4b. buy_chips (10 MUSD) into the cage vault");
+      record("buy_chips", await send("buy_chips", base, wallet, buildIx(idl, "buy_chips", {
+        pool: POOL, cage_vault: CAGE, chips, owner: wallet.publicKey, owner_musd_ata: musdAta,
+        token_program: TOKEN_PROGRAM, system_program: SystemProgram.programId,
+      }, u64(BUY_AMOUNT))), "solana");
+    }
     console.log("4c. delegate_chip_stack (owner signs)");
     const chipAcc = delegateAccounts(chips);
     record("delegate_chip_stack", await send("delegate_chip_stack", base, wallet, buildIx(idl, "delegate_chip_stack", {
@@ -502,29 +563,24 @@ async function main() {
     })), "solana");
   }
 
-  // 4d. The bet slip (D42): the bettor opens it on Solana (the wallet pays the rent there), then
-  // delegates it to the rollup. The rollup only fills it in (place_bet_chips).
+  // 4d. The bet slip (D42): opened and delegated on Solana, unless it already is.
   const roundIdNow = decodeRound((await base.getAccountInfo(ROUND)).data).roundId;
-  const slipKey = betPda(roundIdNow, wallet.publicKey, BET_SYMBOL);
-  let slipBase = await base.getAccountInfo(slipKey);
+  const bet = betPda(roundIdNow, wallet.publicKey, BET_SYMBOL);
+  let slipBase = await base.getAccountInfo(bet);
   if (!slipBase) {
     console.log(`4d. open_chip_bet for round ${roundIdNow}, face ${BET_SYMBOL} (Solana; the wallet pays the slip's rent)`);
     record("open_chip_bet", await send("open_chip_bet", base, wallet, buildIx(idl, "open_chip_bet", {
-      round: ROUND, bet: slipKey, bettor: wallet.publicKey, system_program: SystemProgram.programId,
+      round: ROUND, bet, bettor: wallet.publicKey, system_program: SystemProgram.programId,
     }, Buffer.concat([u64(roundIdNow), u8(BET_SYMBOL)]))), "solana");
-    slipBase = await base.getAccountInfo(slipKey);
+    slipBase = await base.getAccountInfo(bet);
   } else {
     console.log("4d. the bet slip exists");
   }
   if (slipBase.owner.equals(PROGRAM_ID)) {
-    const slipData = decodeBet(slipBase.data);
-    if (slipData.amount > 0n) {
-      throw new Error(`The bet slip for round ${roundIdNow}, face ${BET_SYMBOL} is already filled (${slipData.amount} base units). Use a fresh round or face.`);
-    }
     console.log("4d. delegate_bet (the bettor signs)");
-    const slipAcc = delegateAccounts(slipKey);
+    const slipAcc = delegateAccounts(bet);
     record("delegate_bet", await send("delegate_bet", base, wallet, buildIx(idl, "delegate_bet", {
-      owner: wallet.publicKey, bet: slipKey, buffer_bet: slipAcc.buffer, delegation_record_bet: slipAcc.record,
+      owner: wallet.publicKey, bet, buffer_bet: slipAcc.buffer, delegation_record_bet: slipAcc.record,
       delegation_metadata_bet: slipAcc.metadata, owner_program: PROGRAM_ID, delegation_program: DLP_ID,
       system_program: SystemProgram.programId,
     }, Buffer.concat([u64(roundIdNow), u8(BET_SYMBOL)]))), "solana");
@@ -555,60 +611,75 @@ async function main() {
     })), "solana");
   }
 
-  // 6. Fill the slip on the rollup (no token transfer, no account created). UNVERIFIED: that the
-  // rollup accepts this call on a delegated slip.
-  console.log("6. place_bet_chips on the rollup (fills the slip opened on Solana, D42)");
-  const roundOnEr = decodeRound((await er.getAccountInfo(ROUND)).data);
-  const betRoundId = roundOnEr.roundId;
-  const bet = betPda(betRoundId, wallet.publicKey, BET_SYMBOL);
-  const betSig = await sendEr("place_bet_chips (rollup)", routerUrl, er, wallet, buildIx(idl, "place_bet_chips", {
-    table: TABLE, round: ROUND, bet, chips, bettor: wallet.publicKey, system_program: SystemProgram.programId,
-  }, Buffer.concat([u8(BET_SYMBOL), u64(BET_AMOUNT)])), [ROUND, chips]);
-  record("place_bet_chips", betSig, "rollup");
-
-  // 7. Wait out the 90 s window on the rollup clock, then request the roll there.
-  console.log("7. request_roll on DEFAULT_EPHEMERAL_QUEUE (rollup)");
-  const opened = decodeRound((await er.getAccountInfo(ROUND)).data).openedAt;
-  for (;;) {
-    const now = (await er.getAccountInfo(SYSVAR_CLOCK_PUBKEY)).data.readBigInt64LE(32);
-    if (now >= opened + WINDOW_SECS) break;
-    console.log(`   waiting: rollup clock ${now}, window closes at ${opened + WINDOW_SECS}`);
-    await sleep(5000);
-  }
-  record("request_roll", await sendEr("request_roll (rollup)", routerUrl, er, wallet, buildIx(idl, "request_roll", {
-    table: TABLE, round: ROUND, payer: wallet.publicKey, oracle_queue: EPHEMERAL_QUEUE,
-    program_identity: PROGRAM_IDENTITY, vrf_program: VRF_PROGRAM, slot_hashes: SLOT_HASHES,
-    system_program: SystemProgram.programId,
-  }), [ROUND]), "rollup");
-
-  // 8. The VRF callback: the round turns Rolled with six faces.
-  console.log("8. waiting for the VRF callback on the rollup");
-  const deadline = Date.now() + CALLBACK_MS;
-  let final = null;
-  while (Date.now() < deadline) {
-    const acc = await er.getAccountInfo(ROUND);
-    const r = acc ? decodeRound(acc.data) : null;
-    if (r && r.status === 3) { final = r; break; }
-    await sleep(3000);
-  }
-  if (!final) {
-    console.log("The round did not reach Rolled before the timeout (UNVERIFIED: the callback on the rollup).");
-    process.exitCode = 1;
+  // 6. Read the rollup state first (resume from where devnet is). Fill the slip only if it is empty.
+  const readEr = async (pk, what) => {
+    const acc = await er.getAccountInfo(pk);
+    if (!acc) throw new Error(`${what} is not on the validator yet (${validator.url}).`);
+    return acc;
+  };
+  let roundOnEr = decodeRound((await readEr(ROUND, "round_v2")).data);
+  const slipOnEr = await er.getAccountInfo(bet);
+  const slipFilled = !!slipOnEr && decodeBet(slipOnEr.data).amount > 0n;
+  if (slipFilled) {
+    console.log(`6. the bet slip is already filled on the validator (${decodeBet(slipOnEr.data).amount} base units); skipping place_bet_chips`);
   } else {
-    console.log(`Round ${final.roundId} is ${final.statusName}; faces: [${final.faces.join(", ")}]`);
+    if (roundOnEr.status !== 0 && roundOnEr.status !== 1) {
+      throw new Error(`round_v2 is ${roundOnEr.statusName} and the bet slip is empty: nothing to place.`);
+    }
+    console.log("6. place_bet_chips on the validator (fills the slip opened on Solana, D42)");
+    record("place_bet_chips", await sendEr("place_bet_chips (validator)", er, wallet, buildIx(idl, "place_bet_chips", {
+      table: TABLE, round: ROUND, bet, chips, bettor: wallet.publicKey, system_program: SystemProgram.programId,
+    }, Buffer.concat([u8(BET_SYMBOL), u64(BET_AMOUNT)]))), "rollup");
+    roundOnEr = decodeRound((await readEr(ROUND, "round_v2")).data);
   }
 
-  // 9. Undelegate the round and the chip stack (table authority), then settle on Solana.
+  // 7. request_roll only while the round is still open. Rolling: wait. Rolled: nothing to do.
+  if (roundOnEr.status === 0 || roundOnEr.status === 1) {
+    console.log("7. request_roll on DEFAULT_EPHEMERAL_QUEUE (validator), after the 90 s window");
+    const opened = roundOnEr.openedAt;
+    for (;;) {
+      const now = (await readEr(SYSVAR_CLOCK_PUBKEY, "the clock")).data.readBigInt64LE(32);
+      if (now >= opened + WINDOW_SECS) break;
+      console.log(`   waiting: validator clock ${now}, window closes at ${opened + WINDOW_SECS}`);
+      await sleep(5000);
+    }
+    record("request_roll", await sendEr("request_roll (validator)", er, wallet, buildIx(idl, "request_roll", {
+      table: TABLE, round: ROUND, payer: wallet.publicKey, oracle_queue: EPHEMERAL_QUEUE,
+      program_identity: PROGRAM_IDENTITY, vrf_program: VRF_PROGRAM, slot_hashes: SLOT_HASHES,
+      system_program: SystemProgram.programId,
+    })), "rollup");
+  } else {
+    console.log(`7. round_v2 is ${roundOnEr.statusName}; skipping request_roll`);
+  }
+
+  // 8. The VRF callback: the round turns Rolled with six faces. Skipped when already Rolled.
+  let final = roundOnEr.status === 3 ? roundOnEr : null;
+  if (!final) {
+    console.log("8. waiting for the VRF callback on the validator");
+    const deadline = Date.now() + CALLBACK_MS;
+    while (Date.now() < deadline) {
+      const r = decodeRound((await readEr(ROUND, "round_v2")).data);
+      if (r.status === 3) { final = r; break; }
+      await sleep(3000);
+    }
+    if (!final) {
+      console.log("The round did not reach Rolled before the timeout (UNVERIFIED: the callback on the validator).");
+      process.exitCode = 1;
+    }
+  }
+  if (final) console.log(`Round ${final.roundId} is ${final.statusName}; faces: [${final.faces.join(", ")}]`);
+
+  // 9. Undelegate round, chips and bet (D40, bettor or table authority), then settle and finish on Solana.
   if (final) {
     await undelegateHome({
-      label: "undelegate_round", account: ROUND, routerUrl, er, base, wallet, record,
+      label: "undelegate_round", account: ROUND, er, base, wallet, record,
       instruction: () => buildIx(idl, "undelegate_round", { payer: wallet.publicKey, config: CONFIG, round: ROUND }),
     });
     await undelegateHome(chipsUndelegate());
     await undelegateHome({
-      label: "undelegate_bet", account: bet, routerUrl, er, base, wallet, record,
+      label: "undelegate_bet", account: bet, er, base, wallet, record,
       instruction: () => buildIx(idl, "undelegate_bet", { payer: wallet.publicKey, config: CONFIG, bet },
-        Buffer.concat([u64(betRoundId), wallet.publicKey.toBuffer(), u8(BET_SYMBOL)])),
+        Buffer.concat([u64(roundIdNow), wallet.publicKey.toBuffer(), u8(BET_SYMBOL)])),
     });
 
     const home = decodeRound((await base.getAccountInfo(ROUND)).data);
@@ -628,10 +699,11 @@ async function main() {
   }
 
   console.log("\n=== Summary ===");
+  console.log(`Validator for rollup transactions: ${validator.url}`);
   for (const r of sigs) {
     const link = r.where === "solana"
       ? explorer(r.sig)
-      : `(rollup via ${routerUrl}; Explorer link UNVERIFIED) signature ${r.sig}`;
+      : `(validator ${validator.url}; Explorer link UNVERIFIED) signature ${r.sig}`;
     console.log(`${r.label}: ${r.sig}\n   ${link}`);
   }
 }

@@ -72,3 +72,7 @@ The Magic Router and the ER VRF queue are the same as in Step 11.3. See #42–#4
 ## Bet slips (D42)
 
 Accounts are never created on the rollup. A chip bet slip (`Bet` PDA) is opened and delegated on Solana first (`open_chip_bet`, `delegate_bet`), `place_bet_chips` on the rollup only fills it in, and `undelegate_bet` brings it home before settle. Why: the rollup refuses to change a non-delegated fee payer's balance (`InvalidAccountForFee`), so it cannot take rent for a new account from the bettor. UNVERIFIED on a validator: that the rollup accepts `place_bet_chips` on a delegated slip.
+
+## Transport: validator, not router (PR #109 devnet run)
+
+The ephemeral VRF queue `5hBR571…` is not delegated to one ER node. The Magic Router reports it as "delegated to unknown ER node", and it refuses a transaction that mixes accounts from different nodes ("transaction contains accounts that were delegated to different ER nodes"). So the script sends rollup transactions straight to the validator that holds round_v2 (`https://devnet-as.magicblock.app`, the fqdn from the router's `getDelegationStatus`) and takes the blockhash from that validator. The router is used only for `getDelegationStatus`. UNVERIFIED: that the direct validator path works for every rollup call the script makes; `request_roll` did work there once, in a one-off test.
