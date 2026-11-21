@@ -153,7 +153,28 @@ async function routerRpc(routerUrl, method, params) {
   return json.result;
 }
 
+// The rollup takes about 2 minutes to load a new program binary after an upgrade.
+// Until then it answers InstructionFallbackNotFound (error 101, 0x65). Only that
+// error is retried: wait 30 s, try again, up to 4 times. Every other error is final.
+const FALLBACK_PATTERNS = ["InstructionFallbackNotFound", "Error Number: 101", "custom program error: 0x65"];
+const FALLBACK_TRIES = 4;
+const FALLBACK_WAIT_MS = 30_000;
+
 async function sendEr(label, routerUrl, conn, wallet, instruction, routedAccounts) {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await sendErOnce(label, routerUrl, conn, wallet, instruction, routedAccounts);
+    } catch (err) {
+      const msg = String(err.message ?? err);
+      const retryable = FALLBACK_PATTERNS.some((p) => msg.includes(p));
+      if (!retryable || attempt >= FALLBACK_TRIES) throw err;
+      console.log(`  ${label}: try ${attempt} hit InstructionFallbackNotFound (rollup still loading the upgrade); waiting 30 s, then retrying`);
+      await new Promise((r) => setTimeout(r, FALLBACK_WAIT_MS));
+    }
+  }
+}
+
+async function sendErOnce(label, routerUrl, conn, wallet, instruction, routedAccounts) {
   try {
     const { blockhash } = await routerRpc(routerUrl, "getBlockhashForAccounts", [
       routedAccounts.map((p) => p.toBase58()),
@@ -251,6 +272,14 @@ async function layoutCheck(idl, base, er, wallet, routerUrl, record) {
       const sig = await sendEr("migrate_round (rollup)", routerUrl, er, wallet,
         buildIx(idl, "migrate_round", accounts), [ROUND]);
       record("migrate_round", sig, "rollup");
+      // A Rolled leftover round is finished on the rollup, so the bet can open a new one.
+      const after = decodeRound((await er.getAccountInfo(ROUND)).data);
+      if (after.status === 3) {
+        console.log("0c. the migrated round is Rolled; finish_round on the rollup");
+        const fsig = await sendEr("finish_round (rollup)", routerUrl, er, wallet,
+          buildIx(idl, "finish_round", { round: ROUND }), [ROUND]);
+        record("finish_round", fsig, "rollup");
+      }
     } else {
       console.log("0b. migrate_round on Solana (upgrade authority)");
       const sig = await send("migrate_round", base, wallet, buildIx(idl, "migrate_round", accounts));
