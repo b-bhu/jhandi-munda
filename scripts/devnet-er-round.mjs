@@ -141,6 +141,47 @@ async function send(label, conn, wallet, instruction) {
   }
 }
 
+async function routerRpc(routerUrl, method, params) {
+  const res = await fetch(routerUrl, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+  });
+  const json = await res.json();
+  if (json.error) throw new Error(`${method} RPC error: ${JSON.stringify(json.error)}`);
+  return json.result;
+}
+
+async function sendEr(label, routerUrl, conn, wallet, instruction, routedAccounts) {
+  try {
+    const { blockhash } = await routerRpc(routerUrl, "getBlockhashForAccounts", [
+      routedAccounts.map((p) => p.toBase58()),
+    ]);
+    const tx = new Transaction({ recentBlockhash: blockhash, feePayer: wallet.publicKey }).add(instruction);
+    tx.sign(wallet);
+    const sig = await conn.sendRawTransaction(tx.serialize(), { skipPreflight: true });
+    for (let i = 0; i < 40; i++) {
+      const st = (await conn.getSignatureStatuses([sig])).value[0];
+      if (st) {
+        if (st.err) {
+          const full = await conn.getTransaction(sig, { commitment: "confirmed", maxSupportedTransactionVersion: 0 }).catch(() => null);
+          const logs = full?.meta?.logMessages?.join("\n    ") ?? "";
+          throw new Error(`tx ${sig} failed: ${JSON.stringify(st.err)}${logs ? "\n    " + logs : ""}`);
+        }
+        if (st.confirmationStatus === "confirmed" || st.confirmationStatus === "finalized") {
+          console.log(`  ${label}: ${sig}`);
+          return sig;
+        }
+      }
+      await new Promise((r) => setTimeout(r, 500));
+    }
+    throw new Error(`tx ${sig} confirmation timed out`);
+  } catch (err) {
+    console.error(`  ${label} FAILED: ${err.message ?? err}`);
+    throw err;
+  }
+}
+
 function decodeRound(data) {
   let o = 8;
   const status = data[o++];
@@ -216,31 +257,40 @@ async function main() {
     console.log("3. MUSD account exists");
   }
 
-  // 4. Buy chips: MUSD into the cage vault (D39).
-  console.log("4. buy_chips (10 MUSD) into the cage vault");
+  // 4-5. Buy chips and delegate the chip stack (skip if already delegated).
   const chips = chipsPda(wallet.publicKey);
-  record("buy_chips", await send("buy_chips", base, wallet, buildIx(idl, "buy_chips", {
-    pool: POOL, cage_vault: CAGE, chips, owner: wallet.publicKey, owner_musd_ata: musdAta,
-    token_program: TOKEN_PROGRAM, system_program: SystemProgram.programId,
-  }, u64(BUY_AMOUNT))), "solana");
+  const chipsBase = await base.getAccountInfo(chips);
+  if (chipsBase && chipsBase.owner.equals(DLP_ID)) {
+    console.log("4-5. chip stack already delegated on Solana; skipping buy_chips & delegate_chip_stack");
+  } else {
+    console.log("4. buy_chips (10 MUSD) into the cage vault");
+    record("buy_chips", await send("buy_chips", base, wallet, buildIx(idl, "buy_chips", {
+      pool: POOL, cage_vault: CAGE, chips, owner: wallet.publicKey, owner_musd_ata: musdAta,
+      token_program: TOKEN_PROGRAM, system_program: SystemProgram.programId,
+    }, u64(BUY_AMOUNT))), "solana");
 
-  // 5. Delegate the chip stack (the owner signs).
-  console.log("5. delegate_chip_stack (owner signs)");
-  const chipAcc = delegateAccounts(chips);
-  record("delegate_chip_stack", await send("delegate_chip_stack", base, wallet, buildIx(idl, "delegate_chip_stack", {
-    owner: wallet.publicKey, chips, buffer_chips: chipAcc.buffer, delegation_record_chips: chipAcc.record,
-    delegation_metadata_chips: chipAcc.metadata, owner_program: PROGRAM_ID, delegation_program: DLP_ID,
-    system_program: SystemProgram.programId,
-  })), "solana");
+    console.log("5. delegate_chip_stack (owner signs)");
+    const chipAcc = delegateAccounts(chips);
+    record("delegate_chip_stack", await send("delegate_chip_stack", base, wallet, buildIx(idl, "delegate_chip_stack", {
+      owner: wallet.publicKey, chips, buffer_chips: chipAcc.buffer, delegation_record_chips: chipAcc.record,
+      delegation_metadata_chips: chipAcc.metadata, owner_program: PROGRAM_ID, delegation_program: DLP_ID,
+      system_program: SystemProgram.programId,
+    })), "solana");
+  }
 
-  // 6. Delegate the round (the table authority only, D40).
-  console.log("6. delegate_round to the Asia validator");
-  const roundAcc = delegateAccounts(ROUND);
-  record("delegate_round", await send("delegate_round", base, wallet, buildIx(idl, "delegate_round", {
-    payer: wallet.publicKey, config: CONFIG, round: ROUND, buffer_round: roundAcc.buffer,
-    delegation_record_round: roundAcc.record, delegation_metadata_round: roundAcc.metadata,
-    owner_program: PROGRAM_ID, delegation_program: DLP_ID, system_program: SystemProgram.programId,
-  })), "solana");
+  // 6. Delegate the round (the table authority only, D40; skip if already delegated).
+  const roundBase = await base.getAccountInfo(ROUND);
+  if (roundBase && roundBase.owner.equals(DLP_ID)) {
+    console.log("6. round already delegated on Solana; skipping delegate_round");
+  } else {
+    console.log("6. delegate_round to the Asia validator");
+    const roundAcc = delegateAccounts(ROUND);
+    record("delegate_round", await send("delegate_round", base, wallet, buildIx(idl, "delegate_round", {
+      payer: wallet.publicKey, config: CONFIG, round: ROUND, buffer_round: roundAcc.buffer,
+      delegation_record_round: roundAcc.record, delegation_metadata_round: roundAcc.metadata,
+      owner_program: PROGRAM_ID, delegation_program: DLP_ID, system_program: SystemProgram.programId,
+    })), "solana");
+  }
 
   // 7. A chip bet on the rollup (no token transfer).
   console.log("7. place_bet_chips on the rollup (UNVERIFIED: init of the Bet account there)");
@@ -248,14 +298,16 @@ async function main() {
   const roundOnEr = before ? decodeRound(before.data) : null;
   if (!roundOnEr) throw new Error("The round is not readable on the rollup yet. Retry after a few seconds.");
   const bet = betPda(roundOnEr.roundId, wallet.publicKey, BET_SYMBOL);
-  const betSig = await send("place_bet_chips (rollup)", er, wallet, buildIx(idl, "place_bet_chips", {
+  const betSig = await sendEr("place_bet_chips (rollup)", router, er, wallet, buildIx(idl, "place_bet_chips", {
     table: TABLE, round: ROUND, bet, chips, bettor: wallet.publicKey, system_program: SystemProgram.programId,
-  }, Buffer.concat([u8(BET_SYMBOL), u64(BET_AMOUNT)])));
+  }, Buffer.concat([u8(BET_SYMBOL), u64(BET_AMOUNT)])), [ROUND, chips]);
   record("place_bet_chips", betSig, "rollup");
 
   // 8. Wait out the 90 s window on the rollup clock, then request the roll there.
   console.log("8. request_roll on DEFAULT_EPHEMERAL_QUEUE (rollup)");
-  const opened = roundOnEr.openedAt;
+  const afterBetAcc = await er.getAccountInfo(ROUND);
+  const afterBet = afterBetAcc ? decodeRound(afterBetAcc.data) : roundOnEr;
+  const opened = afterBet.openedAt;
   const windowEnd = opened + WINDOW_SECS;
   for (;;) {
     const clock = await er.getAccountInfo(SYSVAR_CLOCK_PUBKEY);
@@ -264,12 +316,12 @@ async function main() {
     console.log(`   waiting: rollup clock ${now}, window closes at ${windowEnd}`);
     await new Promise((r) => setTimeout(r, 5000));
   }
-  const reqSig = await send("request_roll (rollup)", er, wallet, buildIx(idl, "request_roll", {
+  const reqSig = await sendEr("request_roll (rollup)", router, er, wallet, buildIx(idl, "request_roll", {
     table: TABLE, round: ROUND, payer: wallet.publicKey, oracle_queue: EPHEMERAL_QUEUE,
     program_identity: PROGRAM_IDENTITY, vrf_program: new PublicKey("Vrf1RNUjXmQGjmQrQLvJHs9SNkvDJEsRVFPkfSQUwGz"),
     slot_hashes: new PublicKey("SysvarS1otHashes111111111111111111111111111"),
     system_program: SystemProgram.programId,
-  }));
+  }), [ROUND]);
   record("request_roll", reqSig, "rollup");
 
   // 9. Wait for the callback: the round turns Rolled with six faces.
