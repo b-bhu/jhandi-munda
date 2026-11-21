@@ -71,3 +71,7 @@
 - D34: Bibhu decided program steps go first and the UI comes after. Demonstrated systems thinking: the UI depends on the account shape, so build it once the shape is stable.
 - Merged: 3.4 NAV after profit (#93), 4.1 table and round (#94), 4.2 first bet (#95), 4.3 multi-player and multi-symbol (#96). 17 tests passing.
 - Lessons shown on real PRs: check the change, not the total (3.4). Order of reads matters (3.4). Init front-running, where anyone can set up the table first (4.1). The PDA seed decides what is unique: `["bet", wallet]` meant one bet for life (4.2 to 4.3).
+
+## 21 Nov, morning: PR #109 devnet fixes
+- Devnet taught, one failure at a time: old account layouts need migrations; the ER won't take rent from an undelegated wallet; undelegate needs the `#[ephemeral]` callback; a half-undelegated account is stuck for good, so use a versioned seed (`round_v2`).
+- Decision D42: Bibhu chose to open chip bet slips on Solana first (over bet slots in the ChipStack). He accepted the trade-off of one Solana tx per new slip. Evidence: decision made with the trade-off shown (assisted: the coach laid out the options).
