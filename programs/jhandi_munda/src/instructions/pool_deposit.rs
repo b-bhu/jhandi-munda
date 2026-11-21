@@ -142,11 +142,23 @@ pub fn handler(ctx: Context<Deposit>, amount: u64) -> Result<()> {
         &ctx.accounts.share_mint.to_account_info(),
         MINT_SUPPLY_OFFSET,
     )?;
+    // D44: the pool's assets are its vault less what the payout queue still owes. Queued wins are
+    // IOUs, not pool money, so a new LP is priced on the assets and does not pay for old debts.
+    let queued_owed: u64 = {
+        let queue = ctx.accounts.queue.load()?;
+        let mut owed = 0u64;
+        for i in queue.head..queue.tail {
+            owed = owed.saturating_add(queue.entries[(i % QUEUE_CAPACITY as u64) as usize].amount);
+        }
+        owed
+    };
+    let assets = vault_amount.saturating_sub(queued_owed);
     let minted: u128 = if share_supply == 0 {
         amount as u128
     } else {
-        require!(vault_amount > 0, ErrorCode::InvalidPoolState);
-        amount as u128 * share_supply as u128 / vault_amount as u128
+        // Shares outstanding with no assets behind them (#114): refused until the shares are burned.
+        require!(assets > 0, ErrorCode::PoolInsolvent);
+        amount as u128 * share_supply as u128 / assets as u128
     };
     // A deposit flooring to zero shares pays MUSD for nothing: reject it.
     require!(minted > 0, ErrorCode::ZeroDeposit);
@@ -180,16 +192,8 @@ pub fn handler(ctx: Context<Deposit>, amount: u64) -> Result<()> {
 
     // D43: no shares, but MUSD in the vault: sweep it to insurance before the new deposit lands,
     // so the new LP owns exactly what they put in. UNVERIFIED on devnet: the insurance vault exists there.
-    // Money the queue still owes is not orphan: only the rest of the vault is swept.
-    let queued_owed: u64 = {
-        let queue = ctx.accounts.queue.load()?;
-        let mut owed = 0u64;
-        for i in queue.head..queue.tail {
-            owed = owed.saturating_add(queue.entries[(i % QUEUE_CAPACITY as u64) as usize].amount);
-        }
-        owed
-    };
-    let orphan = vault_amount.saturating_sub(queued_owed);
+    // Money the queue still owes is not orphan: only the assets are swept (D43, D44).
+    let orphan = assets;
     if share_supply == 0 && orphan > 0 {
         require_keys_eq!(
             *ctx.accounts.insurance_vault.owner,

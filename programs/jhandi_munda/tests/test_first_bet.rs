@@ -3043,3 +3043,101 @@ fn test_settled_round_exposes_proof_trail() {
     let b = Bet::try_deserialize(&mut t.svm.get_account(&ab).unwrap().data.as_slice()).unwrap();
     assert_eq!((b.player, b.symbol, b.amount, b.settled), (a.pubkey(), 2, 10_000_000, true), "the bet summary");
 }
+
+// --- #114: an insolvent pool (shares outstanding, no MUSD) and queued wins (D44) ---
+
+// Sets the vault's balance to zero: the state the devnet pool reached. (In a real run this comes
+// from wins paid out of an empty vault; the test writes it directly.)
+fn empty_vault(t: &mut Table) {
+    let mut acc = t.svm.get_account(&t.vault).unwrap();
+    acc.data[64..72].copy_from_slice(&0u64.to_le_bytes());
+    t.svm.set_account(t.vault, acc).unwrap();
+}
+
+#[test]
+fn test_insolvent_pool_burns_to_zero_then_mints_one_to_one() {
+    let mut t = setup();
+    let alice = new_player(&mut t);
+    let bob = new_player(&mut t);
+    let share_mint = pda(&[SHARE_MINT_SEED]);
+    deposit(&mut t, &alice, 2_000_000);
+    assert_eq!(mint_supply(&t, &share_mint), 2_000_000);
+
+    // Shares outstanding, vault at zero: a deposit errors cleanly (no divide by zero, no mint).
+    empty_vault(&mut t);
+    let e = {
+        let res = send(
+            &mut t.svm,
+            &bob,
+            ix(
+                jhandi_munda::accounts::Deposit {
+                    pool: t.pool,
+                    share_mint,
+                    vault: t.vault,
+                    depositor: bob.pubkey(),
+                    depositor_ata: jhandi_munda::musd_ata(&bob.pubkey(), &t.musd_mint),
+                    depositor_shares: jhandi_munda::share_ata(&bob.pubkey(), &share_mint),
+                    insurance_vault: pda(&[INSURANCE_VAULT_SEED]),
+                    queue: pda(&[QUEUE_SEED]),
+                    token_program: SPL_TOKEN_PROGRAM_ID,
+                    system_program: SYS,
+                    associated_token_program: jhandi_munda::ATA_PROGRAM_ID,
+                },
+                jhandi_munda::instruction::Deposit { amount: 1_000_000 },
+            ),
+        );
+        res.expect_err("a deposit into an insolvent pool is refused")
+    };
+    assert!(format!("{:?}", e.meta.logs).contains("PoolInsolvent"), "{:?}", e.meta.logs);
+    assert_eq!(mint_supply(&t, &share_mint), 2_000_000, "nothing was minted");
+
+    // Alice burns her worthless shares for 0: the pool returns to 0 shares and 0 MUSD.
+    let alice_shares = token_amount(&t.svm, &jhandi_munda::share_ata(&alice.pubkey(), &share_mint));
+    assert!(lp_withdraw(&mut t, &alice, alice_shares).is_ok(), "the burn succeeds, paying 0");
+    assert_eq!((mint_supply(&t, &share_mint), token_amount(&t.svm, &t.vault)), (0, 0));
+
+    // The next deposit mints 1:1 again.
+    deposit(&mut t, &bob, 3_000_000);
+    assert_eq!(token_amount(&t.svm, &jhandi_munda::share_ata(&bob.pubkey(), &share_mint)), 3_000_000);
+}
+
+// D44: a deposit is priced on the pool's assets (vault minus what the queue owes), so the new LP
+// does not pay for queued wins. The queued win is paid later, FIFO, from the vault (D30).
+#[test]
+fn test_deposit_prices_around_queued_wins() {
+    let mut t = setup();
+    stub_vrf(&mut t);
+    let funder = new_player(&mut t);
+    init_cage(&mut t, &funder);
+    let a = new_player(&mut t);
+    let b = new_player(&mut t);
+    let c = new_player(&mut t);
+    assert!(buy_chips(&mut t, &a, 20_000_000).is_ok());
+    assert!(buy_chips(&mut t, &b, 5_000_000).is_ok());
+    assert!(place_chip_bet(&mut t, &a, 2, 10_000_000).is_ok());
+    assert!(place_chip_bet(&mut t, &b, 4, 1_000_000).is_ok());
+    set_time(&mut t, BASE_TIME + 90);
+    let ephemeral_queue: Pubkey = "5hBR571xnXppuCPveTrctfTU7tJLSN94nq7kv7FRK5Tc".parse().unwrap();
+    assert!(request_roll_on(&mut t, &a, ephemeral_queue).is_ok());
+    let mut randomness = [0u8; 32];
+    randomness[..6].copy_from_slice(&[1, 1, 4, 5, 0, 2]);
+    let request_id = round(&t).request_id;
+    assert!(send_callback(&mut t, &a, randomness, request_id).is_ok());
+    set_time(&mut t, BASE_TIME + 100);
+    let (ab, bb) = (bet_pda_r(0, &a, 2), bet_pda_r(0, &b, 4));
+    let (ac, bc) = (pda(&[jhandi_munda::CHIPS_SEED, a.pubkey().as_ref()]), pda(&[jhandi_munda::CHIPS_SEED, b.pubkey().as_ref()]));
+    assert!(settle_chip_bets(&mut t, &a, &[(ab, ac), (bb, bc)]).is_ok());
+    // Alice's win (29.60) is queued; the vault holds 11 MUSD of stakes.
+    assert_eq!(token_amount(&t.svm, &t.vault), 11_000_000);
+
+    // The funder's 100 MUSD is the first LP money (no shares yet, so 1:1). The vault is now 111.
+    deposit(&mut t, &funder, 100_000_000);
+    let share_mint = pda(&[SHARE_MINT_SEED]);
+    assert_eq!(mint_supply(&t, &share_mint), 100_000_000);
+
+    // Carol deposits 10 MUSD. Assets are 111 - 29.60 = 81.40, so she gets 10 x 100 / 81.40 shares,
+    // not 10 x 100 / 111 (which would charge her for Alice's queued win).
+    deposit(&mut t, &c, 10_000_000);
+    let carol_shares = token_amount(&t.svm, &jhandi_munda::share_ata(&c.pubkey(), &share_mint));
+    assert_eq!(carol_shares, 12_285_012, "priced on assets, excluding the queued IOU (D44)");
+}

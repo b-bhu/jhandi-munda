@@ -143,8 +143,12 @@ pub fn handler(ctx: Context<Withdraw>, amount: u64) -> Result<()> {
     )?;
     require!(share_supply > 0, ErrorCode::InvalidPoolState);
     let paid: u128 = amount as u128 * vault_amount as u128 / share_supply as u128;
-    // A withdraw flooring to zero MUSD burns shares for nothing: reject it.
-    require!(paid > 0, ErrorCode::ZeroWithdraw);
+    // A withdraw flooring to zero MUSD burns shares for nothing: reject it, except when the pool is
+    // insolvent (no MUSD in the vault at all, #114). Then the shares can be burned for 0, so the
+    // pool returns to 0 shares and 0 MUSD, and the next deposit mints 1:1.
+    if paid == 0 {
+        require!(vault_amount == 0, ErrorCode::ZeroWithdraw);
+    }
     let paid = u64::try_from(paid).map_err(|_| ErrorCode::InvalidPoolState)?;
 
     // Burn the shares; the withdrawer's transaction signature carries through
