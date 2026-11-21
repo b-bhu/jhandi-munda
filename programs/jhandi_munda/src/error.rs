@@ -126,4 +126,6 @@ pub enum ErrorCode {
     SessionTooLong,
     #[msg("A snapshot is taken for the current UTC day only")]
     SnapshotNotToday,
+    #[msg("The pool has LP shares but no MUSD behind them: deposits are closed until the shares are burned (#114)")]
+    PoolInsolvent,
 }

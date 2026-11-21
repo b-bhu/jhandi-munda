@@ -652,8 +652,14 @@ fn test_open_claim_from_settled_bet() {
 
 // Pool deposit (the existing `deposit`): the pool needs MUSD to pay winners.
 fn deposit(t: &mut Table, funder: &Keypair, amount: u64) {
+    let res = try_deposit(t, funder, amount);
+    assert!(res.is_ok(), "deposit failed: {:?}", res.err());
+}
+
+// Like `deposit`, but returns the result (the harness logs a refused deposit instead of failing).
+fn try_deposit(t: &mut Table, funder: &Keypair, amount: u64) -> TransactionResult {
     let share_mint = pda(&[SHARE_MINT_SEED]);
-    let res = send(
+    send(
         &mut t.svm,
         funder,
         ix(
@@ -672,8 +678,7 @@ fn deposit(t: &mut Table, funder: &Keypair, amount: u64) {
             },
             jhandi_munda::instruction::Deposit { amount },
         ),
-    );
-    assert!(res.is_ok(), "deposit failed: {:?}", res.err());
+    )
 }
 
 // Creates the insurance vault (the insurance PDA is its authority).
@@ -3042,4 +3047,310 @@ fn test_settled_round_exposes_proof_trail() {
     assert_eq!(r.faces, [2, 2, 5, 6, 1, 3], "the six faces are on the round");
     let b = Bet::try_deserialize(&mut t.svm.get_account(&ab).unwrap().data.as_slice()).unwrap();
     assert_eq!((b.player, b.symbol, b.amount, b.settled), (a.pubkey(), 2, 10_000_000, true), "the bet summary");
+}
+
+// --- #114: an insolvent pool (shares outstanding, no MUSD) and queued wins (D44) ---
+
+// Sets the vault's balance to zero: the state the devnet pool reached. (In a real run this comes
+// from wins paid out of an empty vault; the test writes it directly.)
+fn empty_vault(t: &mut Table) {
+    let mut acc = t.svm.get_account(&t.vault).unwrap();
+    acc.data[64..72].copy_from_slice(&0u64.to_le_bytes());
+    t.svm.set_account(t.vault, acc).unwrap();
+}
+
+#[test]
+fn test_insolvent_pool_burns_to_zero_then_mints_one_to_one() {
+    let mut t = setup();
+    let alice = new_player(&mut t);
+    let bob = new_player(&mut t);
+    let share_mint = pda(&[SHARE_MINT_SEED]);
+    deposit(&mut t, &alice, 2_000_000);
+    assert_eq!(mint_supply(&t, &share_mint), 2_000_000);
+
+    // Shares outstanding, vault at zero: a deposit errors cleanly (no divide by zero, no mint).
+    empty_vault(&mut t);
+    let e = {
+        let res = send(
+            &mut t.svm,
+            &bob,
+            ix(
+                jhandi_munda::accounts::Deposit {
+                    pool: t.pool,
+                    share_mint,
+                    vault: t.vault,
+                    depositor: bob.pubkey(),
+                    depositor_ata: jhandi_munda::musd_ata(&bob.pubkey(), &t.musd_mint),
+                    depositor_shares: jhandi_munda::share_ata(&bob.pubkey(), &share_mint),
+                    insurance_vault: pda(&[INSURANCE_VAULT_SEED]),
+                    queue: pda(&[QUEUE_SEED]),
+                    token_program: SPL_TOKEN_PROGRAM_ID,
+                    system_program: SYS,
+                    associated_token_program: jhandi_munda::ATA_PROGRAM_ID,
+                },
+                jhandi_munda::instruction::Deposit { amount: 1_000_000 },
+            ),
+        );
+        res.expect_err("a deposit into an insolvent pool is refused")
+    };
+    assert!(format!("{:?}", e.meta.logs).contains("PoolInsolvent"), "{:?}", e.meta.logs);
+    assert_eq!(mint_supply(&t, &share_mint), 2_000_000, "nothing was minted");
+
+    // Alice burns her worthless shares for 0: the pool returns to 0 shares and 0 MUSD.
+    let alice_shares = token_amount(&t.svm, &jhandi_munda::share_ata(&alice.pubkey(), &share_mint));
+    assert!(lp_withdraw(&mut t, &alice, alice_shares).is_ok(), "the burn succeeds, paying 0");
+    assert_eq!((mint_supply(&t, &share_mint), token_amount(&t.svm, &t.vault)), (0, 0));
+
+    // The next deposit mints 1:1 again.
+    deposit(&mut t, &bob, 3_000_000);
+    assert_eq!(token_amount(&t.svm, &jhandi_munda::share_ata(&bob.pubkey(), &share_mint)), 3_000_000);
+}
+
+// D44: a deposit is priced on the pool's assets (vault minus what the queue owes), so the new LP
+// does not pay for queued wins. The queued win is paid later, FIFO, from the vault (D30).
+#[test]
+fn test_deposit_prices_around_queued_wins() {
+    let mut t = setup();
+    stub_vrf(&mut t);
+    let funder = new_player(&mut t);
+    init_cage(&mut t, &funder);
+    let a = new_player(&mut t);
+    let b = new_player(&mut t);
+    let c = new_player(&mut t);
+    assert!(buy_chips(&mut t, &a, 20_000_000).is_ok());
+    assert!(buy_chips(&mut t, &b, 5_000_000).is_ok());
+    assert!(place_chip_bet(&mut t, &a, 2, 10_000_000).is_ok());
+    assert!(place_chip_bet(&mut t, &b, 4, 1_000_000).is_ok());
+    set_time(&mut t, BASE_TIME + 90);
+    let ephemeral_queue: Pubkey = "5hBR571xnXppuCPveTrctfTU7tJLSN94nq7kv7FRK5Tc".parse().unwrap();
+    assert!(request_roll_on(&mut t, &a, ephemeral_queue).is_ok());
+    let mut randomness = [0u8; 32];
+    randomness[..6].copy_from_slice(&[1, 1, 4, 5, 0, 2]);
+    let request_id = round(&t).request_id;
+    assert!(send_callback(&mut t, &a, randomness, request_id).is_ok());
+    set_time(&mut t, BASE_TIME + 100);
+    let (ab, bb) = (bet_pda_r(0, &a, 2), bet_pda_r(0, &b, 4));
+    let (ac, bc) = (pda(&[jhandi_munda::CHIPS_SEED, a.pubkey().as_ref()]), pda(&[jhandi_munda::CHIPS_SEED, b.pubkey().as_ref()]));
+    assert!(settle_chip_bets(&mut t, &a, &[(ab, ac), (bb, bc)]).is_ok());
+    // Alice's win (29.60) is queued; the vault holds 11 MUSD of stakes.
+    assert_eq!(token_amount(&t.svm, &t.vault), 11_000_000);
+
+    // The funder's 100 MUSD is the first LP money (no shares yet, so 1:1). The vault is now 111.
+    deposit(&mut t, &funder, 100_000_000);
+    let share_mint = pda(&[SHARE_MINT_SEED]);
+    assert_eq!(mint_supply(&t, &share_mint), 100_000_000);
+
+    // Carol deposits 10 MUSD. Assets are 111 - 29.60 = 81.40, so she gets 10 x 100 / 81.40 shares,
+    // not 10 x 100 / 111 (which would charge her for Alice's queued win).
+    deposit(&mut t, &c, 10_000_000);
+    let carol_shares = token_amount(&t.svm, &jhandi_munda::share_ata(&c.pubkey(), &share_mint));
+    assert_eq!(carol_shares, 12_285_012, "priced on assets, excluding the queued IOU (D44)");
+}
+
+// --- #61: scripted multi-round harness (D32) ---
+//
+// Plays N rounds against the real program (LiteSVM): chip bets, the VRF roll through the callback,
+// settle, finish, next round. Replayable: every choice comes from a seeded generator. A player with
+// less than one bet of chips sits out. An LP adds 5 MUSD every 10 rounds, and each round the FIFO
+// queue is paid where the pool can afford it.
+
+// A small seeded generator (SplitMix64): the same seed gives the same run.
+struct Lcg(u64);
+impl Lcg {
+    fn next(&mut self) -> u64 {
+        self.0 = self.0.wrapping_add(0x9E37_79B9_7F4A_7C15);
+        let mut z = self.0;
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+        z ^ (z >> 31)
+    }
+}
+
+// The pool's numbers the harness prints: MUSD in the vault, NAV per share (6 decimals), queued
+// wins, and the insurance fund.
+#[derive(Clone, Copy)]
+struct PoolStats {
+    vault: u64,
+    nav_micro: u64,
+    queue_len: u64,
+    insurance: u64,
+}
+
+fn pool_stats(t: &Table) -> PoolStats {
+    let supply = mint_supply(t, &pda(&[SHARE_MINT_SEED]));
+    let vault = token_amount(&t.svm, &t.vault);
+    let nav_micro = if supply == 0 { 1_000_000 } else { (vault as u128 * 1_000_000 / supply as u128) as u64 };
+    let queue = t.svm.get_account(&pda(&[QUEUE_SEED])).unwrap().data;
+    let head = u64::from_le_bytes(queue[8..16].try_into().unwrap());
+    let tail = u64::from_le_bytes(queue[16..24].try_into().unwrap());
+    PoolStats {
+        vault,
+        nav_micro,
+        queue_len: tail - head,
+        insurance: token_amount(&t.svm, &pda(&[INSURANCE_VAULT_SEED])),
+    }
+}
+
+// The claims (chip stacks, for chip wins) waiting in the queue, in FIFO order.
+fn queued_stacks(t: &Table) -> Vec<Pubkey> {
+    let data = t.svm.get_account(&pda(&[QUEUE_SEED])).unwrap().data;
+    let head = u64::from_le_bytes(data[8..16].try_into().unwrap());
+    let tail = u64::from_le_bytes(data[16..24].try_into().unwrap());
+    (head..tail)
+        .map(|i| {
+            let at = 24 + (i % jhandi_munda::QUEUE_CAPACITY as u64) as usize * 40;
+            Pubkey::new_from_array(data[at..at + 32].try_into().unwrap())
+        })
+        .collect()
+}
+
+// The documented demo jackpot (#62): round JACKPOT_ROUND (index 16, the 17th round) is injected.
+// Player 0 bets face 6 and the roll shows six 6s: six matches, a 101x gross, owed 99 MUSD on a
+// 1 MUSD stake. This is a demo injection in the test harness only; production VRF is never forced.
+const JACKPOT_ROUND: u64 = 16;
+
+// Plays `rounds` rounds from the seed. Returns one summary line per round, plus the jackpot's
+// before/after block when the run reaches JACKPOT_ROUND.
+fn run_rounds(rounds: u64, seed: u64) -> Vec<String> {
+    let mut rng = Lcg(seed);
+    let mut t = setup();
+    stub_vrf(&mut t);
+    let funder = new_player(&mut t);
+    init_cage(&mut t, &funder);
+    init_insurance(&mut t, &funder);
+    deposit(&mut t, &funder, 20_000_000);
+    let players: Vec<Keypair> = (0..3).map(|_| new_player(&mut t)).collect();
+    for p in &players {
+        assert!(buy_chips(&mut t, p, 40_000_000).is_ok(), "chips for the session");
+    }
+    let ephemeral_queue: Pubkey = "5hBR571xnXppuCPveTrctfTU7tJLSN94nq7kv7FRK5Tc".parse().unwrap();
+    let mut lines = Vec::new();
+
+    for r in 0..rounds {
+        let start = BASE_TIME + (r as i64) * 200;
+        set_time(&mut t, start);
+        let round_id = round(&t).round_id;
+
+        // Each player with chips bets 1 MUSD on a random face.
+        let mut bets: Vec<(usize, u8)> = Vec::new();
+        let jackpot = r == JACKPOT_ROUND;
+        for (i, p) in players.iter().enumerate() {
+            let random_face = (rng.next() % 6) as u8 + 1;
+            if chip_balance(&t, p) < 1_000_000 {
+                continue;
+            }
+            let face = if jackpot && i == 0 { 6 } else { random_face };
+            assert!(place_chip_bet(&mut t, p, face, 1_000_000).is_ok(), "round {r}: a bet");
+            bets.push((i, face));
+        }
+        let bet_text: Vec<String> = bets
+            .iter()
+            .map(|(i, f)| format!("P{}:f{}", i, f))
+            .collect();
+
+        // The roll: a VRF value per die. Bytes 0..=5 give faces 1..=6.
+        set_time(&mut t, start + 90);
+        assert!(request_roll_on(&mut t, &players[0], ephemeral_queue).is_ok(), "round {r}: request the roll");
+        let mut randomness = [0u8; 32];
+        for d in 0..6 {
+            randomness[d] = (rng.next() % 6) as u8;
+        }
+        if jackpot {
+            randomness[..6].copy_from_slice(&[5; 6]); // six 6s
+        }
+        let request_id = round(&t).request_id;
+        assert!(send_callback(&mut t, &players[0], randomness, request_id).is_ok(), "round {r}: the callback");
+        let faces = round(&t).faces;
+
+        // Settle every bet of the round, then finish it. The jackpot block records the pool first.
+        set_time(&mut t, start + 100);
+        let before = pool_stats(&t);
+        let pairs: Vec<(Pubkey, Pubkey)> = bets
+            .iter()
+            .map(|(i, f)| (bet_pda_r(round_id, &players[*i], *f), chip_stack(&players[*i])))
+            .collect();
+        assert!(settle_chip_bets(&mut t, &players[0], &pairs).is_ok(), "round {r}: settle");
+        let after_settle = pool_stats(&t);
+        assert!(finish_round(&mut t, &players[0]).is_ok(), "round {r}: finish");
+
+        // Every tenth round an LP adds 5 MUSD; the queue is paid FIFO where the pool can afford it.
+        let mut deposit_note = String::new();
+        if (r + 1) % 10 == 0 {
+            match try_deposit(&mut t, &funder, 5_000_000) {
+                Ok(_) => {}
+                Err(e) if format!("{:?}", e.meta.logs).contains("PoolInsolvent") => {
+                    // The queue owes more than the vault: LP money is refused until bet stakes catch up (D44).
+                    deposit_note = " | LP deposit refused: pool insolvent (queue owes more than the vault)".to_string();
+                }
+                Err(e) => panic!("round {r}: the LP deposit failed for another reason: {:?}", e.err),
+            }
+        }
+        let stacks = queued_stacks(&t);
+        if !stacks.is_empty() {
+            assert!(pay_queue_chips(&mut t, &players[0], &stacks).is_ok(), "round {r}: pay the queue");
+        }
+
+        let s = pool_stats(&t);
+        if jackpot {
+            // 1 MUSD stake, 6 matches: 101 gross, 99 owed after the 2% win fee on the 100 profit.
+            lines.push(format!(
+                "JACKPOT round {} (index {}): P0 bet 1.000000 on face 6, faces {:?}, six matches, 101x gross, owed 99.000000\n\
+                 \x20 before settle: pool {} | queue {} | insurance {}\n\
+                 \x20 after settle:  pool {} | queue {} | insurance {}  (queued when the pool is short)\n\
+                 \x20 after the queue pass and the round: pool {} | queue {} | insurance {}",
+                round_id, r, faces,
+                before.vault, before.queue_len, before.insurance,
+                after_settle.vault, after_settle.queue_len, after_settle.insurance,
+                s.vault, s.queue_len, s.insurance,
+            ));
+        }
+        lines.push(format!(
+            "round {:>3} | bets {:<16} | faces {:?} | pool {:>10} | NAV {:>9.6} | queue {} | insurance {}{}",
+            round_id,
+            if bet_text.is_empty() { "-".to_string() } else { bet_text.join(" ") },
+            faces,
+            s.vault,
+            s.nav_micro as f64 / 1e6,
+            s.queue_len,
+            s.insurance,
+            deposit_note,
+        ));
+    }
+    lines
+}
+
+// The run reaches the jackpot round: it contains a six-match hit, and the pool could not pay it, so
+// the win waited in the queue rather than failing the round (#62).
+#[test]
+fn test_jackpot_round_is_queued_not_a_crash() {
+    let lines = run_rounds(JACKPOT_ROUND + 2, 1);
+    let jackpot = lines.iter().find(|l| l.starts_with("JACKPOT")).expect("the jackpot round ran");
+    assert!(jackpot.contains("six matches"), "{jackpot}");
+    // The jackpot is owed 99 and the pool is short, so the queue is not empty after settle (another
+    // short win may queue too, so the count is not fixed).
+    let after = jackpot.lines().find(|l| l.contains("after settle")).expect("after-settle line");
+    assert!(!after.contains("queue 0"), "the win queued: {jackpot}");
+    println!("{jackpot}");
+}
+
+#[test]
+fn test_sim_five_rounds_run_to_the_end() {
+    let lines = run_rounds(5, 1);
+    assert_eq!(lines.len(), 5, "five rounds played");
+    for line in &lines {
+        println!("{line}");
+    }
+}
+
+// The documented command runs this with the rounds and seed from the environment:
+//   ./scripts/sim-rounds.sh --rounds 50 --seed 1
+#[test]
+#[ignore]
+fn sim_rounds_from_env() {
+    let rounds: u64 = std::env::var("SIM_ROUNDS").ok().and_then(|v| v.parse().ok()).unwrap_or(5);
+    let seed: u64 = std::env::var("SIM_SEED").ok().and_then(|v| v.parse().ok()).unwrap_or(1);
+    println!("simulation: {rounds} rounds, seed {seed}");
+    for line in run_rounds(rounds, seed) {
+        println!("{line}");
+    }
 }
