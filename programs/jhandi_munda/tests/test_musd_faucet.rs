@@ -5,7 +5,7 @@ use {
         InstructionData, ToAccountMetas,
     },
     jhandi_munda::{
-        error::ErrorCode, state::FaucetRecord, CONFIG_SEED, FAUCET_AMOUNT, FAUCET_COOLDOWN_SECS,
+        state::FaucetRecord, CONFIG_SEED, FAUCET_AMOUNT, FAUCET_COOLDOWN_SECS,
         FAUCET_RECORD_SEED, MUSD_MINT_AUTHORITY_SEED, MUSD_MINT_SEED, SPL_TOKEN_PROGRAM_ID,
     },
     litesvm::{types::TransactionResult, LiteSVM},

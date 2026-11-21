@@ -41,6 +41,8 @@ pub struct OpenClaim<'info> {
 pub fn handle_open_claim(ctx: Context<OpenClaim>) -> Result<()> {
     let bet = &ctx.accounts.bet;
     require!(bet.settled, ErrorCode::BetNotSettled);
+    // A chip bet is paid into chips at settle (D39); it has no claim.
+    require!(!bet.paid_with_chips, ErrorCode::ChipBetSettledToChips);
 
     // A win pays its owed MUSD after one round (D7). A loss pays MUNDA at one
     // base unit per base unit lost, after 24 hours (D23, D26).

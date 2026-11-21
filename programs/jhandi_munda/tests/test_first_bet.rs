@@ -307,8 +307,13 @@ fn stub_vrf(t: &mut Table) {
     t.svm.add_program(VRF_PROGRAM.parse::<Pubkey>().unwrap(), bytes).unwrap();
 }
 
-// Requests a VRF roll for the open round, signed by `payer`.
+// Requests a VRF roll for the open round, signed by `payer`, on the base-layer queue.
 fn request_roll(t: &mut Table, payer: &Keypair) -> TransactionResult {
+    request_roll_on(t, payer, DEFAULT_QUEUE_ID.parse().unwrap())
+}
+
+// Requests a VRF roll on the given queue (Step 11.3 accepts the ephemeral queue).
+fn request_roll_on(t: &mut Table, payer: &Keypair, queue: Pubkey) -> TransactionResult {
     send(
         &mut t.svm,
         payer,
@@ -317,7 +322,7 @@ fn request_roll(t: &mut Table, payer: &Keypair) -> TransactionResult {
                 table: t.table,
                 round: t.round,
                 payer: payer.pubkey(),
-                oracle_queue: DEFAULT_QUEUE_ID.parse().unwrap(),
+                oracle_queue: queue,
                 program_identity: pda(&[b"identity"]),
                 vrf_program: VRF_PROGRAM.parse().unwrap(),
                 slot_hashes: SLOT_HASHES.parse().unwrap(),
@@ -658,6 +663,7 @@ fn deposit(t: &mut Table, funder: &Keypair, amount: u64) {
                 depositor: funder.pubkey(),
                 depositor_ata: jhandi_munda::musd_ata(&funder.pubkey(), &t.musd_mint),
                 depositor_shares: jhandi_munda::share_ata(&funder.pubkey(), &share_mint),
+                insurance_vault: Pubkey::find_program_address(&[jhandi_munda::INSURANCE_VAULT_SEED], &jhandi_munda::id()).0,
                 token_program: SPL_TOKEN_PROGRAM_ID,
                 system_program: SYS,
                 associated_token_program: jhandi_munda::ATA_PROGRAM_ID,
@@ -1682,12 +1688,14 @@ fn test_delegate_round_size_under_er_cap() {
         &dlp_id(),
     )
     .0;
+    // Only the table authority (D40) may delegate: the admin pays here.
     let res = send(
         &mut t.svm,
-        &alice,
+        &t.admin,
         ix(
             jhandi_munda::accounts::DelegateRound {
-                payer: alice.pubkey(),
+                payer: t.admin.pubkey(),
+                config: t.config,
                 round,
                 buffer_round: buffer,
                 delegation_record_round: record,
@@ -1706,4 +1714,983 @@ fn test_delegate_round_size_under_er_cap() {
     assert_eq!(after.owner, dlp_id(), "the round is now owned by the delegation program");
     assert_eq!(after.data.len(), size, "delegated round keeps its size");
     assert!(after.data.len() <= 10_240);
+}
+
+#[test]
+fn test_delegate_rejects_stranger() {
+    let mut t = setup();
+    stub_vrf(&mut t);
+    t.svm.add_program(dlp_id(), include_bytes!("fixtures/vrf_stub.so")).unwrap();
+    let alice = new_player(&mut t);
+    assert!(place(&mut t, &alice, 2, 10_000_000).is_ok());
+    let round = t.round;
+    let owner_before = t.svm.get_account(&round).unwrap().owner;
+
+    // A stranger (not the config admin, D40) cannot delegate the round.
+    let program = jhandi_munda::id();
+    let buffer = Pubkey::find_program_address(&[ephemeral_rollups_sdk::pda::DELEGATE_BUFFER_TAG, round.as_ref()], &program).0;
+    let record = Pubkey::find_program_address(&[ephemeral_rollups_sdk::pda::DELEGATION_RECORD_TAG, round.as_ref()], &dlp_id()).0;
+    let metadata = Pubkey::find_program_address(&[ephemeral_rollups_sdk::pda::DELEGATION_METADATA_TAG, round.as_ref()], &dlp_id()).0;
+    let stranger_ix = || ix(
+        jhandi_munda::accounts::DelegateRound {
+            payer: alice.pubkey(),
+            config: t.config,
+            round,
+            buffer_round: buffer,
+            delegation_record_round: record,
+            delegation_metadata_round: metadata,
+            owner_program: program,
+            delegation_program: dlp_id(),
+            system_program: SYS,
+        },
+        jhandi_munda::instruction::DelegateRound {},
+    );
+    assert!(send(&mut t.svm, &alice, stranger_ix()).is_err(), "a stranger is rejected");
+    assert_eq!(t.svm.get_account(&round).unwrap().owner, owner_before, "the round did not move");
+}
+
+// --- Chips at the cage (Step 11.3) ---
+
+fn chip_stack(owner: &Keypair) -> Pubkey {
+    pda(&[jhandi_munda::CHIPS_SEED, owner.pubkey().as_ref()])
+}
+
+fn chip_balance(t: &Table, owner: &Keypair) -> u64 {
+    let data = t.svm.get_account(&chip_stack(owner)).unwrap().data;
+    jhandi_munda::state::ChipStack::try_deserialize(&mut data.as_slice()).unwrap().balance
+}
+
+fn cage() -> Pubkey {
+    pda(&[jhandi_munda::CAGE_VAULT_SEED])
+}
+
+fn init_cage(t: &mut Table, payer: &Keypair) {
+    let res = send(
+        &mut t.svm,
+        payer,
+        ix(
+            jhandi_munda::accounts::InitCage {
+                config: t.config,
+                pool: t.pool,
+                cage_vault: cage(),
+                musd_mint: t.musd_mint,
+                payer: payer.pubkey(),
+                token_program: SPL_TOKEN_PROGRAM_ID,
+                system_program: SYS,
+            },
+            jhandi_munda::instruction::InitCage {},
+        ),
+    );
+    assert!(res.is_ok(), "init_cage failed: {:?}", res.err());
+}
+
+// Settles chip bets: `pairs` are (bet, chip stack).
+fn settle_chip_bets(t: &mut Table, signer: &Keypair, pairs: &[(Pubkey, Pubkey)]) -> TransactionResult {
+    let mut instruction = ix(
+        jhandi_munda::accounts::SettleChipBets {
+            table: t.table,
+            round: t.round,
+            pool: t.pool,
+            pool_vault: t.vault,
+            cage_vault: cage(),
+            token_program: SPL_TOKEN_PROGRAM_ID,
+        },
+        jhandi_munda::instruction::SettleChipBets {},
+    );
+    for (bet, chips) in pairs {
+        instruction.accounts.push(AccountMeta::new(*bet, false));
+        instruction.accounts.push(AccountMeta::new(*chips, false));
+    }
+    send(&mut t.svm, signer, instruction)
+}
+
+fn buy_chips(t: &mut Table, owner: &Keypair, amount: u64) -> TransactionResult {
+    send(
+        &mut t.svm,
+        owner,
+        ix(
+            jhandi_munda::accounts::BuyChips {
+                pool: t.pool,
+                cage_vault: cage(),
+                chips: chip_stack(owner),
+                owner: owner.pubkey(),
+                owner_musd_ata: jhandi_munda::musd_ata(&owner.pubkey(), &t.musd_mint),
+                token_program: SPL_TOKEN_PROGRAM_ID,
+                system_program: SYS,
+            },
+            jhandi_munda::instruction::BuyChips { amount },
+        ),
+    )
+}
+
+fn cash_out(t: &mut Table, owner: &Keypair, amount: u64) -> TransactionResult {
+    send(
+        &mut t.svm,
+        owner,
+        ix(
+            jhandi_munda::accounts::CashOut {
+                pool: t.pool,
+                cage_vault: cage(),
+                queue: pda(&[QUEUE_SEED]),
+                chips: chip_stack(owner),
+                owner: owner.pubkey(),
+                owner_musd_ata: jhandi_munda::musd_ata(&owner.pubkey(), &t.musd_mint),
+                token_program: SPL_TOKEN_PROGRAM_ID,
+            },
+            jhandi_munda::instruction::CashOut { amount },
+        ),
+    )
+}
+
+// A bet paid from chips: no token transfer, the round is the only thing that changes.
+// D42: the slip is opened on Solana first. The helper opens it when it is not open yet, so
+// existing chip-bet tests keep their meaning; `place_chip_bet_raw` does not open anything.
+fn place_chip_bet(t: &mut Table, bettor: &Keypair, symbol: u8, amount: u64) -> TransactionResult {
+    let round_id = round(t).round_id;
+    if t.svm.get_account(&bet_pda_r(round_id, bettor, symbol)).is_none() {
+        open_chip_bet(t, bettor, round_id, symbol).expect("open the slip");
+    }
+    place_chip_bet_raw(t, bettor, bet_pda_r(round_id, bettor, symbol), symbol, amount)
+}
+
+fn place_chip_bet_raw(t: &mut Table, bettor: &Keypair, bet: Pubkey, symbol: u8, amount: u64) -> TransactionResult {
+    send(
+        &mut t.svm,
+        bettor,
+        ix(
+            jhandi_munda::accounts::PlaceBetChips {
+                table: t.table,
+                round: t.round,
+                bet,
+                chips: chip_stack(bettor),
+                bettor: bettor.pubkey(),
+                system_program: SYS,
+            },
+            jhandi_munda::instruction::PlaceBetChips { symbol, amount },
+        ),
+    )
+}
+
+#[test]
+fn test_er_bets_on_chips() {
+    let mut t = setup();
+    stub_vrf(&mut t);
+    // The pool holds 100 MUSD from an LP deposit: wins can be paid from it.
+    let funder = new_player(&mut t);
+    deposit(&mut t, &funder, 100_000_000);
+    init_cage(&mut t, &funder);
+    let a = new_player(&mut t);
+    let b = new_player(&mut t);
+
+    // Chips are bought on Solana: the MUSD moves into the cage, not the pool.
+    assert!(buy_chips(&mut t, &a, 20_000_000).is_ok());
+    assert_eq!(chip_balance(&t, &a), 20_000_000);
+    assert_eq!(token_amount(&t.svm, &cage()), 20_000_000, "chip money is in the cage");
+    assert_eq!(token_amount(&t.svm, &t.vault), 100_000_000, "pool is unchanged by chip money");
+    assert!(buy_chips(&mut t, &b, 5_000_000).is_ok());
+    assert_eq!(token_amount(&t.svm, &cage()), 25_000_000);
+
+    // A chip bet subtracts chips and moves no tokens: the stake waits in the cage.
+    assert!(place_chip_bet(&mut t, &a, 2, 10_000_000).is_ok(), "a chip bet opens the round");
+    assert_eq!(chip_balance(&t, &a), 10_000_000);
+    assert_eq!(token_amount(&t.svm, &cage()), 25_000_000, "no token transfer for a chip bet");
+    assert!(place_chip_bet(&mut t, &a, 4, 11_000_000).is_err(), "more than the chips held is refused");
+    assert!(place_chip_bet(&mut t, &b, 4, 1_000_000).is_ok(), "a second player joins");
+    assert_eq!(round(&t).players, vec![a.pubkey(), b.pubkey()]);
+
+    // The VRF request goes on the ephemeral queue (D11, D20); any other queue is refused.
+    set_time(&mut t, BASE_TIME + 90);
+    let ephemeral_queue: Pubkey = "5hBR571xnXppuCPveTrctfTU7tJLSN94nq7kv7FRK5Tc".parse().unwrap();
+    assert!(request_roll_on(&mut t, &a, pda(&[b"not_a_queue"])).is_err(), "a foreign queue is refused");
+    assert!(request_roll_on(&mut t, &a, ephemeral_queue).is_ok(), "the ephemeral queue is accepted");
+    let mut randomness = [0u8; 32];
+    randomness[..6].copy_from_slice(&[1, 1, 4, 5, 0, 2]);
+    let request_id = round(&t).request_id;
+    assert!(send_callback(&mut t, &a, randomness, request_id).is_ok());
+    assert_eq!(round(&t).faces, [2, 2, 5, 6, 1, 3]);
+
+    // Settle the chip bets (D39): the stakes move cage -> pool (+11), and Alice's
+    // win is paid pool -> cage (29.60) and credited to her chips.
+    set_time(&mut t, BASE_TIME + 100);
+    let (ab, bb) = (bet_pda_r(0, &a, 2), bet_pda_r(0, &b, 4));
+    let (ac, bc) = (pda(&[jhandi_munda::CHIPS_SEED, a.pubkey().as_ref()]), pda(&[jhandi_munda::CHIPS_SEED, b.pubkey().as_ref()]));
+    assert!(settle_chip_bets(&mut t, &a, &[(ab, ac), (bb, bc)]).is_ok());
+    assert!(finish_round(&mut t, &a).is_ok());
+    assert_eq!(token_amount(&t.svm, &t.vault), 100_000_000 + 11_000_000 - 29_600_000, "pool: stakes in, win out");
+    assert_eq!(token_amount(&t.svm, &cage()), 25_000_000 - 11_000_000 + 29_600_000, "cage: stakes out, win in");
+    assert_eq!(chip_balance(&t, &a), 10_000_000 + 29_600_000, "Alice's win is credited to chips");
+    assert_eq!(chip_balance(&t, &b), 4_000_000, "Bob's loss: no credit");
+    // Invariant: the cage holds exactly the chips players hold.
+    assert_eq!(token_amount(&t.svm, &cage()), chip_balance(&t, &a) + chip_balance(&t, &b));
+    // A chip bet is paid into chips, so it has no claim.
+    assert!(open_claim(&mut t, &a, &ab).is_err(), "no claim for a chip bet");
+
+    // Cash-out turns chips back into MUSD from the cage (queue empty, D30).
+    let ata = jhandi_munda::musd_ata(&a.pubkey(), &t.musd_mint);
+    let ata_before = token_amount(&t.svm, &ata);
+    assert!(cash_out(&mut t, &a, 5_000_000).is_ok());
+    assert_eq!(chip_balance(&t, &a), 34_600_000);
+    assert_eq!(token_amount(&t.svm, &ata), ata_before + 5_000_000);
+    assert_eq!(token_amount(&t.svm, &cage()), 43_600_000 - 5_000_000);
+    assert!(cash_out(&mut t, &a, 50_000_000).is_err(), "cannot cash out more chips than held");
+}
+
+#[test]
+fn test_chip_money_not_in_lp_nav() {
+    let mut t = setup();
+    stub_vrf(&mut t);
+    // An LP deposits 5 MUSD: 5,000,000 shares, pool NAV $1.
+    let lp = new_player(&mut t);
+    deposit(&mut t, &lp, 5_000_000);
+    init_cage(&mut t, &lp);
+    let nav_before = token_amount(&t.svm, &t.vault);
+
+    // A player buys 20 chips. The pool is untouched, so NAV is unchanged.
+    let buyer = new_player(&mut t);
+    assert!(buy_chips(&mut t, &buyer, 20_000_000).is_ok());
+    assert_eq!(token_amount(&t.svm, &t.vault), nav_before, "chip money is not pool money");
+
+    // One share is still worth $1: 1,000,000 shares pay 1,000,000 MUSD.
+    let lp_ata = jhandi_munda::musd_ata(&lp.pubkey(), &t.musd_mint);
+    let before = token_amount(&t.svm, &lp_ata);
+    assert!(lp_withdraw(&mut t, &lp, 1_000_000).is_ok());
+    assert_eq!(token_amount(&t.svm, &lp_ata) - before, 1_000_000, "LP paid at pool NAV");
+
+    // The LP cannot take the chip money: the rest of the shares pay only pool money.
+    let before = token_amount(&t.svm, &lp_ata);
+    assert!(lp_withdraw(&mut t, &lp, 4_000_000).is_ok());
+    assert_eq!(token_amount(&t.svm, &lp_ata) - before, 4_000_000, "not 24,000,000");
+    assert_eq!(token_amount(&t.svm, &cage()), 20_000_000, "the cage still holds the chips");
+    assert_eq!(chip_balance(&t, &buyer), 20_000_000);
+}
+
+#[test]
+fn test_delegated_chips_cannot_cash_out() {
+    let mut t = setup();
+    stub_vrf(&mut t);
+    t.svm.add_program(dlp_id(), include_bytes!("fixtures/vrf_stub.so")).unwrap();
+    let funder = new_player(&mut t);
+    init_cage(&mut t, &funder);
+    let a = new_player(&mut t);
+    assert!(buy_chips(&mut t, &a, 10_000_000).is_ok());
+
+    // Delegate the chip stack with the owner's signature; it is tiny (49 bytes).
+    let chips = chip_stack(&a);
+    let size = t.svm.get_account(&chips).unwrap().data.len();
+    assert!(size <= 10_240, "chip stack is {size} bytes");
+    let buffer = pda_with(&[ephemeral_rollups_sdk::pda::DELEGATE_BUFFER_TAG, chips.as_ref()], &jhandi_munda::id());
+    let record = pda_with(&[ephemeral_rollups_sdk::pda::DELEGATION_RECORD_TAG, chips.as_ref()], &dlp_id());
+    let metadata = pda_with(&[ephemeral_rollups_sdk::pda::DELEGATION_METADATA_TAG, chips.as_ref()], &dlp_id());
+    let res = send(
+        &mut t.svm,
+        &a,
+        ix(
+            jhandi_munda::accounts::DelegateChipStack {
+                owner: a.pubkey(),
+                chips,
+                buffer_chips: buffer,
+                delegation_record_chips: record,
+                delegation_metadata_chips: metadata,
+                owner_program: jhandi_munda::id(),
+                delegation_program: dlp_id(),
+                system_program: SYS,
+            },
+            jhandi_munda::instruction::DelegateChipStack {},
+        ),
+    );
+    assert!(res.is_ok(), "delegate_chip_stack failed: {:?}", res.err());
+    assert_eq!(t.svm.get_account(&chips).unwrap().owner, dlp_id(), "the chips moved to the rollup");
+
+    // Cash-out needs Solana: a delegated stack is refused.
+    assert!(cash_out(&mut t, &a, 1_000_000).is_err(), "no cash-out while delegated");
+}
+
+fn pda_with(seeds: &[&[u8]], program: &Pubkey) -> Pubkey {
+    Pubkey::find_program_address(seeds, program).0
+}
+
+// --- migrate_config (Step 11.2 follow-up) ---
+
+// Makes `authority` the upgrade authority in this program's ProgramData account.
+fn set_upgrade_authority(t: &mut Table, authority: &Pubkey) {
+    let pd = pda_with(&[jhandi_munda::id().as_ref()], &anchor_lang::solana_program::bpf_loader_upgradeable::id());
+    let mut acc = t.svm.get_account(&pd).expect("ProgramData exists");
+    let elf = acc.data[13..].to_vec(); // the header is 13 bytes when the authority is None
+    let mut data = Vec::with_capacity(45 + elf.len());
+    data.extend_from_slice(&[3, 0, 0, 0]);
+    data.extend_from_slice(&acc.data[4..12]); // slot
+    data.push(1); // Some(authority)
+    data.extend_from_slice(authority.as_ref());
+    data.extend_from_slice(&elf);
+    acc.data = data;
+    t.svm.set_account(pd, acc).unwrap();
+}
+
+// Puts the config back in the layout before `admin` existed: 42 bytes.
+fn write_old_config(t: &mut Table) {
+    let mut acc = t.svm.get_account(&t.config).unwrap();
+    let new = acc.data.clone();
+    let mut old = Vec::with_capacity(42);
+    old.extend_from_slice(&new[0..8]); // discriminator
+    old.extend_from_slice(&new[40..72]); // musd_mint
+    old.push(new[72]); // bump
+    old.push(new[73]); // musd_bump
+    acc.data = old;
+    t.svm.set_account(t.config, acc).unwrap();
+}
+
+fn migrate(t: &mut Table, signer: &Keypair) -> TransactionResult {
+    let pd = pda_with(&[jhandi_munda::id().as_ref()], &anchor_lang::solana_program::bpf_loader_upgradeable::id());
+    send(
+        &mut t.svm,
+        signer,
+        ix(
+            jhandi_munda::accounts::MigrateConfig {
+                config: t.config,
+                upgrade_authority: signer.pubkey(),
+                program_data: pd,
+                system_program: SYS,
+            },
+            jhandi_munda::instruction::MigrateConfig {},
+        ),
+    )
+}
+
+fn delegate_round_by(t: &mut Table, signer: &Keypair) -> TransactionResult {
+    let round = t.round;
+    let program = jhandi_munda::id();
+    let buffer = pda_with(&[ephemeral_rollups_sdk::pda::DELEGATE_BUFFER_TAG, round.as_ref()], &program);
+    let record = pda_with(&[ephemeral_rollups_sdk::pda::DELEGATION_RECORD_TAG, round.as_ref()], &dlp_id());
+    let metadata = pda_with(&[ephemeral_rollups_sdk::pda::DELEGATION_METADATA_TAG, round.as_ref()], &dlp_id());
+    send(
+        &mut t.svm,
+        signer,
+        ix(
+            jhandi_munda::accounts::DelegateRound {
+                payer: signer.pubkey(),
+                config: t.config,
+                round,
+                buffer_round: buffer,
+                delegation_record_round: record,
+                delegation_metadata_round: metadata,
+                owner_program: program,
+                delegation_program: dlp_id(),
+                system_program: SYS,
+            },
+            jhandi_munda::instruction::DelegateRound {},
+        ),
+    )
+}
+
+#[test]
+fn test_migrate_config_then_delegate() {
+    let mut t = setup();
+    stub_vrf(&mut t);
+    t.svm.add_program(dlp_id(), include_bytes!("fixtures/vrf_stub.so")).unwrap();
+    let admin = t.admin.insecure_clone();
+    let stranger = new_player(&mut t);
+    let alice = new_player(&mut t);
+    assert!(place(&mut t, &alice, 2, 10_000_000).is_ok());
+
+    // The deployed devnet config is in the old 42-byte layout, and the admin is
+    // the program's upgrade authority.
+    set_upgrade_authority(&mut t, &admin.pubkey());
+    write_old_config(&mut t);
+    assert_eq!(t.svm.get_account(&t.config).unwrap().data.len(), 42);
+    assert!(delegate_round_by(&mut t, &admin).is_err(), "the old config cannot be read yet");
+
+    // Only the upgrade authority can migrate: a stranger is refused.
+    assert!(migrate(&mut t, &stranger).is_err(), "a stranger cannot migrate the config");
+    assert_eq!(t.svm.get_account(&t.config).unwrap().data.len(), 42, "the refused call changed nothing");
+
+    // The upgrade authority migrates; `admin` becomes the table authority.
+    assert!(migrate(&mut t, &admin).is_ok(), "the upgrade authority migrates");
+    let data = t.svm.get_account(&t.config).unwrap().data;
+    assert_eq!(data.len(), 74, "the config is in the current layout");
+    assert_eq!(&data[8..40], admin.pubkey().as_ref(), "admin is the upgrade authority");
+    assert!(migrate(&mut t, &admin).is_err(), "a second migration is refused");
+
+    // Now delegation works, for the admin only (D40).
+    assert!(delegate_round_by(&mut t, &admin).is_ok(), "the admin delegates the round");
+}
+
+// --- migrate_table and migrate_round (Blitz verify, PR #109) ---
+
+fn migrate_table_ix(t: &mut Table, signer: &Keypair) -> TransactionResult {
+    let pd = pda_with(&[jhandi_munda::id().as_ref()], &anchor_lang::solana_program::bpf_loader_upgradeable::id());
+    send(
+        &mut t.svm,
+        signer,
+        ix(
+            jhandi_munda::accounts::MigrateTable {
+                table: pda(&[TABLE_SEED]),
+                upgrade_authority: signer.pubkey(),
+                program_data: pd,
+                system_program: SYS,
+            },
+            jhandi_munda::instruction::MigrateTable {},
+        ),
+    )
+}
+
+/// The v1 round PDA (`ROUND_V1_SEED`, D41). `migrate_round` migrates this account only.
+fn v1_round() -> Pubkey {
+    Pubkey::find_program_address(&[jhandi_munda::ROUND_V1_SEED], &jhandi_munda::id()).0
+}
+
+fn migrate_round_ix(t: &mut Table, signer: &Keypair) -> TransactionResult {
+    let pd = pda_with(&[jhandi_munda::id().as_ref()], &anchor_lang::solana_program::bpf_loader_upgradeable::id());
+    send(
+        &mut t.svm,
+        signer,
+        ix(
+            jhandi_munda::accounts::MigrateRound {
+                round: v1_round(),
+                upgrade_authority: signer.pubkey(),
+                program_data: pd,
+                system_program: SYS,
+            },
+            jhandi_munda::instruction::MigrateRound {},
+        ),
+    )
+}
+
+#[test]
+fn test_migrate_table_then_place_bet() {
+    let mut t = setup();
+    stub_vrf(&mut t);
+    let admin = t.admin.insecure_clone();
+    let stranger = new_player(&mut t);
+    let alice = new_player(&mut t);
+    set_upgrade_authority(&mut t, &admin.pubkey());
+
+    // The deployed table is the 34-byte layout: no fee pots. Write it.
+    let table_bump = Pubkey::find_program_address(&[TABLE_SEED], &jhandi_munda::id()).1;
+    let mut old = t.svm.get_account(&t.table).unwrap();
+    let mut bytes = old.data[0..8].to_vec();
+    bytes.extend_from_slice(&90i64.to_le_bytes()); // round_length_secs
+    bytes.extend_from_slice(&1_000_000u64.to_le_bytes()); // min_bet
+    bytes.extend_from_slice(&0u64.to_le_bytes()); // max_bet
+    bytes.push(0); // max_bet_enabled
+    bytes.push(table_bump);
+    assert_eq!(bytes.len(), 34);
+    old.data = bytes;
+    t.svm.set_account(t.table, old).unwrap();
+
+    // The old table cannot be read: placing a bet fails.
+    assert!(place(&mut t, &alice, 2, 1_000_000).is_err(), "the old table cannot place bets");
+
+    // A stranger cannot migrate it; the upgrade authority can, once.
+    assert!(migrate_table_ix(&mut t, &stranger).is_err(), "a stranger cannot migrate the table");
+    assert!(migrate_table_ix(&mut t, &admin).is_ok(), "the upgrade authority migrates the table");
+    let data = t.svm.get_account(&t.table).unwrap().data;
+    assert_eq!(data.len(), 8 + TableConfig::INIT_SPACE, "sized from the struct");
+    let cfg = TableConfig::try_deserialize(&mut data.as_slice()).unwrap();
+    assert_eq!((cfg.round_length_secs, cfg.min_bet), (90, 1_000_000), "old fields kept");
+    assert_eq!((cfg.fee_treasury, cfg.fee_devs, cfg.fee_stakers), (0, 0, 0), "new fee pots are zero");
+    assert!(migrate_table_ix(&mut t, &admin).is_err(), "a second migration is refused");
+
+    // Placing a bet works on the migrated table.
+    assert!(place(&mut t, &alice, 2, 1_000_000).is_ok(), "place_bet works after migration");
+}
+
+#[test]
+fn test_migrate_round_388_to_392() {
+    let mut t = setup();
+    stub_vrf(&mut t);
+    let admin = t.admin.insecure_clone();
+    let stranger = new_player(&mut t);
+    set_upgrade_authority(&mut t, &admin.pubkey());
+
+    // The deployed round is 388 bytes: no bet_count or settled_count. Idle, round 0.
+    let round_bump = Pubkey::find_program_address(&[jhandi_munda::ROUND_V1_SEED], &jhandi_munda::id()).1;
+    let write_old_round = |t: &mut Table, status: u8| write_old_round_with(t, status, &[], round_bump);
+
+    // A live round is never migrated.
+    write_old_round(&mut t, 1); // Open
+    assert!(migrate_round_ix(&mut t, &admin).is_err(), "a live round is refused");
+
+    // An idle 388-byte round migrates; a stranger cannot.
+    write_old_round(&mut t, 0); // Idle
+    assert!(migrate_round_ix(&mut t, &stranger).is_err(), "a stranger cannot migrate the round");
+    assert!(migrate_round_ix(&mut t, &admin).is_ok(), "the upgrade authority migrates the round");
+    let acc = t.svm.get_account(&v1_round()).unwrap();
+    assert_eq!(acc.data.len(), 8 + Round::INIT_SPACE, "392 bytes, sized from the struct");
+    let r = Round::try_deserialize(&mut acc.data.as_slice()).unwrap();
+    assert_eq!((r.status, r.round_id, r.bet_count, r.settled_count), (RoundStatus::Idle, 0, 0, 0));
+    assert_eq!(r.bump, round_bump, "the old fields are kept");
+
+    // The current round (round_v2) takes bets. The migrated v1 account is no longer the table's round.
+    let alice = new_player(&mut t);
+    assert!(place(&mut t, &alice, 2, 1_000_000).is_ok(), "the current round takes a bet");
+}
+
+// Writes the deployed 388-byte round layout: status, opened_at, round_id, players
+// (with room for 10), request_id, faces, bump. No counters.
+fn write_old_round_with(t: &mut Table, status: u8, players: &[Pubkey], bump: u8) {
+    // The v1 account does not exist in setup (only round_v2 does): create it from the v2 account's
+    // owner and rent, then overwrite its data with the old layout.
+    let mut acc = t.svm.get_account(&t.round).unwrap();
+    let mut b = acc.data[0..8].to_vec();
+    b.push(status);
+    b.extend_from_slice(&0i64.to_le_bytes()); // opened_at
+    b.extend_from_slice(&0u64.to_le_bytes()); // round_id
+    b.extend_from_slice(&(players.len() as u32).to_le_bytes());
+    for p in players {
+        b.extend_from_slice(p.as_ref());
+    }
+    b.extend_from_slice(&vec![0u8; (10 - players.len()) * 32]); // unused slots
+    b.extend_from_slice(&[0u8; 32]); // request_id
+    b.extend_from_slice(&[0u8; 6]); // faces
+    b.push(bump);
+    assert_eq!(b.len(), 388);
+    acc.data = b;
+    t.svm.set_account(v1_round(), acc).unwrap();
+}
+
+#[test]
+fn test_migrate_rolled_round_then_finish() {
+    let mut t = setup();
+    stub_vrf(&mut t);
+    let admin = t.admin.insecure_clone();
+    let stranger = new_player(&mut t);
+    let alice = new_player(&mut t);
+    set_upgrade_authority(&mut t, &admin.pubkey());
+    let round_bump = Pubkey::find_program_address(&[jhandi_munda::ROUND_V1_SEED], &jhandi_munda::id()).1;
+
+    // The devnet leftover: a finished (Rolled) round with one player, in the old layout.
+    write_old_round_with(&mut t, 3, &[alice.pubkey()], round_bump);
+
+    // Only the upgrade authority may migrate it.
+    assert!(migrate_round_ix(&mut t, &stranger).is_err(), "a stranger cannot migrate the round");
+    assert_eq!(t.svm.get_account(&v1_round()).unwrap().data.len(), 388, "the refused call changed nothing");
+
+    // The authority migrates: it grows, adds zero counters, and changes nothing else.
+    assert!(migrate_round_ix(&mut t, &admin).is_ok());
+    let r = Round::try_deserialize(&mut t.svm.get_account(&v1_round()).unwrap().data.as_slice()).unwrap();
+    assert_eq!(r.status, RoundStatus::Rolled, "the migration keeps the status");
+    assert_eq!((r.bet_count, r.settled_count), (0, 0), "the counters start at zero");
+    assert_eq!(r.players, vec![alice.pubkey()], "players are kept by the migration");
+    assert_eq!(r.round_id, 0);
+
+    // A second migration is refused: the account is already the current size.
+    assert!(migrate_round_ix(&mut t, &admin).is_err(), "already migrated: refused cleanly");
+
+    // finish_round works on round_v2 (D41), not the v1 account, so the migrated v1 round is not
+    // finished here. The table's current round (round_v2) is untouched by the v1 migration.
+    let cur = Round::try_deserialize(&mut t.svm.get_account(&t.round).unwrap().data.as_slice()).unwrap();
+    assert_eq!((cur.status, cur.round_id), (RoundStatus::Idle, 0), "round_v2 is untouched");
+}
+
+// --- commit and undelegate (Step 11.4, #44) ---
+// UNVERIFIED on a validator: the magic program is a no-op stub here, so only our
+// checks and the SDK's builder call run. The rollup performs the commit.
+
+fn magic_program_id() -> Pubkey {
+    Pubkey::new_from_array(ephemeral_rollups_sdk::consts::MAGIC_PROGRAM_ID.to_bytes())
+}
+
+fn magic_context_id() -> Pubkey {
+    Pubkey::new_from_array(ephemeral_rollups_sdk::consts::MAGIC_CONTEXT_ID.to_bytes())
+}
+
+fn undelegate_round_by(t: &mut Table, signer: &Keypair) -> TransactionResult {
+    send(
+        &mut t.svm,
+        signer,
+        ix(
+            jhandi_munda::accounts::UndelegateRound {
+                payer: signer.pubkey(),
+                config: t.config,
+                round: t.round,
+                magic_context: magic_context_id(),
+                magic_program: magic_program_id(),
+            },
+            jhandi_munda::instruction::UndelegateRound {},
+        ),
+    )
+}
+
+fn undelegate_chips_by(t: &mut Table, signer: &Keypair, owner: &Pubkey) -> TransactionResult {
+    send(
+        &mut t.svm,
+        signer,
+        ix(
+            jhandi_munda::accounts::UndelegateChips {
+                payer: signer.pubkey(),
+                config: t.config,
+                chips: pda(&[jhandi_munda::CHIPS_SEED, owner.as_ref()]),
+                magic_context: magic_context_id(),
+                magic_program: magic_program_id(),
+            },
+            jhandi_munda::instruction::UndelegateChips { owner: *owner },
+        ),
+    )
+}
+
+#[test]
+fn test_undelegate_round_and_chips_admin_only() {
+    let mut t = setup();
+    stub_vrf(&mut t);
+    t.svm.add_program(magic_program_id(), include_bytes!("fixtures/vrf_stub.so")).unwrap();
+    let admin = t.admin.insecure_clone();
+    let stranger = new_player(&mut t);
+    let alice = new_player(&mut t);
+
+    // A live round and a chip stack, as they would be on the rollup.
+    assert!(place(&mut t, &alice, 2, 1_000_000).is_ok());
+    let funder = new_player(&mut t);
+    init_cage(&mut t, &funder);
+    assert!(buy_chips(&mut t, &alice, 5_000_000).is_ok());
+
+    // Only the table authority (D40) can commit and undelegate the round.
+    assert!(undelegate_round_by(&mut t, &stranger).is_err(), "a stranger cannot undelegate the round");
+    assert!(undelegate_round_by(&mut t, &admin).is_ok(), "the admin undelegates the round");
+
+    // The chip stack: the admin with the right owner; a wrong owner is refused.
+    let bob = new_player(&mut t);
+    assert!(undelegate_chips_by(&mut t, &admin, &bob.pubkey()).is_err(), "the wrong owner is refused");
+    assert!(undelegate_chips_by(&mut t, &stranger, &alice.pubkey()).is_err(), "a stranger cannot undelegate chips");
+    assert!(undelegate_chips_by(&mut t, &admin, &alice.pubkey()).is_ok(), "the admin undelegates Alice's chips");
+    // The round and chips are still readable on Solana in this stub test.
+    assert_eq!(t.svm.get_account(&t.round).unwrap().owner, jhandi_munda::id());
+}
+
+// The delegation program calls back into our program on Solana when a delegated account is
+// undelegated, with the SDK's external-undelegate instruction (`process_undelegation`, added by
+// `#[ephemeral]`). Without that callback the call fails with InstructionFallbackNotFound (101),
+// which is what stuck devnet undelegates. UNVERIFIED on a validator: the delegation program is a
+// no-op stub here, so this checks only that the instruction is routed, not that it undelegates.
+#[test]
+fn test_external_undelegate_callback_is_routed() {
+    let mut t = setup();
+    let payer = t.admin.insecure_clone();
+    // Anchor discriminator: first 8 bytes of sha256("global:process_undelegation").
+    let disc: [u8; 8] = [196, 28, 41, 206, 48, 37, 51, 167];
+    let (buffer, _) = Pubkey::find_program_address(&[b"undelegate-buffer", t.round.as_ref()], &dlp_id());
+    let mut data = disc.to_vec();
+    data.extend_from_slice(&0u32.to_le_bytes()); // account_seeds: an empty Vec<Vec<u8>>
+    let ix = Instruction::new_with_bytes(
+        jhandi_munda::id(),
+        &data,
+        vec![
+            AccountMeta::new(t.round, false),
+            AccountMeta::new_readonly(buffer, false),
+            AccountMeta::new(payer.pubkey(), true),
+            AccountMeta::new_readonly(anchor_lang::solana_program::system_program::ID, false),
+        ],
+    );
+    if let Err(e) = send(&mut t.svm, &payer, ix) {
+        let text = format!("{:?} {:?}", e.err, e.meta.logs);
+        assert!(
+            !text.contains("Custom(101)") && !text.contains("InstructionFallbackNotFound"),
+            "the undelegate callback must be routed, not fall back: {text}"
+        );
+    }
+}
+
+// --- round_v2 (D41): init, and clear undelegate errors ---
+
+fn init_round_by(t: &mut Table, signer: &Keypair) -> TransactionResult {
+    send(
+        &mut t.svm,
+        signer,
+        ix(
+            jhandi_munda::accounts::InitRound {
+                config: t.config,
+                round: t.round,
+                payer: signer.pubkey(),
+                system_program: SYS,
+            },
+            jhandi_munda::instruction::InitRound {},
+        ),
+    )
+}
+
+#[test]
+fn test_init_round_is_table_authority_only_and_not_twice() {
+    let mut t = setup();
+    let admin = t.admin.insecure_clone();
+    let stranger = new_player(&mut t);
+    // initialize_table already created round_v2, so init_round cannot create it again.
+    assert!(init_round_by(&mut t, &stranger).is_err(), "a stranger cannot init the round");
+    assert!(init_round_by(&mut t, &admin).is_err(), "round_v2 already exists: init is refused");
+}
+
+#[test]
+fn test_undelegate_on_an_account_already_undelegating_says_so() {
+    let mut t = setup();
+    let admin = t.admin.insecure_clone();
+    let alice = new_player(&mut t);
+    let funder = new_player(&mut t);
+    init_cage(&mut t, &funder);
+    assert!(buy_chips(&mut t, &alice, 5_000_000).is_ok());
+
+    // The rollup copy the delegation program owns: the rollup has already scheduled the undelegate.
+    let mut round = t.svm.get_account(&t.round).unwrap();
+    round.owner = dlp_id();
+    t.svm.set_account(t.round, round).unwrap();
+    let e = undelegate_round_by(&mut t, &admin).expect_err("an undelegating round is refused");
+    let logs = format!("{:?}", e.meta.logs);
+    assert!(logs.contains("RoundAlreadyUndelegating"), "the error names the cause: {logs}");
+    assert!(!logs.contains("cannot be migrated"), "not the migration message: {logs}");
+
+    // Same for a chip stack the delegation program owns.
+    let chips = Pubkey::find_program_address(&[jhandi_munda::CHIPS_SEED, alice.pubkey().as_ref()], &jhandi_munda::id()).0;
+    let mut stack = t.svm.get_account(&chips).unwrap();
+    stack.owner = dlp_id();
+    t.svm.set_account(chips, stack).unwrap();
+    let e = undelegate_chips_by(&mut t, &admin, &alice.pubkey()).expect_err("an undelegating stack is refused");
+    let logs = format!("{:?}", e.meta.logs);
+    assert!(logs.contains("ChipStackAlreadyUndelegating"), "the error names the cause: {logs}");
+}
+
+
+// --- open_chip_bet, place_bet_chips on an opened slip, delegate_bet, undelegate_bet (D42) ---
+
+fn open_chip_bet(t: &mut Table, bettor: &Keypair, round_id: u64, symbol: u8) -> TransactionResult {
+    send(
+        &mut t.svm,
+        bettor,
+        ix(
+            jhandi_munda::accounts::OpenChipBet {
+                round: t.round,
+                bet: bet_pda_r(round_id, bettor, symbol),
+                bettor: bettor.pubkey(),
+                system_program: SYS,
+            },
+            jhandi_munda::instruction::OpenChipBet { round_id, symbol },
+        ),
+    )
+}
+
+fn delegate_bet_by(t: &mut Table, signer: &Keypair, round_id: u64, symbol: u8) -> TransactionResult {
+    let bet = bet_pda_r(round_id, signer, symbol);
+    let buffer = pda_with(&[ephemeral_rollups_sdk::pda::DELEGATE_BUFFER_TAG, bet.as_ref()], &jhandi_munda::id());
+    let record = pda_with(&[ephemeral_rollups_sdk::pda::DELEGATION_RECORD_TAG, bet.as_ref()], &dlp_id());
+    let metadata = pda_with(&[ephemeral_rollups_sdk::pda::DELEGATION_METADATA_TAG, bet.as_ref()], &dlp_id());
+    send(
+        &mut t.svm,
+        signer,
+        ix(
+            jhandi_munda::accounts::DelegateBet {
+                owner: signer.pubkey(),
+                bet,
+                buffer_bet: buffer,
+                delegation_record_bet: record,
+                delegation_metadata_bet: metadata,
+                owner_program: jhandi_munda::id(),
+                delegation_program: dlp_id(),
+                system_program: SYS,
+            },
+            jhandi_munda::instruction::DelegateBet { round_id, symbol },
+        ),
+    )
+}
+
+fn undelegate_bet_by(t: &mut Table, signer: &Keypair, round_id: u64, player: &Pubkey, symbol: u8) -> TransactionResult {
+    send(
+        &mut t.svm,
+        signer,
+        ix(
+            jhandi_munda::accounts::UndelegateBet {
+                payer: signer.pubkey(),
+                config: t.config,
+                bet: pda_with(
+                    &[BET_SEED, &round_id.to_le_bytes(), player.as_ref(), &[symbol]],
+                    &jhandi_munda::id(),
+                ),
+                magic_context: magic_context_id(),
+                magic_program: magic_program_id(),
+            },
+            jhandi_munda::instruction::UndelegateBet { round_id, player: *player, symbol },
+        ),
+    )
+}
+
+fn slip(t: &Table, bettor: &Keypair, symbol: u8) -> Bet {
+    let data = t.svm.get_account(&bet_pda_r(round(t).round_id, bettor, symbol)).unwrap().data;
+    Bet::try_deserialize(&mut data.as_slice()).unwrap()
+}
+
+#[test]
+fn test_open_chip_bet_creates_an_empty_slip() {
+    let mut t = setup();
+    let funder = new_player(&mut t);
+    init_cage(&mut t, &funder);
+    let alice = new_player(&mut t);
+    assert!(buy_chips(&mut t, &alice, 5_000_000).is_ok());
+
+    assert!(open_chip_bet(&mut t, &alice, 0, 2).is_ok(), "the bettor opens a slip");
+    let acc = t.svm.get_account(&bet_pda_r(0, &alice, 2)).unwrap();
+    assert_eq!(acc.owner, jhandi_munda::id());
+    let b = slip(&t, &alice, 2);
+    assert_eq!((b.player, b.amount, b.symbol, b.round_id), (alice.pubkey(), 0, 2, 0), "empty, for this bettor and face");
+    assert!(b.paid_with_chips && !b.settled, "a chip slip, not yet settled");
+
+    // A wrong round id, an invalid face, and a second open are all refused.
+    assert!(open_chip_bet(&mut t, &alice, 7, 3).is_err(), "a round id that is not the current round");
+    assert!(open_chip_bet(&mut t, &alice, 0, 7).is_err(), "face 7 is not a face");
+    assert!(open_chip_bet(&mut t, &alice, 0, 2).is_err(), "the slip already exists");
+}
+
+#[test]
+fn test_place_bet_chips_fills_the_slip_and_creates_nothing() {
+    let mut t = setup();
+    let funder = new_player(&mut t);
+    init_cage(&mut t, &funder);
+    let alice = new_player(&mut t);
+    assert!(buy_chips(&mut t, &alice, 5_000_000).is_ok());
+    assert!(open_chip_bet(&mut t, &alice, 0, 2).is_ok());
+
+    let bet = bet_pda_r(0, &alice, 2);
+    let before = t.svm.get_account(&bet).unwrap();
+    let chips_before = chip_balance(&t, &alice);
+    assert!(place_chip_bet_raw(&mut t, &alice, bet, 2, 1_000_000).is_ok(), "fills the opened slip");
+
+    // The same account, same size, same rent: nothing was created or paid for.
+    let after = t.svm.get_account(&bet).unwrap();
+    assert_eq!((after.lamports, after.data.len()), (before.lamports, before.data.len()), "no rent moved");
+    let b = slip(&t, &alice, 2);
+    assert_eq!((b.amount, b.symbol, b.paid_with_chips), (1_000_000, 2, true));
+    assert_eq!(chip_balance(&t, &alice), chips_before - 1_000_000, "the stake comes off the chips");
+    assert!(round(&t).players.contains(&alice.pubkey()), "the bettor takes a seat");
+
+    // A filled slip cannot be filled again.
+    let e = place_chip_bet_raw(&mut t, &alice, bet, 2, 1_000_000).expect_err("a second fill is refused");
+    assert!(format!("{:?}", e.meta.logs).contains("BetSlipAlreadyFilled"), "{:?}", e.meta.logs);
+}
+
+#[test]
+fn test_place_bet_chips_fails_when_the_slip_was_not_opened() {
+    let mut t = setup();
+    let funder = new_player(&mut t);
+    init_cage(&mut t, &funder);
+    let alice = new_player(&mut t);
+    assert!(buy_chips(&mut t, &alice, 5_000_000).is_ok());
+
+    // No open_chip_bet for face 3: the place fails and creates nothing (the rollup can't pay rent).
+    let bet = bet_pda_r(0, &alice, 3);
+    assert!(place_chip_bet_raw(&mut t, &alice, bet, 3, 1_000_000).is_err(), "no slip, no bet");
+    assert!(t.svm.get_account(&bet).is_none(), "the failed place created no account");
+    assert_eq!(chip_balance(&t, &alice), 5_000_000, "no chips were taken");
+}
+
+#[test]
+fn test_stranger_cannot_fill_someone_elses_slip() {
+    let mut t = setup();
+    let funder = new_player(&mut t);
+    init_cage(&mut t, &funder);
+    let alice = new_player(&mut t);
+    let bob = new_player(&mut t);
+    assert!(buy_chips(&mut t, &alice, 5_000_000).is_ok());
+    assert!(buy_chips(&mut t, &bob, 5_000_000).is_ok());
+    assert!(open_chip_bet(&mut t, &alice, 0, 4).is_ok());
+
+    // Bob signs, but the slip is Alice's: the seeds include her key, so Bob cannot fill it.
+    let alice_slip = bet_pda_r(0, &alice, 4);
+    assert!(place_chip_bet_raw(&mut t, &bob, alice_slip, 4, 1_000_000).is_err(), "a stranger cannot fill it");
+    assert_eq!(slip(&t, &alice, 4).amount, 0, "Alice's slip is still empty");
+    assert_eq!(chip_balance(&t, &bob), 5_000_000, "Bob's chips are untouched");
+}
+
+#[test]
+fn test_delegate_and_undelegate_a_chip_slip() {
+    let mut t = setup();
+    stub_vrf(&mut t);
+    t.svm.add_program(dlp_id(), include_bytes!("fixtures/vrf_stub.so")).unwrap();
+    t.svm.add_program(magic_program_id(), include_bytes!("fixtures/vrf_stub.so")).unwrap();
+    let funder = new_player(&mut t);
+    init_cage(&mut t, &funder);
+    let alice = new_player(&mut t);
+    let stranger = new_player(&mut t);
+    let admin = t.admin.insecure_clone();
+    assert!(buy_chips(&mut t, &alice, 5_000_000).is_ok());
+    assert!(open_chip_bet(&mut t, &alice, 0, 5).is_ok());
+    let slip_key = bet_pda_r(0, &alice, 5);
+    let original = t.svm.get_account(&slip_key).unwrap();
+
+    // Only the slip's owner delegates it.
+    assert!(delegate_bet_by(&mut t, &stranger, 0, 5).is_err(), "a stranger cannot delegate Alice's slip");
+    assert!(delegate_bet_by(&mut t, &alice, 0, 5).is_ok(), "the owner delegates the slip");
+    // The SDK zeroes the PDA's data on delegation (cpi.rs); the rollup holds the real bytes. Model
+    // that rollup copy here: owned by this program, with the slip's own data.
+    assert_eq!(t.svm.get_account(&bet_pda_r(0, &alice, 5)).unwrap().owner, dlp_id(), "the slip moved to the rollup");
+
+    // Bringing it home: the owner or the table authority; a stranger is refused.
+    assert!(undelegate_bet_by(&mut t, &stranger, 0, &alice.pubkey(), 5).is_err(), "a stranger cannot undelegate it");
+
+    // The rollup's view of the slip: owned by this program, so undelegate is allowed.
+    let mut acc = original.clone();
+    acc.owner = jhandi_munda::id();
+    t.svm.set_account(slip_key, acc.clone()).unwrap();
+    assert!(undelegate_bet_by(&mut t, &alice, 0, &alice.pubkey(), 5).is_ok(), "the owner brings it home");
+    assert!(undelegate_bet_by(&mut t, &admin, 0, &alice.pubkey(), 5).is_ok(), "the table authority can too");
+
+    // Already undelegating (owned by the delegation program): named, not the migration message.
+    acc.owner = dlp_id();
+    t.svm.set_account(slip_key, acc).unwrap();
+    let e = undelegate_bet_by(&mut t, &alice, 0, &alice.pubkey(), 5).expect_err("already undelegating");
+    assert!(format!("{:?}", e.meta.logs).contains("BetAlreadyUndelegating"), "{:?}", e.meta.logs);
+}
+
+// --- D43: orphan MUSD (no shares, MUSD in the vault) ---
+
+// Moves MUSD straight into the pool vault, like a lost stake landing in an empty pool.
+fn musd_transfer_to_vault(t: &mut Table, from: &Keypair, amount: u64) -> TransactionResult {
+    let mut data = vec![3u8]; // SPL token Transfer
+    data.extend_from_slice(&amount.to_le_bytes());
+    let transfer = Instruction::new_with_bytes(
+        SPL_TOKEN_PROGRAM_ID,
+        &data,
+        vec![
+            AccountMeta::new(jhandi_munda::musd_ata(&from.pubkey(), &t.musd_mint), false),
+            AccountMeta::new(t.vault, false),
+            AccountMeta::new_readonly(from.pubkey(), true),
+        ],
+    );
+    send(&mut t.svm, from, transfer)
+}
+
+// SPL mint supply (36..44).
+fn mint_supply(t: &Table, mint: &Pubkey) -> u64 {
+    let data = t.svm.get_account(mint).unwrap().data;
+    u64::from_le_bytes(data[36..44].try_into().unwrap())
+}
+
+#[test]
+fn test_deposit_into_orphan_vault() {
+    let mut t = setup();
+    let alice = new_player(&mut t); // the only LP, then gone
+    let bob = new_player(&mut t); // the losing bettor whose stake lands in the empty pool
+    let carol = new_player(&mut t); // the first new LP
+    let dave = new_player(&mut t); // a later LP, priced pro rata
+    init_insurance(&mut t, &alice);
+    let share_mint = pda(&[SHARE_MINT_SEED]);
+    let insurance = pda(&[INSURANCE_VAULT_SEED]);
+    let shares = |t: &Table, who: &Keypair| token_amount(&t.svm, &jhandi_munda::share_ata(&who.pubkey(), &share_mint));
+
+    // Alice is the only LP, and she withdraws everything: no shares, empty vault.
+    deposit(&mut t, &alice, 1_000_000);
+    let alice_shares = shares(&t, &alice);
+    assert!(lp_withdraw(&mut t, &alice, alice_shares).is_ok(), "the only LP leaves");
+    assert_eq!((mint_supply(&t, &share_mint), token_amount(&t.svm, &t.vault)), (0, 0));
+
+    // A lost stake lands in the empty pool: MUSD in the vault with zero shares outstanding.
+    assert!(musd_transfer_to_vault(&mut t, &bob, 1_000_000).is_ok(), "the stake lands");
+    assert_eq!((mint_supply(&t, &share_mint), token_amount(&t.svm, &t.vault)), (0, 1_000_000));
+
+    // Carol deposits 2 MUSD. The orphan 1 MUSD moves to insurance first; she owns exactly her 2 MUSD.
+    let insurance_before = token_amount(&t.svm, &insurance);
+    deposit(&mut t, &carol, 2_000_000);
+    assert_eq!(shares(&t, &carol), 2_000_000, "1:1 with what she put in");
+    assert_eq!(token_amount(&t.svm, &insurance), insurance_before + 1_000_000, "the orphan MUSD is in insurance");
+    assert_eq!(token_amount(&t.svm, &t.vault), 2_000_000, "the vault holds only Carol's deposit");
+    assert_eq!(mint_supply(&t, &share_mint), 2_000_000);
+
+    // Dave comes later: priced pro rata at NAV $1.00, so 1 MUSD buys 1 MUSD of shares.
+    deposit(&mut t, &dave, 1_000_000);
+    assert_eq!(shares(&t, &dave), 1_000_000, "pro rata at NAV $1.00");
+    assert_eq!(token_amount(&t.svm, &t.vault), 3_000_000);
+    assert_eq!(mint_supply(&t, &share_mint), 3_000_000);
 }

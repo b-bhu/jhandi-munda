@@ -7,6 +7,9 @@ use crate::{QUEUE_CAPACITY, STAKE_LOCK_SECS, STAKE_MAX_LOTS};
 #[account]
 #[derive(InitSpace)]
 pub struct ProgramConfig {
+    /// The table authority (D40): the only key that can delegate the round. Set
+    /// to the payer of `initialize`.
+    pub admin: Pubkey,
     /// The MUSD mint this program controls.
     pub musd_mint: Pubkey,
     /// Bump seed for the config PDA itself.
@@ -142,6 +145,8 @@ pub struct Bet {
     pub settled: bool,
     /// Clock time the bet was settled. Claims unlock from here (D7, D8).
     pub settled_at: i64,
+    /// True for a chip bet (D39): its stake sits in the cage vault until settle.
+    pub paid_with_chips: bool,
     /// Bump seed for the bet PDA.
     pub bump: u8,
 }
@@ -252,6 +257,19 @@ impl Stake {
             .map(|lot| lot.amount)
             .sum()
     }
+}
+
+/// A player's chips at the cage (D39): MUSD bought on Solana and spent on the
+/// rollup without token transfers. One per wallet, at `["chips", owner]`.
+#[account]
+#[derive(InitSpace)]
+pub struct ChipStack {
+    /// The wallet the chips belong to.
+    pub owner: Pubkey,
+    /// Chips held, in MUSD base units.
+    pub balance: u64,
+    /// Bump seed for the chip stack PDA.
+    pub bump: u8,
 }
 
 /// The MUSD faucet cooldown record for one wallet (D33): a small PDA at

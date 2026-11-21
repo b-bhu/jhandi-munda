@@ -43,10 +43,21 @@ Only the round is delegated in this step. The cap is **10,240 bytes** per accoun
 - The delegate call is `ephemeral_rollups_sdk::cpi::delegate_account` with the
   seeds **without** the bump (the SDK appends it).
 
+## Commit and undelegate (Step 11.4, #44)
+
+- `undelegate_round` and `undelegate_chips(owner)` run on the rollup and CPI the
+  magic program's `commit_and_undelegate`. Only the table authority (`config.admin`)
+  may undelegate the round (D40). A chip stack may be undelegated only by its owner.
+- A round that is old-size while delegated is handled in the devnet script: undelegate,
+  wait until Solana owns it, `migrate_round` on Solana, `finish_round` if Rolled,
+  delegate again. The wallet pays the rent on Solana.
+- Chip money stays in the cage vault on Solana. Chip bets are settled on Solana with
+  `settle_chip_bets` after the round comes home.
+
 ## Not in this step
 
-Calling the Magic Router, a devnet delegation, playing a full round on the ER,
-the ER VRF queue, and commit-and-undelegate. See #42–#44.
+Playing a full round on devnet was not run from here (the PR checker runs the script).
+The Magic Router and the ER VRF queue are the same as in Step 11.3. See #42–#44.
 
 ## Unverified (written down, not guessed)
 
@@ -57,3 +68,11 @@ the ER VRF queue, and commit-and-undelegate. See #42–#44.
   the delegation program's address, so only the SDK's own checks and our account
   checks run for real.
 - The Ephemeral SPL Token Rust API (see above).
+
+## Bet slips (D42)
+
+Accounts are never created on the rollup. A chip bet slip (`Bet` PDA) is opened and delegated on Solana first (`open_chip_bet`, `delegate_bet`), `place_bet_chips` on the rollup only fills it in, and `undelegate_bet` brings it home before settle. Why: the rollup refuses to change a non-delegated fee payer's balance (`InvalidAccountForFee`), so it cannot take rent for a new account from the bettor. UNVERIFIED on a validator: that the rollup accepts `place_bet_chips` on a delegated slip.
+
+## Transport: validator, not router (PR #109 devnet run)
+
+The ephemeral VRF queue `5hBR571…` is not delegated to one ER node. The Magic Router reports it as "delegated to unknown ER node", and it refuses a transaction that mixes accounts from different nodes ("transaction contains accounts that were delegated to different ER nodes"). So the script sends rollup transactions straight to the validator that holds round_v2 (`https://devnet-as.magicblock.app`, the fqdn from the router's `getDelegationStatus`) and takes the blockhash from that validator. The router is used only for `getDelegationStatus`. UNVERIFIED: that the direct validator path works for every rollup call the script makes; `request_roll` did work there once, in a one-off test.

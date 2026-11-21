@@ -2,6 +2,11 @@
 //! vault and is minted shares at the current NAV. The empty pool defines NAV
 //! as $1.00, so the first deposit mints 1:1: 100 MUSD in = 100 shares, vault
 //! holds 100 MUSD. Zero-amount deposits are rejected.
+//!
+//! D43: a pool with no shares but MUSD in its vault (orphan money, e.g. a lost
+//! stake that landed after the last LP withdrew) is swept to the insurance vault
+//! first, then the new deposit mints 1:1. No first depositor can take the
+//! leftover house money.
 
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::{
@@ -10,7 +15,7 @@ use anchor_lang::solana_program::{
 };
 
 use crate::{
-    error::ErrorCode, state::PoolState, ATA_PROGRAM_ID, POOL_SEED, POOL_VAULT_SEED,
+    error::ErrorCode, state::PoolState, ATA_PROGRAM_ID, INSURANCE_VAULT_SEED, POOL_SEED, POOL_VAULT_SEED,
     SHARE_MINT_SEED, SPL_TOKEN_PROGRAM_ID,
 };
 
@@ -59,6 +64,11 @@ pub struct Deposit<'info> {
     /// and created there if missing.
     #[account(mut)]
     pub depositor_shares: UncheckedAccount<'info>,
+
+    /// CHECK: the insurance vault (D18, D43). Receives orphan MUSD when the pool has no
+    /// shares. Its seeds pin the address; it is only touched in that case.
+    #[account(mut, seeds = [INSURANCE_VAULT_SEED], bump)]
+    pub insurance_vault: UncheckedAccount<'info>,
 
     /// CHECK: verified against SPL_TOKEN_PROGRAM_ID in the handler.
     pub token_program: UncheckedAccount<'info>,
@@ -117,20 +127,20 @@ pub fn handler(ctx: Context<Deposit>, amount: u64) -> Result<()> {
         ErrorCode::InvalidAtaAddress
     );
 
-    // Price before any token moves (D27). `(0, 0)` is the empty pool (D4)
-    // with NAV $1.00 by definition, so shares mint 1:1 with MUSD; anything
-    // else prices pro rata (`amount × supply / vault`), floored in the
-    // pool's favour. A pair with a zero side cannot be produced here and is
-    // rejected instead of divided by zero.
+    // Price before any token moves (D27). With no shares the pool's NAV is $1.00 by
+    // definition, so the deposit mints 1:1. Any MUSD still in the vault then is orphan
+    // money (D43): it is swept to insurance below, before the deposit lands. With shares
+    // outstanding, price pro rata (`amount × supply / vault`), floored in the pool's favour.
+    // Shares outstanding with an empty vault cannot be produced here and is refused.
     let vault_amount = token_u64(&ctx.accounts.vault.to_account_info(), TOKEN_AMOUNT_OFFSET)?;
     let share_supply = token_u64(
         &ctx.accounts.share_mint.to_account_info(),
         MINT_SUPPLY_OFFSET,
     )?;
-    let minted: u128 = if vault_amount == 0 && share_supply == 0 {
+    let minted: u128 = if share_supply == 0 {
         amount as u128
     } else {
-        require!(vault_amount > 0 && share_supply > 0, ErrorCode::InvalidPoolState);
+        require!(vault_amount > 0, ErrorCode::InvalidPoolState);
         amount as u128 * share_supply as u128 / vault_amount as u128
     };
     // A deposit flooring to zero shares pays MUSD for nothing: reject it.
@@ -162,6 +172,38 @@ pub fn handler(ctx: Context<Deposit>, amount: u64) -> Result<()> {
             ctx.accounts.token_program.to_account_info(),
         ],
     )?;
+
+    // D43: no shares, but MUSD in the vault: sweep it to insurance before the new deposit lands,
+    // so the new LP owns exactly what they put in. UNVERIFIED on devnet: the insurance vault exists there.
+    if share_supply == 0 && vault_amount > 0 {
+        require_keys_eq!(
+            *ctx.accounts.insurance_vault.owner,
+            SPL_TOKEN_PROGRAM_ID,
+            ErrorCode::InvalidPoolState
+        );
+        let mut data = Vec::with_capacity(9);
+        data.push(TOKEN_IX_TRANSFER);
+        data.extend_from_slice(&vault_amount.to_le_bytes());
+        let sweep = Instruction {
+            program_id: SPL_TOKEN_PROGRAM_ID,
+            accounts: vec![
+                AccountMeta::new(ctx.accounts.vault.key(), false),
+                AccountMeta::new(ctx.accounts.insurance_vault.key(), false),
+                AccountMeta::new_readonly(ctx.accounts.pool.key(), true),
+            ],
+            data,
+        };
+        invoke_signed(
+            &sweep,
+            &[
+                ctx.accounts.vault.to_account_info(),
+                ctx.accounts.insurance_vault.to_account_info(),
+                ctx.accounts.pool.to_account_info(),
+            ],
+            &[&[POOL_SEED, &[ctx.bumps.pool]]],
+        )?;
+        msg!("D43: {} orphan base MUSD moved from the pool vault to insurance", vault_amount);
+    }
 
     // Pull the MUSD into the vault; the depositor's transaction signature
     // carries through `invoke`, and the token program checks balance/mint.

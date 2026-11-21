@@ -52,12 +52,22 @@ pub enum ErrorCode {
     ClaimLocked,
     #[msg("This claim was already paid out")]
     ClaimAlreadyRedeemed,
-    #[msg("The pool does not hold enough MUSD to pay this now (the queue is Step 8)")]
+    #[msg("The pool cannot pay this right now: it does not hold enough MUSD in its vault")]
     InsufficientPoolFunds,
     #[msg("The insurance fund does not hold enough MUSD for this Take now")]
     InsufficientInsuranceFunds,
     #[msg("There is nothing to collect from the pool for this claim")]
     NothingToCollect,
+    #[msg("A chip purchase or cash-out must be greater than zero")]
+    ZeroChips,
+    #[msg("The VRF queue must be the base-layer or the ephemeral queue")]
+    InvalidQueue,
+    #[msg("Only the owner of this chip stack can delegate it")]
+    NotChipOwner,
+    #[msg("Not enough chips for this bet or cash-out")]
+    InsufficientChips,
+    #[msg("Only the table authority (the config admin) can delegate the round")]
+    NotTableAuthority,
     #[msg("A token account does not have the expected layout")]
     InvalidTokenAccount,
     #[msg("The payout queue is full")]
@@ -78,6 +88,32 @@ pub enum ErrorCode {
     NothingToClaim,
     #[msg("This wallet already has the maximum number of stake lots; unstake to free one")]
     TooManyLots,
+    #[msg("A chip bet is settled with settle_chip_bets, not settle_bets")]
+    ChipBetNeedsChipSettle,
+    #[msg("A chip bet pays into chips, not a claim")]
+    ChipBetSettledToChips,
+    #[msg("Only the program's upgrade authority can migrate the config")]
+    NotUpgradeAuthority,
+    #[msg("The account is not in the layout this migration expects (already migrated?)")]
+    WrongLayoutForMigration,
+    #[msg("The account is not owned by this program, so it cannot be migrated here")]
+    AccountNotProgramOwned,
+    #[msg("A live round (Open or Rolling) cannot be migrated")]
+    RoundIsLive,
+    #[msg("The config is already in the current layout")]
+    ConfigAlreadyMigrated,
     #[msg("A payout or fee amount overflowed")]
     MathOverflow,
+    #[msg("The round is already undelegating (the delegation program owns it); it cannot be undelegated again here")]
+    RoundAlreadyUndelegating,
+    #[msg("The chip stack is already undelegating (the delegation program owns it); it cannot be undelegated again here")]
+    ChipStackAlreadyUndelegating,
+    #[msg("This bet slip is already filled; a slip takes one stake")]
+    BetSlipAlreadyFilled,
+    #[msg("The round id does not match the current round")]
+    RoundIdMismatch,
+    #[msg("Only the bettor or the table authority can do this to this bet slip")]
+    NotBetOwner,
+    #[msg("The bet slip is already undelegating (the delegation program owns it); it cannot be undelegated again here")]
+    BetAlreadyUndelegating,
 }

@@ -28,7 +28,12 @@ pub const SHARE_MINT_SEED: &[u8] = b"pool_share_mint";
 pub const TABLE_SEED: &[u8] = b"table";
 
 /// Round PDA seed. One round account per table, reused round after round (D5).
-pub const ROUND_SEED: &[u8] = b"round";
+/// The round PDA seed (D41). Versioned: the v1 round (`ROUND_V1_SEED`) got stuck mid-undelegate on
+/// devnet before the `#[ephemeral]` callback existed, and an account the rollup marks as
+/// undelegating cannot be reused from our side.
+pub const ROUND_SEED: &[u8] = b"round_v2";
+/// The v1 round seed (D41). Only `migrate_round` uses it, for the v1 account.
+pub const ROUND_V1_SEED: &[u8] = b"round";
 
 /// Round length: 90 seconds start to finish (D8). Stored in `TableConfig`.
 pub const ROUND_LENGTH_SECS: i64 = 90;
@@ -118,6 +123,14 @@ pub const INSURANCE_TARGET: u64 = 1_000_000_000;
 /// other public regions are EU and US (US runs validator 2.0, which SDK 0.18 does
 /// not target).
 pub const ER_VALIDATOR_ASIA: Pubkey = pubkey!("MAS1Dt9qreoRMQ14YQuhg8UTZMMzDdKhmkZMECCzk57");
+
+/// Cage vault PDA seed (D39): holds chip money, separate from the pool vault. Owned
+/// by the pool PDA. Chip money is not pool money: NAV, LP withdraws and pool-based
+/// limits do not count it.
+pub const CAGE_VAULT_SEED: &[u8] = b"cage_vault";
+
+/// Chip stack PDA seed: ["chips", owner] (D39).
+pub const CHIPS_SEED: &[u8] = b"chips";
 
 /// Minimum bet: $1 MUSD in base units (D3).
 pub const MIN_BET: u64 = 1_000_000;
