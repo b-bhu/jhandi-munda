@@ -3141,3 +3141,162 @@ fn test_deposit_prices_around_queued_wins() {
     let carol_shares = token_amount(&t.svm, &jhandi_munda::share_ata(&c.pubkey(), &share_mint));
     assert_eq!(carol_shares, 12_285_012, "priced on assets, excluding the queued IOU (D44)");
 }
+
+// --- #61: scripted multi-round harness (D32) ---
+//
+// Plays N rounds against the real program (LiteSVM): chip bets, the VRF roll through the callback,
+// settle, finish, next round. Replayable: every choice comes from a seeded generator. A player with
+// less than one bet of chips sits out. An LP adds 5 MUSD every 10 rounds, and each round the FIFO
+// queue is paid where the pool can afford it.
+
+// A small seeded generator (SplitMix64): the same seed gives the same run.
+struct Lcg(u64);
+impl Lcg {
+    fn next(&mut self) -> u64 {
+        self.0 = self.0.wrapping_add(0x9E37_79B9_7F4A_7C15);
+        let mut z = self.0;
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+        z ^ (z >> 31)
+    }
+}
+
+// The pool's numbers the harness prints: MUSD in the vault, NAV per share (6 decimals), queued
+// wins, and the insurance fund.
+#[derive(Clone, Copy)]
+struct PoolStats {
+    vault: u64,
+    nav_micro: u64,
+    queue_len: u64,
+    insurance: u64,
+}
+
+fn pool_stats(t: &Table) -> PoolStats {
+    let supply = mint_supply(t, &pda(&[SHARE_MINT_SEED]));
+    let vault = token_amount(&t.svm, &t.vault);
+    let nav_micro = if supply == 0 { 1_000_000 } else { (vault as u128 * 1_000_000 / supply as u128) as u64 };
+    let queue = t.svm.get_account(&pda(&[QUEUE_SEED])).unwrap().data;
+    let head = u64::from_le_bytes(queue[8..16].try_into().unwrap());
+    let tail = u64::from_le_bytes(queue[16..24].try_into().unwrap());
+    PoolStats {
+        vault,
+        nav_micro,
+        queue_len: tail - head,
+        insurance: token_amount(&t.svm, &pda(&[INSURANCE_VAULT_SEED])),
+    }
+}
+
+// The claims (chip stacks, for chip wins) waiting in the queue, in FIFO order.
+fn queued_stacks(t: &Table) -> Vec<Pubkey> {
+    let data = t.svm.get_account(&pda(&[QUEUE_SEED])).unwrap().data;
+    let head = u64::from_le_bytes(data[8..16].try_into().unwrap());
+    let tail = u64::from_le_bytes(data[16..24].try_into().unwrap());
+    (head..tail)
+        .map(|i| {
+            let at = 24 + (i % jhandi_munda::QUEUE_CAPACITY as u64) as usize * 40;
+            Pubkey::new_from_array(data[at..at + 32].try_into().unwrap())
+        })
+        .collect()
+}
+
+// Plays `rounds` rounds from the seed. Returns one summary line per round.
+fn run_rounds(rounds: u64, seed: u64) -> Vec<String> {
+    let mut rng = Lcg(seed);
+    let mut t = setup();
+    stub_vrf(&mut t);
+    let funder = new_player(&mut t);
+    init_cage(&mut t, &funder);
+    init_insurance(&mut t, &funder);
+    deposit(&mut t, &funder, 20_000_000);
+    let players: Vec<Keypair> = (0..3).map(|_| new_player(&mut t)).collect();
+    for p in &players {
+        assert!(buy_chips(&mut t, p, 40_000_000).is_ok(), "chips for the session");
+    }
+    let ephemeral_queue: Pubkey = "5hBR571xnXppuCPveTrctfTU7tJLSN94nq7kv7FRK5Tc".parse().unwrap();
+    let mut lines = Vec::new();
+
+    for r in 0..rounds {
+        let start = BASE_TIME + (r as i64) * 200;
+        set_time(&mut t, start);
+        let round_id = round(&t).round_id;
+
+        // Each player with chips bets 1 MUSD on a random face.
+        let mut bets: Vec<(usize, u8)> = Vec::new();
+        for (i, p) in players.iter().enumerate() {
+            if chip_balance(&t, p) < 1_000_000 {
+                continue;
+            }
+            let face = (rng.next() % 6) as u8 + 1;
+            assert!(place_chip_bet(&mut t, p, face, 1_000_000).is_ok(), "round {r}: a bet");
+            bets.push((i, face));
+        }
+        let bet_text: Vec<String> = bets
+            .iter()
+            .map(|(i, f)| format!("P{}:f{}", i, f))
+            .collect();
+
+        // The roll: a VRF value per die. Bytes 0..=5 give faces 1..=6.
+        set_time(&mut t, start + 90);
+        assert!(request_roll_on(&mut t, &players[0], ephemeral_queue).is_ok(), "round {r}: request the roll");
+        let mut randomness = [0u8; 32];
+        for d in 0..6 {
+            randomness[d] = (rng.next() % 6) as u8;
+        }
+        let request_id = round(&t).request_id;
+        assert!(send_callback(&mut t, &players[0], randomness, request_id).is_ok(), "round {r}: the callback");
+        let faces = round(&t).faces;
+
+        // Settle every bet of the round, then finish it.
+        set_time(&mut t, start + 100);
+        let pairs: Vec<(Pubkey, Pubkey)> = bets
+            .iter()
+            .map(|(i, f)| (bet_pda_r(round_id, &players[*i], *f), chip_stack(&players[*i])))
+            .collect();
+        assert!(settle_chip_bets(&mut t, &players[0], &pairs).is_ok(), "round {r}: settle");
+        assert!(finish_round(&mut t, &players[0]).is_ok(), "round {r}: finish");
+
+        // Every tenth round an LP adds 5 MUSD; the queue is paid FIFO where the pool can afford it.
+        if (r + 1) % 10 == 0 {
+            deposit(&mut t, &funder, 5_000_000);
+        }
+        let stacks = queued_stacks(&t);
+        if !stacks.is_empty() {
+            assert!(pay_queue_chips(&mut t, &players[0], &stacks).is_ok(), "round {r}: pay the queue");
+        }
+
+        let s = pool_stats(&t);
+        lines.push(format!(
+            "round {:>3} | bets {:<16} | faces {:?} | pool {:>10} | NAV {:>9.6} | queue {} | insurance {}",
+            round_id,
+            if bet_text.is_empty() { "-".to_string() } else { bet_text.join(" ") },
+            faces,
+            s.vault,
+            s.nav_micro as f64 / 1e6,
+            s.queue_len,
+            s.insurance,
+        ));
+    }
+    lines
+}
+
+#[test]
+fn test_sim_five_rounds_run_to_the_end() {
+    let lines = run_rounds(5, 1);
+    assert_eq!(lines.len(), 5, "five rounds played");
+    for line in &lines {
+        println!("{line}");
+    }
+}
+
+// The documented command runs this with the rounds and seed from the environment:
+//   ./scripts/sim-rounds.sh --rounds 50 --seed 1
+#[test]
+#[ignore]
+fn sim_rounds_from_env() {
+    let rounds: u64 = std::env::var("SIM_ROUNDS").ok().and_then(|v| v.parse().ok()).unwrap_or(5);
+    let seed: u64 = std::env::var("SIM_SEED").ok().and_then(|v| v.parse().ok()).unwrap_or(1);
+    println!("simulation: {rounds} rounds, seed {seed}");
+    for line in run_rounds(rounds, seed) {
+        println!("{line}");
+    }
+}
