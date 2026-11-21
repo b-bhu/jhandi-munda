@@ -17,4 +17,4 @@ source scripts/env.sh
 anchor build > /dev/null 2>&1
 SIM_ROUNDS="$ROUNDS" SIM_SEED="$SEED" \
   cargo test -p jhandi_munda --test test_first_bet sim_rounds_from_env -- --ignored --nocapture 2>&1 \
-  | grep -E "^(simulation|round )|test result|panicked|error" 
+  | grep -v -E "^\s+(Compiling|Finished|Running|Blocking|Fresh|Doc-tests)|^running |^$|^test |^note: " 

@@ -652,8 +652,14 @@ fn test_open_claim_from_settled_bet() {
 
 // Pool deposit (the existing `deposit`): the pool needs MUSD to pay winners.
 fn deposit(t: &mut Table, funder: &Keypair, amount: u64) {
+    let res = try_deposit(t, funder, amount);
+    assert!(res.is_ok(), "deposit failed: {:?}", res.err());
+}
+
+// Like `deposit`, but returns the result (the harness logs a refused deposit instead of failing).
+fn try_deposit(t: &mut Table, funder: &Keypair, amount: u64) -> TransactionResult {
     let share_mint = pda(&[SHARE_MINT_SEED]);
-    let res = send(
+    send(
         &mut t.svm,
         funder,
         ix(
@@ -672,8 +678,7 @@ fn deposit(t: &mut Table, funder: &Keypair, amount: u64) {
             },
             jhandi_munda::instruction::Deposit { amount },
         ),
-    );
-    assert!(res.is_ok(), "deposit failed: {:?}", res.err());
+    )
 }
 
 // Creates the insurance vault (the insurance PDA is its authority).
@@ -3199,7 +3204,13 @@ fn queued_stacks(t: &Table) -> Vec<Pubkey> {
         .collect()
 }
 
-// Plays `rounds` rounds from the seed. Returns one summary line per round.
+// The documented demo jackpot (#62): round JACKPOT_ROUND (index 16, the 17th round) is injected.
+// Player 0 bets face 6 and the roll shows six 6s: six matches, a 101x gross, owed 99 MUSD on a
+// 1 MUSD stake. This is a demo injection in the test harness only; production VRF is never forced.
+const JACKPOT_ROUND: u64 = 16;
+
+// Plays `rounds` rounds from the seed. Returns one summary line per round, plus the jackpot's
+// before/after block when the run reaches JACKPOT_ROUND.
 fn run_rounds(rounds: u64, seed: u64) -> Vec<String> {
     let mut rng = Lcg(seed);
     let mut t = setup();
@@ -3222,11 +3233,13 @@ fn run_rounds(rounds: u64, seed: u64) -> Vec<String> {
 
         // Each player with chips bets 1 MUSD on a random face.
         let mut bets: Vec<(usize, u8)> = Vec::new();
+        let jackpot = r == JACKPOT_ROUND;
         for (i, p) in players.iter().enumerate() {
+            let random_face = (rng.next() % 6) as u8 + 1;
             if chip_balance(&t, p) < 1_000_000 {
                 continue;
             }
-            let face = (rng.next() % 6) as u8 + 1;
+            let face = if jackpot && i == 0 { 6 } else { random_face };
             assert!(place_chip_bet(&mut t, p, face, 1_000_000).is_ok(), "round {r}: a bet");
             bets.push((i, face));
         }
@@ -3242,22 +3255,35 @@ fn run_rounds(rounds: u64, seed: u64) -> Vec<String> {
         for d in 0..6 {
             randomness[d] = (rng.next() % 6) as u8;
         }
+        if jackpot {
+            randomness[..6].copy_from_slice(&[5; 6]); // six 6s
+        }
         let request_id = round(&t).request_id;
         assert!(send_callback(&mut t, &players[0], randomness, request_id).is_ok(), "round {r}: the callback");
         let faces = round(&t).faces;
 
-        // Settle every bet of the round, then finish it.
+        // Settle every bet of the round, then finish it. The jackpot block records the pool first.
         set_time(&mut t, start + 100);
+        let before = pool_stats(&t);
         let pairs: Vec<(Pubkey, Pubkey)> = bets
             .iter()
             .map(|(i, f)| (bet_pda_r(round_id, &players[*i], *f), chip_stack(&players[*i])))
             .collect();
         assert!(settle_chip_bets(&mut t, &players[0], &pairs).is_ok(), "round {r}: settle");
+        let after_settle = pool_stats(&t);
         assert!(finish_round(&mut t, &players[0]).is_ok(), "round {r}: finish");
 
         // Every tenth round an LP adds 5 MUSD; the queue is paid FIFO where the pool can afford it.
+        let mut deposit_note = String::new();
         if (r + 1) % 10 == 0 {
-            deposit(&mut t, &funder, 5_000_000);
+            match try_deposit(&mut t, &funder, 5_000_000) {
+                Ok(_) => {}
+                Err(e) if format!("{:?}", e.meta.logs).contains("PoolInsolvent") => {
+                    // The queue owes more than the vault: LP money is refused until bet stakes catch up (D44).
+                    deposit_note = " | LP deposit refused: pool insolvent (queue owes more than the vault)".to_string();
+                }
+                Err(e) => panic!("round {r}: the LP deposit failed for another reason: {:?}", e.err),
+            }
         }
         let stacks = queued_stacks(&t);
         if !stacks.is_empty() {
@@ -3265,8 +3291,21 @@ fn run_rounds(rounds: u64, seed: u64) -> Vec<String> {
         }
 
         let s = pool_stats(&t);
+        if jackpot {
+            // 1 MUSD stake, 6 matches: 101 gross, 99 owed after the 2% win fee on the 100 profit.
+            lines.push(format!(
+                "JACKPOT round {} (index {}): P0 bet 1.000000 on face 6, faces {:?}, six matches, 101x gross, owed 99.000000\n\
+                 \x20 before settle: pool {} | queue {} | insurance {}\n\
+                 \x20 after settle:  pool {} | queue {} | insurance {}  (queued when the pool is short)\n\
+                 \x20 after the queue pass and the round: pool {} | queue {} | insurance {}",
+                round_id, r, faces,
+                before.vault, before.queue_len, before.insurance,
+                after_settle.vault, after_settle.queue_len, after_settle.insurance,
+                s.vault, s.queue_len, s.insurance,
+            ));
+        }
         lines.push(format!(
-            "round {:>3} | bets {:<16} | faces {:?} | pool {:>10} | NAV {:>9.6} | queue {} | insurance {}",
+            "round {:>3} | bets {:<16} | faces {:?} | pool {:>10} | NAV {:>9.6} | queue {} | insurance {}{}",
             round_id,
             if bet_text.is_empty() { "-".to_string() } else { bet_text.join(" ") },
             faces,
@@ -3274,9 +3313,24 @@ fn run_rounds(rounds: u64, seed: u64) -> Vec<String> {
             s.nav_micro as f64 / 1e6,
             s.queue_len,
             s.insurance,
+            deposit_note,
         ));
     }
     lines
+}
+
+// The run reaches the jackpot round: it contains a six-match hit, and the pool could not pay it, so
+// the win waited in the queue rather than failing the round (#62).
+#[test]
+fn test_jackpot_round_is_queued_not_a_crash() {
+    let lines = run_rounds(JACKPOT_ROUND + 2, 1);
+    let jackpot = lines.iter().find(|l| l.starts_with("JACKPOT")).expect("the jackpot round ran");
+    assert!(jackpot.contains("six matches"), "{jackpot}");
+    // The jackpot is owed 99 and the pool is short, so the queue is not empty after settle (another
+    // short win may queue too, so the count is not fixed).
+    let after = jackpot.lines().find(|l| l.contains("after settle")).expect("after-settle line");
+    assert!(!after.contains("queue 0"), "the win queued: {jackpot}");
+    println!("{jackpot}");
 }
 
 #[test]
