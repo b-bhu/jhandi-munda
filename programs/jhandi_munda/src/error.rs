@@ -98,8 +98,8 @@ pub enum ErrorCode {
     WrongLayoutForMigration,
     #[msg("The account is not owned by this program, so it cannot be migrated here")]
     AccountNotProgramOwned,
-    #[msg("Only an idle round can be migrated: a live round keeps its counts")]
-    RoundNotIdle,
+    #[msg("A live round (Open or Rolling) cannot be migrated")]
+    RoundIsLive,
     #[msg("The config is already in the current layout")]
     ConfigAlreadyMigrated,
     #[msg("A payout or fee amount overflowed")]

@@ -2189,21 +2189,7 @@ fn test_migrate_round_388_to_392() {
 
     // The deployed round is 388 bytes: no bet_count or settled_count. Idle, round 0.
     let round_bump = Pubkey::find_program_address(&[ROUND_SEED], &jhandi_munda::id()).1;
-    let write_old_round = |t: &mut Table, status: u8| {
-        let mut acc = t.svm.get_account(&t.round).unwrap();
-        let mut b = acc.data[0..8].to_vec();
-        b.push(status); // RoundStatus
-        b.extend_from_slice(&0i64.to_le_bytes()); // opened_at
-        b.extend_from_slice(&0u64.to_le_bytes()); // round_id
-        b.extend_from_slice(&0u32.to_le_bytes()); // players: empty
-        b.extend_from_slice(&[0u8; 320]); // players capacity (10 x 32)
-        b.extend_from_slice(&[0u8; 32]); // request_id
-        b.extend_from_slice(&[0u8; 6]); // faces
-        b.push(round_bump);
-        assert_eq!(b.len(), 388);
-        acc.data = b;
-        t.svm.set_account(t.round, acc).unwrap();
-    };
+    let write_old_round = |t: &mut Table, status: u8| write_old_round_with(t, status, &[], round_bump);
 
     // A live round is never migrated.
     write_old_round(&mut t, 1); // Open
@@ -2222,4 +2208,60 @@ fn test_migrate_round_388_to_392() {
     // The migrated round takes bets.
     let alice = new_player(&mut t);
     assert!(place(&mut t, &alice, 2, 1_000_000).is_ok(), "the migrated round takes a bet");
+}
+
+// Writes the deployed 388-byte round layout: status, opened_at, round_id, players
+// (with room for 10), request_id, faces, bump. No counters.
+fn write_old_round_with(t: &mut Table, status: u8, players: &[Pubkey], bump: u8) {
+    let mut acc = t.svm.get_account(&t.round).unwrap();
+    let mut b = acc.data[0..8].to_vec();
+    b.push(status);
+    b.extend_from_slice(&0i64.to_le_bytes()); // opened_at
+    b.extend_from_slice(&0u64.to_le_bytes()); // round_id
+    b.extend_from_slice(&(players.len() as u32).to_le_bytes());
+    for p in players {
+        b.extend_from_slice(p.as_ref());
+    }
+    b.extend_from_slice(&vec![0u8; (10 - players.len()) * 32]); // unused slots
+    b.extend_from_slice(&[0u8; 32]); // request_id
+    b.extend_from_slice(&[0u8; 6]); // faces
+    b.push(bump);
+    assert_eq!(b.len(), 388);
+    acc.data = b;
+    t.svm.set_account(t.round, acc).unwrap();
+}
+
+#[test]
+fn test_migrate_rolled_round_then_finish() {
+    let mut t = setup();
+    stub_vrf(&mut t);
+    let admin = t.admin.insecure_clone();
+    let stranger = new_player(&mut t);
+    let alice = new_player(&mut t);
+    set_upgrade_authority(&mut t, &admin.pubkey());
+    let round_bump = Pubkey::find_program_address(&[ROUND_SEED], &jhandi_munda::id()).1;
+
+    // The devnet leftover: a finished (Rolled) round with one player, in the old layout.
+    write_old_round_with(&mut t, 3, &[alice.pubkey()], round_bump);
+
+    // Only the upgrade authority may migrate it.
+    assert!(migrate_round_ix(&mut t, &stranger).is_err(), "a stranger cannot migrate the round");
+    assert_eq!(t.svm.get_account(&t.round).unwrap().data.len(), 388, "the refused call changed nothing");
+
+    // The authority migrates: it grows, adds zero counters, and changes nothing else.
+    assert!(migrate_round_ix(&mut t, &admin).is_ok());
+    let r = Round::try_deserialize(&mut t.svm.get_account(&t.round).unwrap().data.as_slice()).unwrap();
+    assert_eq!(r.status, RoundStatus::Rolled, "the migration keeps the status");
+    assert_eq!((r.bet_count, r.settled_count), (0, 0), "the counters start at zero");
+    assert_eq!(r.players, vec![alice.pubkey()], "players are kept by the migration");
+    assert_eq!(r.round_id, 0);
+
+    // A second migration is refused: the account is already the current size.
+    assert!(migrate_round_ix(&mut t, &admin).is_err(), "already migrated: refused cleanly");
+
+    // Finishing the round (nothing to settle: 0 of 0) takes it to Idle for the next round.
+    assert!(finish_round(&mut t, &admin).is_ok(), "finish_round after the migration");
+    let r = Round::try_deserialize(&mut t.svm.get_account(&t.round).unwrap().data.as_slice()).unwrap();
+    assert_eq!((r.status, r.round_id), (RoundStatus::Idle, 1));
+    assert!(r.players.is_empty(), "finish clears the players");
 }

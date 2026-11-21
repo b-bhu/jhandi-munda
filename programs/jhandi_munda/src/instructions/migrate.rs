@@ -9,8 +9,10 @@
 //!
 //! - `migrate_config`: the config (42 -> current). Sets `admin` to the authority (D40).
 //! - `migrate_table`: the table (34 -> current). New fee pots are zero.
-//! - `migrate_round`: the round (388 -> current), only while it is Idle. It must be
-//!   owned by this program, so a delegated round is refused on Solana. Whether the
+//! - `migrate_round`: the round (388 -> current). It only grows the account and
+//!   sets `bet_count` and `settled_count` to zero. It does NOT change the status or
+//!   any other field. A live round (Open or Rolling) is refused. It must be owned
+//!   by this program, so a delegated round is refused on Solana. Whether the
 //!   rollup lets this run on the delegated copy is UNVERIFIED (see docs/er-design.md).
 
 use anchor_lang::prelude::*;
@@ -233,8 +235,12 @@ pub fn handle_migrate_round<'info>(ctx: Context<'info, MigrateRound<'info>>) -> 
         require!(data[0..8] == *Round::DISCRIMINATOR, ErrorCode::WrongLayoutForMigration);
         read_round_v388(&data)?
     };
-    // Never migrate a live round: its counts must not be lost mid-game.
-    require!(old.status == RoundStatus::Idle, ErrorCode::RoundNotIdle);
+    // A live round (Open or Rolling) is never migrated: its bets are still in play.
+    // Any other status is kept as it is: this only adds the two counters.
+    require!(
+        old.status == RoundStatus::Idle || old.status == RoundStatus::Rolled,
+        ErrorCode::RoundIsLive
+    );
     let round = Round {
         status: old.status,
         opened_at: old.opened_at,
