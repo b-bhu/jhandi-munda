@@ -103,7 +103,8 @@ const CONFIG = P([enc("config")]);
 const POOL = P([enc("pool")]);
 const POOL_VAULT = P([enc("pool_vault")]);
 const SHARE_MINT = P([enc("pool_share_mint")]); // SHARE_MINT_SEED (LP shares)
-const INSURANCE_VAULT = P([enc("insurance_vault")]); // D43: orphan MUSD is swept here by deposit
+const INSURANCE_VAULT = P([enc("insurance_vault")]);
+const QUEUE = P([enc("queue")]); // QUEUE_SEED: the FIFO payout queue (D30, #110) // D43: orphan MUSD is swept here by deposit
 const CAGE = P([enc("cage_vault")]);
 const MUSD_MINT = P([enc("musd_mint")]);
 // Payout math, copied from payout.rs (MULTIPLIERS, WIN_FEE_BPS = 200). Used only to size the pool top-up.
@@ -481,7 +482,7 @@ async function topUpPoolFor({ idl, base, wallet, bet, faces, record, rpc }) {
   }
   record("deposit", await send("deposit (LP, pool top-up)", base, wallet, buildIx(idl, "deposit", {
     pool: POOL, share_mint: SHARE_MINT, vault: POOL_VAULT, depositor: wallet.publicKey, depositor_ata: musdAta,
-    depositor_shares: ataOf(wallet.publicKey, SHARE_MINT), insurance_vault: INSURANCE_VAULT, token_program: TOKEN_PROGRAM,
+    depositor_shares: ataOf(wallet.publicKey, SHARE_MINT), insurance_vault: INSURANCE_VAULT, queue: QUEUE, token_program: TOKEN_PROGRAM,
     system_program: SystemProgram.programId, associated_token_program: ATA_PROGRAM,
   }, u64(deposit))), "solana");
   return deposit;
@@ -532,6 +533,7 @@ async function settleFromSolana({ idl, base, er, wallet, record, roundId, bet, c
       await topUpPoolFor({ idl, base, wallet, bet, faces: home.faces, record });
       const settle = buildIx(idl, "settle_chip_bets", {
         table: TABLE, round: ROUND, pool: POOL, pool_vault: POOL_VAULT, cage_vault: CAGE, token_program: TOKEN_PROGRAM,
+        queue: QUEUE,
       });
       settle.keys.push({ pubkey: bet, isSigner: false, isWritable: true }, { pubkey: chips, isSigner: false, isWritable: true });
       try {

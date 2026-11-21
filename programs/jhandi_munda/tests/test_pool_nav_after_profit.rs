@@ -209,6 +209,7 @@ fn try_deposit(svm: &mut LiteSVM, wallet: &Keypair, pool: &Pubkey, musd_mint: &P
             depositor_ata,
             depositor_shares,
             insurance_vault: Pubkey::find_program_address(&[jhandi_munda::INSURANCE_VAULT_SEED], &jhandi_munda::id()).0,
+            queue: Pubkey::find_program_address(&[jhandi_munda::QUEUE_SEED], &jhandi_munda::id()).0,
             token_program: SPL_TOKEN_PROGRAM_ID,
             system_program: anchor_lang::solana_program::system_program::ID,
             associated_token_program: jhandi_munda::ATA_PROGRAM_ID,

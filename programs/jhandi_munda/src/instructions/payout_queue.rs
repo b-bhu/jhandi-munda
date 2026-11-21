@@ -6,6 +6,13 @@
 //! so a newer winner is never paid ahead of an older one (no skipping, D30).
 //! Anyone can call `pay_queue` when MUSD has flowed into the pool.
 //!
+//! #110: a chip win that the pool cannot pay joins the same queue, keyed by the
+//! winner's ChipStack instead of a Claim. `pay_queue` tells the two apart by the
+//! account's type: a ChipStack is paid from the pool vault into the cage vault and
+//! credited to the chips; a Claim is paid to the player's MUSD ATA.
+//! LIMITATION: a chip entry is paid only while its ChipStack is on Solana (not
+//! delegated), so a queued chip win waits, and holds the queue, until then. UNVERIFIED on devnet.
+//!
 //! The queue lives on Solana (base layer). It is a single zero-copy account of
 //! about 4 KB, under the 10,240-byte ER commit cap.
 
@@ -14,8 +21,9 @@ use anchor_lang::prelude::*;
 use crate::{
     error::ErrorCode,
     instructions::claim_redeem::{spl_transfer, token_balance},
-    state::{Claim, PayoutQueue, PoolState, QueueEntry},
-    POOL_SEED, POOL_VAULT_SEED, QUEUE_CAPACITY, QUEUE_SEED, SPL_TOKEN_PROGRAM_ID,
+    instructions::settle::save_account,
+    state::{Claim, ChipStack, PayoutQueue, PoolState, QueueEntry},
+    CAGE_VAULT_SEED, POOL_SEED, POOL_VAULT_SEED, QUEUE_CAPACITY, QUEUE_SEED, SPL_TOKEN_PROGRAM_ID,
 };
 
 /// Adds a win to the back of the queue. Fails with `QueueFull` at capacity.
@@ -70,7 +78,8 @@ pub struct PayQueue<'info> {
     /// CHECK: verified against SPL_TOKEN_PROGRAM_ID in the handler.
     pub token_program: UncheckedAccount<'info>,
     // Remaining accounts, in pairs, in queue order: each queued claim (writable),
-    // then that claim's player MUSD ATA (writable).
+    // then that claim's player MUSD ATA (writable). For a queued chip win the pair is
+    // the ChipStack (writable), then the cage vault (writable).
 }
 
 /// Pays queued wins from the head while the pool can cover the head. Stops at
@@ -96,6 +105,31 @@ pub fn handle_pay_queue<'info>(ctx: Context<'info, PayQueue<'info>>) -> Result<(
         let Some(pair) = pairs.next() else { break };
         let (claim_info, ata_info) = (&pair[0], &pair[1]);
         require_keys_eq!(claim_info.key(), entry_claim, ErrorCode::QueueOrderMismatch);
+
+        // #110: a chip win. The entry's key is the ChipStack; pay the cage, credit the chips.
+        let is_chips = {
+            let data = claim_info.try_borrow_data()?;
+            ChipStack::try_deserialize(&mut &data[..]).is_ok()
+        };
+        if is_chips {
+            require_keys_eq!(*claim_info.owner, crate::ID, ErrorCode::QueueOrderMismatch);
+            require!(claim_info.is_writable, ErrorCode::QueueOrderMismatch);
+            let cage_expected = Pubkey::find_program_address(&[CAGE_VAULT_SEED], &crate::ID).0;
+            require_keys_eq!(ata_info.key(), cage_expected, ErrorCode::QueueOrderMismatch);
+            require!(ata_info.is_writable, ErrorCode::QueueOrderMismatch);
+            let mut stack = {
+                let data = claim_info.try_borrow_data()?;
+                ChipStack::try_deserialize(&mut &data[..])?
+            };
+            let seeds: &[&[u8]] = &[POOL_SEED, &[pool.bump]];
+            let (vault_info, pool_info) = (ctx.accounts.pool_vault.to_account_info(), pool.to_account_info());
+            spl_transfer(&vault_info, ata_info, &pool_info, entry_amount, &[seeds])?;
+            stack.balance = stack.balance.checked_add(entry_amount).ok_or(ErrorCode::MathOverflow)?;
+            save_account(claim_info, &stack)?;
+            queue.head += 1;
+            msg!("Queued chip win of {} credited to chips; {} left in queue", entry_amount, queue.tail - queue.head);
+            continue;
+        }
 
         let mut claim: Account<Claim> = Account::try_from(claim_info)?;
         require!(claim.queued && !claim.redeemed, ErrorCode::QueueOrderMismatch);

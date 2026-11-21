@@ -664,6 +664,7 @@ fn deposit(t: &mut Table, funder: &Keypair, amount: u64) {
                 depositor_ata: jhandi_munda::musd_ata(&funder.pubkey(), &t.musd_mint),
                 depositor_shares: jhandi_munda::share_ata(&funder.pubkey(), &share_mint),
                 insurance_vault: Pubkey::find_program_address(&[jhandi_munda::INSURANCE_VAULT_SEED], &jhandi_munda::id()).0,
+                queue: Pubkey::find_program_address(&[jhandi_munda::QUEUE_SEED], &jhandi_munda::id()).0,
                 token_program: SPL_TOKEN_PROGRAM_ID,
                 system_program: SYS,
                 associated_token_program: jhandi_munda::ATA_PROGRAM_ID,
@@ -1794,6 +1795,7 @@ fn settle_chip_bets(t: &mut Table, signer: &Keypair, pairs: &[(Pubkey, Pubkey)])
             pool_vault: t.vault,
             cage_vault: cage(),
             token_program: SPL_TOKEN_PROGRAM_ID,
+            queue: pda(&[QUEUE_SEED]),
         },
         jhandi_munda::instruction::SettleChipBets {},
     );
@@ -2693,4 +2695,70 @@ fn test_deposit_into_orphan_vault() {
     assert_eq!(shares(&t, &dave), 1_000_000, "pro rata at NAV $1.00");
     assert_eq!(token_amount(&t.svm, &t.vault), 3_000_000);
     assert_eq!(mint_supply(&t, &share_mint), 3_000_000);
+}
+
+// #110: pays queued chip wins. `stacks` are the ChipStacks in queue order (cage vault added here).
+fn pay_queue_chips(t: &mut Table, signer: &Keypair, stacks: &[Pubkey]) -> TransactionResult {
+    let mut instruction = ix(
+        jhandi_munda::accounts::PayQueue {
+            queue: pda(&[QUEUE_SEED]),
+            pool: t.pool,
+            pool_vault: t.vault,
+            token_program: SPL_TOKEN_PROGRAM_ID,
+        },
+        jhandi_munda::instruction::PayQueue {},
+    );
+    for stack in stacks {
+        instruction.accounts.push(AccountMeta::new(*stack, false));
+        instruction.accounts.push(AccountMeta::new(cage(), false));
+    }
+    send(&mut t.svm, signer, instruction)
+}
+
+// #110 (D30): a chip win the pool cannot pay joins the FIFO queue; the round still settles.
+#[test]
+fn test_chip_win_queues_when_pool_short_then_pays_after_deposit() {
+    let mut t = setup();
+    stub_vrf(&mut t);
+    let funder = new_player(&mut t);
+    init_cage(&mut t, &funder);
+    let a = new_player(&mut t);
+    let b = new_player(&mut t);
+    assert!(buy_chips(&mut t, &a, 20_000_000).is_ok());
+    assert!(buy_chips(&mut t, &b, 5_000_000).is_ok());
+    // No LP yet: the pool vault is empty, so Alice's win cannot be paid when it settles.
+    assert_eq!(token_amount(&t.svm, &t.vault), 0);
+
+    assert!(place_chip_bet(&mut t, &a, 2, 10_000_000).is_ok());
+    assert!(place_chip_bet(&mut t, &b, 4, 1_000_000).is_ok());
+    set_time(&mut t, BASE_TIME + 90);
+    let ephemeral_queue: Pubkey = "5hBR571xnXppuCPveTrctfTU7tJLSN94nq7kv7FRK5Tc".parse().unwrap();
+    assert!(request_roll_on(&mut t, &a, ephemeral_queue).is_ok());
+    let mut randomness = [0u8; 32];
+    randomness[..6].copy_from_slice(&[1, 1, 4, 5, 0, 2]);
+    let request_id = round(&t).request_id;
+    assert!(send_callback(&mut t, &a, randomness, request_id).is_ok());
+    assert_eq!(round(&t).faces, [2, 2, 5, 6, 1, 3]);
+
+    // Alice matches twice on face 2: owed 10 + 0.98 x 20 = 29.60, but the pool holds only the
+    // 11 of stakes that just moved in. Settle must succeed: her win is queued, Bob's loss settles.
+    set_time(&mut t, BASE_TIME + 100);
+    let (ab, bb) = (bet_pda_r(0, &a, 2), bet_pda_r(0, &b, 4));
+    let (ac, bc) = (pda(&[jhandi_munda::CHIPS_SEED, a.pubkey().as_ref()]), pda(&[jhandi_munda::CHIPS_SEED, b.pubkey().as_ref()]));
+    assert!(settle_chip_bets(&mut t, &a, &[(ab, ac), (bb, bc)]).is_ok(), "a short pool does not fail the settle");
+    assert_eq!(chip_balance(&t, &a), 10_000_000, "the win is queued, not credited yet");
+    assert_eq!(token_amount(&t.svm, &cage()), 14_000_000, "stakes moved to the pool; nothing paid out");
+    assert_eq!(token_amount(&t.svm, &t.vault), 11_000_000);
+    let bob_slip = Bet::try_deserialize(&mut t.svm.get_account(&bb).unwrap().data.as_slice()).unwrap();
+    assert!(bob_slip.settled, "the other bet settled in the same round");
+    assert!(finish_round(&mut t, &a).is_ok(), "the round finishes with a win still queued");
+
+    // An LP deposit funds the pool. The queued win is paid into the cage and credited to chips.
+    deposit(&mut t, &funder, 100_000_000);
+    let stack_a = pda(&[jhandi_munda::CHIPS_SEED, a.pubkey().as_ref()]);
+    assert!(pay_queue_chips(&mut t, &a, &[stack_a]).is_ok(), "the queued chip win is paid");
+    assert_eq!(chip_balance(&t, &a), 39_600_000, "Alice's win is credited to chips");
+    assert_eq!(token_amount(&t.svm, &cage()), 14_000_000 + 29_600_000, "the win came out of the pool into the cage");
+    // Invariant: the cage holds exactly the chips players hold.
+    assert_eq!(token_amount(&t.svm, &cage()), chip_balance(&t, &a) + chip_balance(&t, &b));
 }
