@@ -100,6 +100,14 @@ pub mod jhandi_munda {
         migrate::handle_migrate_config(ctx)
     }
 
+    pub fn migrate_table<'info>(ctx: Context<'info, MigrateTable<'info>>) -> Result<()> {
+        migrate::handle_migrate_table(ctx)
+    }
+
+    pub fn migrate_round<'info>(ctx: Context<'info, MigrateRound<'info>>) -> Result<()> {
+        migrate::handle_migrate_round(ctx)
+    }
+
     pub fn init_cage(ctx: Context<InitCage>) -> Result<()> {
         chips::handle_init_cage(ctx)
     }

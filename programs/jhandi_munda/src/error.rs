@@ -94,6 +94,12 @@ pub enum ErrorCode {
     ChipBetSettledToChips,
     #[msg("Only the program's upgrade authority can migrate the config")]
     NotUpgradeAuthority,
+    #[msg("The account is not in the layout this migration expects (already migrated?)")]
+    WrongLayoutForMigration,
+    #[msg("The account is not owned by this program, so it cannot be migrated here")]
+    AccountNotProgramOwned,
+    #[msg("Only an idle round can be migrated: a live round keeps its counts")]
+    RoundNotIdle,
     #[msg("The config is already in the current layout")]
     ConfigAlreadyMigrated,
     #[msg("A payout or fee amount overflowed")]

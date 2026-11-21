@@ -2103,3 +2103,123 @@ fn test_migrate_config_then_delegate() {
     // Now delegation works, for the admin only (D40).
     assert!(delegate_round_by(&mut t, &admin).is_ok(), "the admin delegates the round");
 }
+
+// --- migrate_table and migrate_round (Blitz verify, PR #109) ---
+
+fn migrate_table_ix(t: &mut Table, signer: &Keypair) -> TransactionResult {
+    let pd = pda_with(&[jhandi_munda::id().as_ref()], &anchor_lang::solana_program::bpf_loader_upgradeable::id());
+    send(
+        &mut t.svm,
+        signer,
+        ix(
+            jhandi_munda::accounts::MigrateTable {
+                table: pda(&[TABLE_SEED]),
+                upgrade_authority: signer.pubkey(),
+                program_data: pd,
+                system_program: SYS,
+            },
+            jhandi_munda::instruction::MigrateTable {},
+        ),
+    )
+}
+
+fn migrate_round_ix(t: &mut Table, signer: &Keypair) -> TransactionResult {
+    let pd = pda_with(&[jhandi_munda::id().as_ref()], &anchor_lang::solana_program::bpf_loader_upgradeable::id());
+    send(
+        &mut t.svm,
+        signer,
+        ix(
+            jhandi_munda::accounts::MigrateRound {
+                round: t.round,
+                upgrade_authority: signer.pubkey(),
+                program_data: pd,
+                system_program: SYS,
+            },
+            jhandi_munda::instruction::MigrateRound {},
+        ),
+    )
+}
+
+#[test]
+fn test_migrate_table_then_place_bet() {
+    let mut t = setup();
+    stub_vrf(&mut t);
+    let admin = t.admin.insecure_clone();
+    let stranger = new_player(&mut t);
+    let alice = new_player(&mut t);
+    set_upgrade_authority(&mut t, &admin.pubkey());
+
+    // The deployed table is the 34-byte layout: no fee pots. Write it.
+    let table_bump = Pubkey::find_program_address(&[TABLE_SEED], &jhandi_munda::id()).1;
+    let mut old = t.svm.get_account(&t.table).unwrap();
+    let mut bytes = old.data[0..8].to_vec();
+    bytes.extend_from_slice(&90i64.to_le_bytes()); // round_length_secs
+    bytes.extend_from_slice(&1_000_000u64.to_le_bytes()); // min_bet
+    bytes.extend_from_slice(&0u64.to_le_bytes()); // max_bet
+    bytes.push(0); // max_bet_enabled
+    bytes.push(table_bump);
+    assert_eq!(bytes.len(), 34);
+    old.data = bytes;
+    t.svm.set_account(t.table, old).unwrap();
+
+    // The old table cannot be read: placing a bet fails.
+    assert!(place(&mut t, &alice, 2, 1_000_000).is_err(), "the old table cannot place bets");
+
+    // A stranger cannot migrate it; the upgrade authority can, once.
+    assert!(migrate_table_ix(&mut t, &stranger).is_err(), "a stranger cannot migrate the table");
+    assert!(migrate_table_ix(&mut t, &admin).is_ok(), "the upgrade authority migrates the table");
+    let data = t.svm.get_account(&t.table).unwrap().data;
+    assert_eq!(data.len(), 8 + TableConfig::INIT_SPACE, "sized from the struct");
+    let cfg = TableConfig::try_deserialize(&mut data.as_slice()).unwrap();
+    assert_eq!((cfg.round_length_secs, cfg.min_bet), (90, 1_000_000), "old fields kept");
+    assert_eq!((cfg.fee_treasury, cfg.fee_devs, cfg.fee_stakers), (0, 0, 0), "new fee pots are zero");
+    assert!(migrate_table_ix(&mut t, &admin).is_err(), "a second migration is refused");
+
+    // Placing a bet works on the migrated table.
+    assert!(place(&mut t, &alice, 2, 1_000_000).is_ok(), "place_bet works after migration");
+}
+
+#[test]
+fn test_migrate_round_388_to_392() {
+    let mut t = setup();
+    stub_vrf(&mut t);
+    let admin = t.admin.insecure_clone();
+    let stranger = new_player(&mut t);
+    set_upgrade_authority(&mut t, &admin.pubkey());
+
+    // The deployed round is 388 bytes: no bet_count or settled_count. Idle, round 0.
+    let round_bump = Pubkey::find_program_address(&[ROUND_SEED], &jhandi_munda::id()).1;
+    let write_old_round = |t: &mut Table, status: u8| {
+        let mut acc = t.svm.get_account(&t.round).unwrap();
+        let mut b = acc.data[0..8].to_vec();
+        b.push(status); // RoundStatus
+        b.extend_from_slice(&0i64.to_le_bytes()); // opened_at
+        b.extend_from_slice(&0u64.to_le_bytes()); // round_id
+        b.extend_from_slice(&0u32.to_le_bytes()); // players: empty
+        b.extend_from_slice(&[0u8; 320]); // players capacity (10 x 32)
+        b.extend_from_slice(&[0u8; 32]); // request_id
+        b.extend_from_slice(&[0u8; 6]); // faces
+        b.push(round_bump);
+        assert_eq!(b.len(), 388);
+        acc.data = b;
+        t.svm.set_account(t.round, acc).unwrap();
+    };
+
+    // A live round is never migrated.
+    write_old_round(&mut t, 1); // Open
+    assert!(migrate_round_ix(&mut t, &admin).is_err(), "a live round is refused");
+
+    // An idle 388-byte round migrates; a stranger cannot.
+    write_old_round(&mut t, 0); // Idle
+    assert!(migrate_round_ix(&mut t, &stranger).is_err(), "a stranger cannot migrate the round");
+    assert!(migrate_round_ix(&mut t, &admin).is_ok(), "the upgrade authority migrates the round");
+    let acc = t.svm.get_account(&t.round).unwrap();
+    assert_eq!(acc.data.len(), 8 + Round::INIT_SPACE, "392 bytes, sized from the struct");
+    let r = Round::try_deserialize(&mut acc.data.as_slice()).unwrap();
+    assert_eq!((r.status, r.round_id, r.bet_count, r.settled_count), (RoundStatus::Idle, 0, 0, 0));
+    assert_eq!(r.bump, round_bump, "the old fields are kept");
+
+    // The migrated round takes bets.
+    let alice = new_player(&mut t);
+    assert!(place(&mut t, &alice, 2, 1_000_000).is_ok(), "the migrated round takes a bet");
+}
