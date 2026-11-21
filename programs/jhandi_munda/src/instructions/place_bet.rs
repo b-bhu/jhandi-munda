@@ -127,6 +127,7 @@ pub fn record_bet(
     bet.owed = 0;
     bet.settled = false;
     bet.settled_at = 0;
+    bet.paid_with_chips = false;
     bet.bump = bump;
     round.bet_count += 1;
 }

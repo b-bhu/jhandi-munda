@@ -145,6 +145,8 @@ pub struct Bet {
     pub settled: bool,
     /// Clock time the bet was settled. Claims unlock from here (D7, D8).
     pub settled_at: i64,
+    /// True for a chip bet (D39): its stake sits in the cage vault until settle.
+    pub paid_with_chips: bool,
     /// Bump seed for the bet PDA.
     pub bump: u8,
 }

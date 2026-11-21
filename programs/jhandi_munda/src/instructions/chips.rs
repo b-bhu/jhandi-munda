@@ -9,6 +9,10 @@
 //! The base-layer `place_bet` (token transfer) is unchanged and still works.
 
 use anchor_lang::prelude::*;
+use anchor_lang::solana_program::{
+    instruction::{AccountMeta, Instruction},
+    program::invoke,
+};
 use ephemeral_rollups_sdk::{
     cpi::{delegate_account, DelegateAccounts, DelegateConfig},
     pda::{DELEGATE_BUFFER_TAG, DELEGATION_METADATA_TAG, DELEGATION_RECORD_TAG},
@@ -20,9 +24,9 @@ use crate::{
         claim_redeem::{spl_transfer, token_balance},
         place_bet::{check_bet, record_bet},
     },
-    state::{Bet, ChipStack, PayoutQueue, PoolState, Round, TableConfig},
-    BET_SEED, CHIPS_SEED, ER_VALIDATOR_ASIA, POOL_SEED, POOL_VAULT_SEED, QUEUE_SEED, ROUND_SEED,
-    SPL_TOKEN_PROGRAM_ID, TABLE_SEED,
+    state::{Bet, ChipStack, PayoutQueue, PoolState, ProgramConfig, Round, TableConfig},
+    BET_SEED, CAGE_VAULT_SEED, CHIPS_SEED, CONFIG_SEED, ER_VALIDATOR_ASIA, MUSD_MINT_SEED, POOL_SEED,
+    QUEUE_SEED, ROUND_SEED, SPL_TOKEN_PROGRAM_ID, TABLE_SEED, TOKEN_ACCOUNT_SPACE,
 };
 
 // --- buy_chips (Solana only) ---
@@ -32,9 +36,10 @@ pub struct BuyChips<'info> {
     #[account(seeds = [POOL_SEED], bump)]
     pub pool: Account<'info, PoolState>,
 
-    /// CHECK: the pool MUSD vault, seeds pin it. The bought MUSD lands here.
-    #[account(mut, seeds = [POOL_VAULT_SEED], bump)]
-    pub pool_vault: UncheckedAccount<'info>,
+    /// CHECK: the cage vault (chip money, D39), seeds pin it. The bought MUSD lands
+    /// here, not in the pool vault: chip money is not pool money.
+    #[account(mut, seeds = [CAGE_VAULT_SEED], bump)]
+    pub cage_vault: UncheckedAccount<'info>,
 
     /// The buyer's chip stack, created on the first purchase.
     #[account(
@@ -70,7 +75,7 @@ pub fn handle_buy_chips(ctx: Context<BuyChips>, amount: u64) -> Result<()> {
     );
     spl_transfer(
         &ctx.accounts.owner_musd_ata.to_account_info(),
-        &ctx.accounts.pool_vault.to_account_info(),
+        &ctx.accounts.cage_vault.to_account_info(),
         &ctx.accounts.owner.to_account_info(),
         amount,
         &[],
@@ -92,9 +97,9 @@ pub struct CashOut<'info> {
     #[account(seeds = [POOL_SEED], bump)]
     pub pool: Account<'info, PoolState>,
 
-    /// CHECK: the pool MUSD vault, seeds pin it.
-    #[account(mut, seeds = [POOL_VAULT_SEED], bump)]
-    pub pool_vault: UncheckedAccount<'info>,
+    /// CHECK: the cage vault (chip money), seeds pin it. Cash-outs pay from here.
+    #[account(mut, seeds = [CAGE_VAULT_SEED], bump)]
+    pub cage_vault: UncheckedAccount<'info>,
 
     /// The payout queue: cash-outs wait until every queued winner is paid (D30).
     #[account(seeds = [QUEUE_SEED], bump)]
@@ -131,13 +136,13 @@ pub fn handle_cash_out(ctx: Context<CashOut>, amount: u64) -> Result<()> {
         ErrorCode::InvalidAtaAddress
     );
     require!(
-        token_balance(&ctx.accounts.pool_vault.to_account_info())? >= amount,
-        ErrorCode::InsufficientPoolFunds
+        token_balance(&ctx.accounts.cage_vault.to_account_info())? >= amount,
+        ErrorCode::InsufficientChips
     );
     ctx.accounts.chips.balance -= amount;
     let seeds: &[&[u8]] = &[POOL_SEED, &[ctx.accounts.pool.bump]];
     spl_transfer(
-        &ctx.accounts.pool_vault.to_account_info(),
+        &ctx.accounts.cage_vault.to_account_info(),
         &ctx.accounts.owner_musd_ata.to_account_info(),
         &ctx.accounts.pool.to_account_info(),
         amount,
@@ -195,6 +200,8 @@ pub fn handle_place_bet_chips(ctx: Context<PlaceBetChips>, symbol: u8, amount: u
         is_new_player,
         now,
     );
+    // A chip bet: its stake is in the cage until settle_chip_bets moves it (D39).
+    ctx.accounts.bet.paid_with_chips = true;
     msg!("Chip bet of {} on face {}", amount, symbol);
     Ok(())
 }
@@ -275,5 +282,66 @@ pub fn handle_delegate_chip_stack<'info>(ctx: Context<'info, DelegateChipStack<'
     };
     delegate_account(accounts, seeds, config)?;
     msg!("Chip stack delegated to the Asia Ephemeral Rollup");
+    Ok(())
+}
+
+// --- init_cage (once, after initialize_pool) ---
+
+#[derive(Accounts)]
+pub struct InitCage<'info> {
+    #[account(seeds = [CONFIG_SEED], bump)]
+    pub config: Account<'info, ProgramConfig>,
+
+    #[account(seeds = [POOL_SEED], bump)]
+    pub pool: Account<'info, PoolState>,
+
+    /// CHECK: the cage vault, created here: a MUSD token account owned by the pool PDA.
+    #[account(
+        init,
+        payer = payer,
+        space = TOKEN_ACCOUNT_SPACE,
+        owner = SPL_TOKEN_PROGRAM_ID,
+        seeds = [CAGE_VAULT_SEED],
+        bump
+    )]
+    pub cage_vault: UncheckedAccount<'info>,
+
+    /// CHECK: the Step 2 MUSD mint, pinned by the config.
+    #[account(
+        seeds = [MUSD_MINT_SEED],
+        bump,
+        owner = SPL_TOKEN_PROGRAM_ID,
+        constraint = config.musd_mint == musd_mint.key() @ ErrorCode::MusdMintMismatch
+    )]
+    pub musd_mint: UncheckedAccount<'info>,
+
+    #[account(mut)]
+    pub payer: Signer<'info>,
+
+    /// CHECK: verified against SPL_TOKEN_PROGRAM_ID in the handler.
+    pub token_program: UncheckedAccount<'info>,
+
+    pub system_program: Program<'info, System>,
+}
+
+pub fn handle_init_cage(ctx: Context<InitCage>) -> Result<()> {
+    require_keys_eq!(ctx.accounts.token_program.key(), SPL_TOKEN_PROGRAM_ID, ErrorCode::InvalidTokenProgram);
+    // The pool PDA owns the cage vault, the same way it owns the pool vault.
+    let mut data = Vec::with_capacity(33);
+    data.push(18u8); // InitializeAccount3
+    data.extend_from_slice(ctx.accounts.pool.key().as_ref());
+    let ix = Instruction {
+        program_id: SPL_TOKEN_PROGRAM_ID,
+        accounts: vec![
+            AccountMeta::new(ctx.accounts.cage_vault.key(), false),
+            AccountMeta::new_readonly(ctx.accounts.musd_mint.key(), false),
+        ],
+        data,
+    };
+    invoke(
+        &ix,
+        &[ctx.accounts.cage_vault.to_account_info(), ctx.accounts.musd_mint.to_account_info()],
+    )?;
+    msg!("Cage vault initialized");
     Ok(())
 }

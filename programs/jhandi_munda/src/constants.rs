@@ -119,6 +119,11 @@ pub const INSURANCE_TARGET: u64 = 1_000_000_000;
 /// not target).
 pub const ER_VALIDATOR_ASIA: Pubkey = pubkey!("MAS1Dt9qreoRMQ14YQuhg8UTZMMzDdKhmkZMECCzk57");
 
+/// Cage vault PDA seed (D39): holds chip money, separate from the pool vault. Owned
+/// by the pool PDA. Chip money is not pool money: NAV, LP withdraws and pool-based
+/// limits do not count it.
+pub const CAGE_VAULT_SEED: &[u8] = b"cage_vault";
+
 /// Chip stack PDA seed: ["chips", owner] (D39).
 pub const CHIPS_SEED: &[u8] = b"chips";
 

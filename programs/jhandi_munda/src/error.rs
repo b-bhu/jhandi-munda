@@ -88,6 +88,14 @@ pub enum ErrorCode {
     NothingToClaim,
     #[msg("This wallet already has the maximum number of stake lots; unstake to free one")]
     TooManyLots,
+    #[msg("A chip bet is settled with settle_chip_bets, not settle_bets")]
+    ChipBetNeedsChipSettle,
+    #[msg("A chip bet pays into chips, not a claim")]
+    ChipBetSettledToChips,
+    #[msg("Only the program's upgrade authority can migrate the config")]
+    NotUpgradeAuthority,
+    #[msg("The config is already in the current layout")]
+    ConfigAlreadyMigrated,
     #[msg("A payout or fee amount overflowed")]
     MathOverflow,
 }

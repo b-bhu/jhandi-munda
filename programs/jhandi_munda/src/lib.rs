@@ -96,6 +96,18 @@ pub mod jhandi_munda {
         chips::handle_buy_chips(ctx, amount)
     }
 
+    pub fn migrate_config<'info>(ctx: Context<'info, MigrateConfig<'info>>) -> Result<()> {
+        migrate::handle_migrate_config(ctx)
+    }
+
+    pub fn init_cage(ctx: Context<InitCage>) -> Result<()> {
+        chips::handle_init_cage(ctx)
+    }
+
+    pub fn settle_chip_bets<'info>(ctx: Context<'info, SettleChipBets<'info>>) -> Result<()> {
+        settle::handle_settle_chip_bets(ctx)
+    }
+
     pub fn cash_out(ctx: Context<CashOut>, amount: u64) -> Result<()> {
         chips::handle_cash_out(ctx, amount)
     }
