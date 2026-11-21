@@ -5,6 +5,9 @@
  *   node scripts/devnet-er-round.mjs [keypair.json] [devnetRpc] [erRouter]
  *
  * Steps (each prints its signature and an Explorer link):
+ *   0. layout check: prints each account's size against the size the IDL types
+ *      give, then runs migrate_table (Solana) and migrate_round (wherever the round
+ *      lives: Solana if not delegated, the rollup if delegated) when needed.
  *   1. migrate_config, if the config is still in the old 42-byte layout (upgrade
  *      authority only).
  *   2. init_cage, if the cage vault does not exist yet.
@@ -31,7 +34,6 @@
  */
 
 import { createRequire } from "node:module";
-import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
@@ -72,7 +74,6 @@ const TABLE = P([enc("table")]);
 const ROUND = P([enc("round")]);
 const QUEUE = P([enc("payout_queue")]);
 const PROGRAM_IDENTITY = P([enc("identity")]);
-const TREASURY_AUTH = P([enc("treasury_authority")]);
 const PROGRAM_DATA = PublicKey.findProgramAddressSync([PROGRAM_ID.toBytes()], BPF_LOADER_UPGRADEABLE)[0];
 const chipsPda = (owner) => P([enc("chips"), owner.toBytes()]);
 const faucetPda = (owner) => P([enc("faucet"), owner.toBytes()]);
@@ -182,6 +183,82 @@ async function sendEr(label, routerUrl, conn, wallet, instruction, routedAccount
   }
 }
 
+// Sizes from the IDL types (no hardcoded struct sizes). `Round::players` is a Vec
+// with #[max_len(10)], and the IDL does not carry that bound, so it is set here.
+const MAX_PLAYERS = 10;
+const PRIM = { bool: 1, u8: 1, i8: 1, u16: 2, i16: 2, u32: 4, i32: 4, u64: 8, i64: 8, u128: 16, i128: 16, pubkey: 32 };
+function sizeOf(idl, t, field) {
+  if (typeof t === "string") {
+    if (!(t in PRIM)) throw new Error(`layout check: unknown IDL type ${t}`);
+    return PRIM[t];
+  }
+  if ("array" in t) return sizeOf(idl, t.array[0], field) * t.array[1];
+  if ("vec" in t) return 4 + (field === "players" ? MAX_PLAYERS : 0) * sizeOf(idl, t.vec, field);
+  if ("defined" in t) {
+    const name = t.defined.name ?? t.defined;
+    const def = idl.types.find((x) => x.name === name);
+    if (!def) throw new Error(`layout check: IDL has no type ${name}`);
+    if (def.type.kind === "enum") {
+      if (def.type.variants.some((v) => v.fields)) throw new Error(`layout check: ${name} has payloads`);
+      return 1;
+    }
+    return def.type.fields.reduce((n, f) => n + sizeOf(idl, f.type, f.name), 0);
+  }
+  throw new Error("layout check: unknown IDL type shape");
+}
+/** Expected account data length: 8-byte discriminator + the struct's fields. */
+const expectedLen = (idl, name) => 8 + sizeOf(idl, { defined: { name } });
+
+async function layoutCheck(idl, base, er, wallet, routerUrl, record) {
+  console.log("0. layout check (account size vs the IDL struct)");
+  const rows = [];
+  const tableAcc = await base.getAccountInfo(TABLE);
+  const table = { name: "TableConfig (Solana)", len: tableAcc?.data.length ?? 0, want: expectedLen(idl, "TableConfig") };
+  rows.push(table);
+  const roundBase = await base.getAccountInfo(ROUND);
+  const roundDelegated = !!roundBase && roundBase.owner.equals(DLP_ID);
+  const roundAcc = roundDelegated ? await er.getAccountInfo(ROUND) : roundBase;
+  const round = { name: `Round (${roundDelegated ? "rollup copy" : "Solana"})`, len: roundAcc?.data.length ?? 0, want: expectedLen(idl, "Round") };
+  rows.push(round);
+  const cfgAcc = await base.getAccountInfo(CONFIG);
+  rows.push({ name: "ProgramConfig (Solana)", len: cfgAcc?.data.length ?? 0, want: expectedLen(idl, "ProgramConfig") });
+  const chipsAcc = await base.getAccountInfo(chipsPda(wallet.publicKey));
+  if (chipsAcc) rows.push({ name: "ChipStack (Solana)", len: chipsAcc.data.length, want: expectedLen(idl, "ChipStack") });
+  for (const r of rows) {
+    console.log(`   ${r.name}: ${r.len} bytes, expected ${r.want} -> ${r.len === r.want ? "ok" : "needs migration"}`);
+  }
+
+  if (table.len !== table.want) {
+    if (table.len !== 34) throw new Error(`TableConfig is ${table.len} bytes: no known migration.`);
+    console.log("0a. migrate_table (Solana, upgrade authority)");
+    const sig = await send("migrate_table", base, wallet, buildIx(idl, "migrate_table", {
+      table: TABLE, upgrade_authority: wallet.publicKey, program_data: PROGRAM_DATA,
+      system_program: SystemProgram.programId,
+    }));
+    record("migrate_table", sig, "solana");
+  }
+
+  if (round.len !== round.want) {
+    if (round.len !== 388) throw new Error(`Round is ${round.len} bytes: no known migration.`);
+    const accounts = {
+      round: ROUND, upgrade_authority: wallet.publicKey, program_data: PROGRAM_DATA,
+      system_program: SystemProgram.programId,
+    };
+    if (roundDelegated) {
+      // The delegated copy lives on the rollup, so the migration runs there.
+      // UNVERIFIED: whether the rollup allows resizing a delegated account.
+      console.log("0b. migrate_round on the rollup (UNVERIFIED: resizing a delegated account)");
+      const sig = await sendEr("migrate_round (rollup)", routerUrl, er, wallet,
+        buildIx(idl, "migrate_round", accounts), [ROUND]);
+      record("migrate_round", sig, "rollup");
+    } else {
+      console.log("0b. migrate_round on Solana (upgrade authority)");
+      const sig = await send("migrate_round", base, wallet, buildIx(idl, "migrate_round", accounts));
+      record("migrate_round", sig, "solana");
+    }
+  }
+}
+
 function decodeRound(data) {
   let o = 8;
   const status = data[o++];
@@ -195,22 +272,25 @@ function decodeRound(data) {
 async function main() {
   const [keyArg, rpcArg, routerArg] = process.argv.slice(2);
   const rpc = rpcArg ?? DEFAULT_RPC;
-  const router = routerArg ?? DEFAULT_ROUTER;
+  const routerUrl = routerArg ?? DEFAULT_ROUTER;
   refuseMainnet("RPC", rpc);
-  refuseMainnet("router", router);
+  refuseMainnet("router", routerUrl);
 
   const idl = loadIdl();
   const wallet = loadWallet(keyArg ?? DEFAULT_KEYPAIR);
   const base = new Connection(rpc, "confirmed");
-  const er = new Connection(router, "confirmed");
+  const er = new Connection(routerUrl, "confirmed");
   console.log(`Devnet RPC: ${rpc}`);
-  console.log(`Rollup router: ${router} (region: Asia, validator ${ASIA_VALIDATOR}, validator 1.1.1)`);
+  console.log(`Rollup router: ${routerUrl} (region: Asia, validator ${ASIA_VALIDATOR}, validator 1.1.1)`);
   console.log(`Wallet: ${wallet.publicKey.toBase58()}`);
   const balance = await base.getBalance(wallet.publicKey);
   if (balance < 0.05 * 1e9) throw new Error("The wallet needs more devnet SOL (at least 0.05).");
 
   const sigs = [];
   const record = (label, sig, where) => sigs.push({ label, sig, where });
+
+  // 0. Layout check and the migrations it needs (table, and the round wherever it lives).
+  await layoutCheck(idl, base, er, wallet, routerUrl, record);
 
   // 1. Migrate the config if it is still in the old 42-byte layout.
   const cfg = await base.getAccountInfo(CONFIG);
@@ -298,7 +378,7 @@ async function main() {
   const roundOnEr = before ? decodeRound(before.data) : null;
   if (!roundOnEr) throw new Error("The round is not readable on the rollup yet. Retry after a few seconds.");
   const bet = betPda(roundOnEr.roundId, wallet.publicKey, BET_SYMBOL);
-  const betSig = await sendEr("place_bet_chips (rollup)", router, er, wallet, buildIx(idl, "place_bet_chips", {
+  const betSig = await sendEr("place_bet_chips (rollup)", routerUrl, er, wallet, buildIx(idl, "place_bet_chips", {
     table: TABLE, round: ROUND, bet, chips, bettor: wallet.publicKey, system_program: SystemProgram.programId,
   }, Buffer.concat([u8(BET_SYMBOL), u64(BET_AMOUNT)])), [ROUND, chips]);
   record("place_bet_chips", betSig, "rollup");
@@ -316,7 +396,7 @@ async function main() {
     console.log(`   waiting: rollup clock ${now}, window closes at ${windowEnd}`);
     await new Promise((r) => setTimeout(r, 5000));
   }
-  const reqSig = await sendEr("request_roll (rollup)", router, er, wallet, buildIx(idl, "request_roll", {
+  const reqSig = await sendEr("request_roll (rollup)", routerUrl, er, wallet, buildIx(idl, "request_roll", {
     table: TABLE, round: ROUND, payer: wallet.publicKey, oracle_queue: EPHEMERAL_QUEUE,
     program_identity: PROGRAM_IDENTITY, vrf_program: new PublicKey("Vrf1RNUjXmQGjmQrQLvJHs9SNkvDJEsRVFPkfSQUwGz"),
     slot_hashes: new PublicKey("SysvarS1otHashes111111111111111111111111111"),
@@ -337,7 +417,7 @@ async function main() {
 
   console.log("\n=== Summary ===");
   for (const r of sigs) {
-    const link = r.where === "solana" ? explorer(r.sig) : `(rollup via ${router}; Explorer link UNVERIFIED) signature ${r.sig}`;
+    const link = r.where === "solana" ? explorer(r.sig) : `(rollup via ${routerUrl}; Explorer link UNVERIFIED) signature ${r.sig}`;
     console.log(`${r.label}: ${r.sig}\n   ${link}`);
   }
   if (final) {
