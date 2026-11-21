@@ -43,10 +43,21 @@ Only the round is delegated in this step. The cap is **10,240 bytes** per accoun
 - The delegate call is `ephemeral_rollups_sdk::cpi::delegate_account` with the
   seeds **without** the bump (the SDK appends it).
 
+## Commit and undelegate (Step 11.4, #44)
+
+- `undelegate_round` and `undelegate_chips(owner)` run on the rollup and CPI the
+  magic program's `commit_and_undelegate`. Only the table authority (`config.admin`)
+  may undelegate the round (D40). A chip stack may be undelegated only by its owner.
+- A round that is old-size while delegated is handled in the devnet script: undelegate,
+  wait until Solana owns it, `migrate_round` on Solana, `finish_round` if Rolled,
+  delegate again. The wallet pays the rent on Solana.
+- Chip money stays in the cage vault on Solana. Chip bets are settled on Solana with
+  `settle_chip_bets` after the round comes home.
+
 ## Not in this step
 
-Calling the Magic Router, a devnet delegation, playing a full round on the ER,
-the ER VRF queue, and commit-and-undelegate. See #42–#44.
+Playing a full round on devnet was not run from here (the PR checker runs the script).
+The Magic Router and the ER VRF queue are the same as in Step 11.3. See #42–#44.
 
 ## Unverified (written down, not guessed)
 
