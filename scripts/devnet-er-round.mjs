@@ -105,7 +105,7 @@ const POOL = P([enc("pool")]);
 const POOL_VAULT = P([enc("pool_vault")]);
 const SHARE_MINT = P([enc("pool_share_mint")]); // SHARE_MINT_SEED (LP shares)
 const INSURANCE_VAULT = P([enc("insurance_vault")]);
-const QUEUE = P([enc("queue")]); // QUEUE_SEED: the FIFO payout queue (D30, #110) // D43: orphan MUSD is swept here by deposit
+const QUEUE = P([enc("payout_queue")]); // QUEUE_SEED: the FIFO payout queue (D30, #110) // D43: orphan MUSD is swept here by deposit
 const CAGE = P([enc("cage_vault")]);
 const MUSD_MINT = P([enc("musd_mint")]);
 // Payout math, copied from payout.rs (MULTIPLIERS, WIN_FEE_BPS = 200). Used only to size the pool top-up.
@@ -492,6 +492,26 @@ async function topUpPoolFor({ idl, base, wallet, bet, faces, record, rpc }) {
   if (!(await base.getAccountInfo(INSURANCE_VAULT))) {
     throw new Error("the insurance vault is missing on devnet: run init_insurance first (deposit sweeps orphan MUSD there, D43). UNVERIFIED whether it exists.");
   }
+  // Program gap (do not fix in the program from this script): if share supply is > 0 and the
+  // vault is 0, deposit divides by zero. Move 1 MUSD in first so the price is defined.
+  const shareSupply = ((await base.getAccountInfo(SHARE_MINT)) ?? { data: Buffer.alloc(44) }).data.readBigUInt64LE(36);
+  if (shareSupply > 0n && poolBal === 0n) {
+    console.log("   PROGRAM GAP: vault is 0 with outstanding LP shares; transferring 1 MUSD into the vault so deposit can run");
+    const need = deposit + 1_000_000n;
+    if (nowHave < need) {
+      throw new Error(`the wallet holds ${nowHave} MUSD, below the ${need} needed for the vault workaround plus the deposit`);
+    }
+    const ix = new TransactionInstruction({
+      programId: TOKEN_PROGRAM,
+      keys: [
+        { pubkey: musdAta, isSigner: false, isWritable: true },
+        { pubkey: POOL_VAULT, isSigner: false, isWritable: true },
+        { pubkey: wallet.publicKey, isSigner: true, isWritable: false },
+      ],
+      data: Buffer.concat([Buffer.from([3]), u64(1_000_000n)]),
+    });
+    record("spl_transfer_to_vault", await send("spl_transfer 1 MUSD into pool vault (workaround)", base, wallet, ix), "solana");
+  }
   record("deposit", await send("deposit (LP, pool top-up)", base, wallet, buildIx(idl, "deposit", {
     pool: POOL, share_mint: SHARE_MINT, vault: POOL_VAULT, depositor: wallet.publicKey, depositor_ata: musdAta,
     depositor_shares: ataOf(wallet.publicKey, SHARE_MINT), insurance_vault: INSURANCE_VAULT, queue: QUEUE, token_program: TOKEN_PROGRAM,
@@ -646,6 +666,16 @@ async function main() {
     console.log("2b. insurance vault exists");
   }
 
+  // 2c. The payout queue (#110): settle_chip_bets and deposit both need it.
+  if (!(await base.getAccountInfo(QUEUE))) {
+    console.log("2c. payout queue missing; init_queue");
+    record("init_queue", await send("init_queue", base, wallet, buildIx(idl, "init_queue", {
+      queue: QUEUE, payer: wallet.publicKey, system_program: SystemProgram.programId,
+    })), "solana");
+  } else {
+    console.log("2c. payout queue exists");
+  }
+
   // 3. MUSD for the wallet (the faucet; one claim per hour per wallet).
   const musdAta = ataOf(wallet.publicKey, MUSD_MINT);
   if (!(await base.getAccountInfo(musdAta))) {
@@ -659,17 +689,16 @@ async function main() {
     console.log("3. MUSD account exists");
   }
 
-  // Resume: round_v2 may already be past the rollup. A finished round, or a Rolled round that is back
-  // on Solana (undelegated by an earlier run that stopped before settle), is finished here.
+  // Resume: a Rolled round that is already back on Solana (an earlier run stopped before settle)
+  // is settled here. An Idle round whose previous id is settled is a fresh table: start a new
+  // round instead of exiting (PR #112 devnet checks need a new ER round after #109).
   const roundTopNow = await base.getAccountInfo(ROUND);
   if (roundTopNow.owner.equals(PROGRAM_ID)) {
     const r0 = decodeRound(roundTopNow.data);
     if (r0.status === 0 && r0.roundId > 0n) {
       const prev = await base.getAccountInfo(betPda(r0.roundId - 1n, wallet.publicKey, BET_SYMBOL));
       if (prev && prev.owner.equals(PROGRAM_ID) && decodeBet(prev.data).settled) {
-        console.log(`RESUME: round_v2 is already finished (round ${r0.roundId - 1n} is settled and the round is Idle). Nothing to do.`);
-        printSummary(sigs, validator);
-        return;
+        console.log(`RESUME: previous round ${r0.roundId - 1n} is settled and the table is Idle at round ${r0.roundId}; starting a new ER round.`);
       }
     }
     if (r0.status === 3) {
