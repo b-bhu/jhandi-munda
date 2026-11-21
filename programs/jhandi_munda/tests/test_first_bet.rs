@@ -2763,3 +2763,177 @@ fn test_chip_win_queues_when_pool_short_then_pays_after_deposit() {
     // Invariant: the cage holds exactly the chips players hold.
     assert_eq!(token_amount(&t.svm, &cage()), chip_balance(&t, &a) + chip_balance(&t, &b));
 }
+
+// --- #46: program-enforced session spend cap (D12, notes.md §4) ---
+
+fn slip_pda(round_id: u64, owner: &Pubkey, symbol: u8) -> Pubkey {
+    pda(&[BET_SEED, &round_id.to_le_bytes(), owner.as_ref(), &[symbol]])
+}
+
+fn session_cap_pda(owner: &Pubkey) -> Pubkey {
+    pda(&[jhandi_munda::SESSION_CAP_SEED, owner.as_ref()])
+}
+
+// The SDK's V1 session token address for (session key, wallet, this program).
+fn session_token_pda(owner: &Pubkey, session_key: &Pubkey) -> Pubkey {
+    Pubkey::find_program_address(
+        &[
+            session_keys::SessionToken::SEED_PREFIX.as_bytes(),
+            jhandi_munda::id().as_ref(),
+            session_key.as_ref(),
+            owner.as_ref(),
+        ],
+        &session_keys::ID,
+    )
+    .0
+}
+
+fn grant_session_by(t: &mut Table, owner: &Keypair, session_key: &Pubkey, cap: u64, valid_for_secs: i64) -> TransactionResult {
+    send(
+        &mut t.svm,
+        owner,
+        ix(
+            jhandi_munda::accounts::GrantSession {
+                owner: owner.pubkey(),
+                cap: session_cap_pda(&owner.pubkey()),
+                system_program: SYS,
+            },
+            jhandi_munda::instruction::GrantSession {
+                session_signer: *session_key,
+                cap,
+                valid_for_secs,
+            },
+        ),
+    )
+}
+
+// Writes the SDK's V1 SessionToken for (wallet, session key) at its PDA, owned by the session
+// program, the way the session program would create it. LiteSVM has no session program binary here.
+fn put_session_token(t: &mut Table, owner: &Pubkey, session_key: &Pubkey, valid_until: i64) {
+    let token = session_keys::SessionToken {
+        authority: *owner,
+        target_program: jhandi_munda::id(),
+        session_signer: *session_key,
+        valid_until,
+    };
+    let mut data = Vec::new();
+    anchor_lang::AccountSerialize::try_serialize(&token, &mut data).unwrap();
+    let mut acc = t.svm.get_account(&t.round).unwrap(); // any program-owned account, reshaped
+    acc.data = data;
+    acc.owner = session_keys::ID;
+    t.svm.set_account(session_token_pda(owner, session_key), acc).unwrap();
+}
+
+fn place_session_bet(t: &mut Table, session_key: &Keypair, owner: &Pubkey, symbol: u8, amount: u64) -> TransactionResult {
+    let round_id = round(t).round_id;
+    send(
+        &mut t.svm,
+        session_key,
+        ix(
+            jhandi_munda::accounts::PlaceBetChipsSession {
+                table: t.table,
+                round: t.round,
+                bet: slip_pda(round_id, owner, symbol),
+                chips: pda(&[jhandi_munda::CHIPS_SEED, owner.as_ref()]),
+                cap: session_cap_pda(owner),
+                session_token: session_token_pda(owner, &session_key.pubkey()),
+                owner: *owner,
+                session_signer: session_key.pubkey(),
+            },
+            jhandi_munda::instruction::PlaceBetChipsSession { symbol, amount },
+        ),
+    )
+}
+
+// A wallet with chips and a session key with a 15 MUSD cap for an hour.
+fn session_setup() -> (Table, Keypair, Keypair) {
+    let mut t = setup();
+    stub_vrf(&mut t);
+    let funder = new_player(&mut t);
+    init_cage(&mut t, &funder);
+    let alice = new_player(&mut t);
+    assert!(buy_chips(&mut t, &alice, 20_000_000).is_ok());
+    let session = Keypair::new();
+    t.svm.airdrop(&session.pubkey(), 1_000_000_000).unwrap();
+    set_time(&mut t, BASE_TIME);
+    assert!(grant_session_by(&mut t, &alice, &session.pubkey(), 15_000_000, 3600).is_ok(), "the wallet grants the session");
+    put_session_token(&mut t, &alice.pubkey(), &session.pubkey(), BASE_TIME + 3600);
+    (t, alice, session)
+}
+
+#[test]
+fn test_session_bet_under_cap() {
+    let (mut t, alice, session) = session_setup();
+    assert!(open_chip_bet(&mut t, &alice, 0, 2).is_ok());
+
+    assert!(place_session_bet(&mut t, &session, &alice.pubkey(), 2, 10_000_000).is_ok(), "a session bet under the cap");
+    assert_eq!(slip(&t, &alice, 2).amount, 10_000_000, "the session filled Alice's slip");
+    assert_eq!(chip_balance(&t, &alice), 10_000_000, "the stake came off her chips");
+    let cap = jhandi_munda::state::SessionCap::try_deserialize(
+        &mut t.svm.get_account(&session_cap_pda(&alice.pubkey())).unwrap().data.as_slice(),
+    )
+    .unwrap();
+    assert_eq!(cap.spent, 10_000_000, "the cap records what the session staked");
+}
+
+#[test]
+fn test_session_bet_over_cap_rejected() {
+    let (mut t, alice, session) = session_setup();
+    assert!(open_chip_bet(&mut t, &alice, 0, 2).is_ok());
+    assert!(open_chip_bet(&mut t, &alice, 0, 4).is_ok());
+    assert!(place_session_bet(&mut t, &session, &alice.pubkey(), 2, 10_000_000).is_ok());
+
+    // 10 + 6 = 16 MUSD is over the 15 MUSD cap: refused, nothing moves.
+    let e = place_session_bet(&mut t, &session, &alice.pubkey(), 4, 6_000_000).expect_err("over the cap");
+    assert!(format!("{:?}", e.meta.logs).contains("SessionCapExceeded"), "{:?}", e.meta.logs);
+    assert_eq!(slip(&t, &alice, 4).amount, 0, "the refused bet filled nothing");
+    assert_eq!(chip_balance(&t, &alice), 10_000_000);
+
+    // Past the hour the session stops: the cap has no value after expiry.
+    set_time(&mut t, BASE_TIME + 3600);
+    assert!(place_session_bet(&mut t, &session, &alice.pubkey(), 4, 1_000_000).is_err(), "an expired session is refused");
+}
+
+#[test]
+fn test_session_key_cannot_use_other_instructions() {
+    let (mut t, alice, session) = session_setup();
+    assert!(open_chip_bet(&mut t, &alice, 0, 2).is_ok());
+    let before = chip_balance(&t, &alice);
+
+    // Cash-out and the wallet's bet need the wallet to sign. The session key cannot reach Alice's
+    // chips through them: it passes its own accounts and gets nothing.
+    let cashout = send(
+        &mut t.svm,
+        &session,
+        ix(
+            jhandi_munda::accounts::CashOut {
+                pool: t.pool,
+                cage_vault: cage(),
+                queue: pda(&[QUEUE_SEED]),
+                chips: chip_stack(&session),
+                owner: session.pubkey(),
+                owner_musd_ata: jhandi_munda::musd_ata(&session.pubkey(), &t.musd_mint),
+                token_program: SPL_TOKEN_PROGRAM_ID,
+            },
+            jhandi_munda::instruction::CashOut { amount: 1_000_000 },
+        ),
+    );
+    assert!(cashout.is_err(), "a session cannot cash out");
+    let bet = send(
+        &mut t.svm,
+        &session,
+        ix(
+            jhandi_munda::accounts::PlaceBetChips {
+                table: t.table,
+                round: t.round,
+                bet: slip_pda(0, &alice.pubkey(), 2),
+                chips: chip_stack(&alice),
+                bettor: session.pubkey(),
+                system_program: SYS,
+            },
+            jhandi_munda::instruction::PlaceBetChips { symbol: 2, amount: 1_000_000 },
+        ),
+    );
+    assert!(bet.is_err(), "the wallet's bet path does not take a session signer");
+    assert_eq!(chip_balance(&t, &alice), before, "Alice's chips are untouched");
+}

@@ -142,6 +142,16 @@ pub mod jhandi_munda {
         chips::handle_place_bet_chips(ctx, symbol, amount)
     }
 
+    /// #46: the wallet grants a session signer a spend cap, for at most 60 minutes.
+    pub fn grant_session(ctx: Context<GrantSession>, session_signer: Pubkey, cap: u64, valid_for_secs: i64) -> Result<()> {
+        chips::handle_grant_session(ctx, session_signer, cap, valid_for_secs)
+    }
+
+    /// #46: a session signer places a chip bet within the wallet's cap and expiry.
+    pub fn place_bet_chips_session(ctx: Context<PlaceBetChipsSession>, symbol: u8, amount: u64) -> Result<()> {
+        chips::handle_place_bet_chips_session(ctx, symbol, amount)
+    }
+
     pub fn delegate_chip_stack<'info>(ctx: Context<'info, DelegateChipStack<'info>>) -> Result<()> {
         chips::handle_delegate_chip_stack(ctx)
     }
