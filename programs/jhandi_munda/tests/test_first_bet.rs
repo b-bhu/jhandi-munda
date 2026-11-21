@@ -2937,3 +2937,66 @@ fn test_session_key_cannot_use_other_instructions() {
     assert!(bet.is_err(), "the wallet's bet path does not take a session signer");
     assert_eq!(chip_balance(&t, &alice), before, "Alice's chips are untouched");
 }
+
+// --- #50: daily snapshot of the house (D28) ---
+
+fn take_snapshot_by(t: &mut Table, payer: &Keypair, day: u64) -> TransactionResult {
+    send(
+        &mut t.svm,
+        payer,
+        ix(
+            jhandi_munda::accounts::TakeSnapshot {
+                payer: payer.pubkey(),
+                snapshot: pda(&[jhandi_munda::SNAPSHOT_SEED, &day.to_le_bytes()]),
+                pool: t.pool,
+                share_mint: pda(&[SHARE_MINT_SEED]),
+                vault: t.vault,
+                stake_pool: pda(&[jhandi_munda::STAKE_POOL_SEED]),
+                queue: pda(&[QUEUE_SEED]),
+                system_program: SYS,
+            },
+            jhandi_munda::instruction::TakeSnapshot { day },
+        ),
+    )
+}
+
+fn snapshot_of(t: &Table, day: u64) -> jhandi_munda::DailySnapshot {
+    let data = t.svm.get_account(&pda(&[jhandi_munda::SNAPSHOT_SEED, &day.to_le_bytes()])).unwrap().data;
+    jhandi_munda::DailySnapshot::try_deserialize(&mut data.as_slice()).unwrap()
+}
+
+// Two snapshots a UTC day apart with different NAVs; a third on the same day is refused (D28, #50).
+#[test]
+fn test_two_snapshots_a_day_apart() {
+    let mut t = setup();
+    let funder = new_player(&mut t);
+    // The staking accounts need the MUNDA mint first (init_munda), as the staking tests do.
+    init_munda(&mut t, &funder);
+    init_staking(&mut t, &funder);
+    let lp = new_player(&mut t);
+    let keeper = new_player(&mut t); // anyone can crank
+    let day1 = (BASE_TIME / 86_400) as u64;
+    let day2 = ((BASE_TIME + 86_400) / 86_400) as u64;
+
+    set_time(&mut t, BASE_TIME);
+    assert!(take_snapshot_by(&mut t, &keeper, day1).is_ok(), "today's snapshot");
+    assert_eq!(snapshot_of(&t, day1).nav_per_share, 1_000_000, "no shares: NAV is $1.00");
+
+    // A day passes; in between, an LP deposits 100 MUSD and a 50 MUSD profit lands in the vault.
+    deposit(&mut t, &lp, 100_000_000);
+    assert!(musd_transfer_to_vault(&mut t, &keeper, 50_000_000).is_ok(), "the profit");
+    set_time(&mut t, BASE_TIME + 86_400);
+    assert!(take_snapshot_by(&mut t, &keeper, day2).is_ok(), "the next day's snapshot");
+
+    let (first, second) = (snapshot_of(&t, day1), snapshot_of(&t, day2));
+    assert_ne!(first.nav_per_share, second.nav_per_share, "NAV moved with the profit");
+    assert_eq!(second.nav_per_share, 1_500_000, "150 MUSD over 100 MUSD of shares");
+    assert_eq!(second.pool_size, 150_000_000);
+    assert_eq!((second.day, second.taken_at), (day2, BASE_TIME + 86_400));
+    assert_eq!((second.open_claims, second.queue_size), (0, 0), "nothing queued");
+
+    // A third crank on the same day is refused: the day's PDA already exists.
+    assert!(take_snapshot_by(&mut t, &keeper, day2).is_err(), "one snapshot per day");
+    // A day that is not today is refused.
+    assert!(take_snapshot_by(&mut t, &keeper, day2 + 1).is_err(), "only the current UTC day");
+}

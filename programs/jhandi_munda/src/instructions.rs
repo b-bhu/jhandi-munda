@@ -17,6 +17,7 @@ pub mod migrate;
 pub mod undelegate;
 pub mod pool_withdraw;
 pub mod table_init;
+pub mod snapshot;
 
 // Anchor's #[program] needs the generated __client_accounts_* modules at the
 // crate root. All modules define `handler`; lib.rs calls them by module
@@ -60,3 +61,5 @@ pub use undelegate::*;
 pub use pool_withdraw::*;
 #[allow(ambiguous_glob_reexports)]
 pub use table_init::*;
+#[allow(ambiguous_glob_reexports)]
+pub use snapshot::*;

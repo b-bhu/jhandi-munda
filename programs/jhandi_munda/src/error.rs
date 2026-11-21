@@ -124,4 +124,6 @@ pub enum ErrorCode {
     SessionCapExceeded,
     #[msg("A session can last at most 60 minutes")]
     SessionTooLong,
+    #[msg("A snapshot is taken for the current UTC day only")]
+    SnapshotNotToday,
 }

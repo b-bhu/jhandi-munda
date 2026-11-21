@@ -50,6 +50,11 @@ pub mod jhandi_munda {
         table_init::handle_init_round(ctx)
     }
 
+    /// #50: anyone takes today's (UTC) snapshot of the house. One per day.
+    pub fn take_snapshot(ctx: Context<TakeSnapshot>, day: u64) -> Result<()> {
+        snapshot::handle_take_snapshot(ctx, day)
+    }
+
     pub fn place_bet(ctx: Context<PlaceBet>, symbol: u8, amount: u64) -> Result<()> {
         place_bet::handler(ctx, symbol, amount)
     }
