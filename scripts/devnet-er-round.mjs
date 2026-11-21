@@ -103,6 +103,7 @@ const CONFIG = P([enc("config")]);
 const POOL = P([enc("pool")]);
 const POOL_VAULT = P([enc("pool_vault")]);
 const SHARE_MINT = P([enc("pool_share_mint")]); // SHARE_MINT_SEED (LP shares)
+const INSURANCE_VAULT = P([enc("insurance_vault")]); // D43: orphan MUSD is swept here by deposit
 const CAGE = P([enc("cage_vault")]);
 const MUSD_MINT = P([enc("musd_mint")]);
 // Payout math, copied from payout.rs (MULTIPLIERS, WIN_FEE_BPS = 200). Used only to size the pool top-up.
@@ -474,9 +475,13 @@ async function topUpPoolFor({ idl, base, wallet, bet, faces, record, rpc }) {
   }
   const nowHave = (await base.getAccountInfo(musdAta))?.data.readBigUInt64LE(64) ?? 0n;
   if (nowHave < deposit) throw new Error(`the wallet holds ${nowHave} MUSD base units, below the ${deposit} deposit`);
+  // D43: with no shares, deposit sweeps the vault's orphan MUSD to insurance first, so the vault must exist.
+  if (!(await base.getAccountInfo(INSURANCE_VAULT))) {
+    throw new Error("the insurance vault is missing on devnet: run init_insurance first (deposit sweeps orphan MUSD there, D43). UNVERIFIED whether it exists.");
+  }
   record("deposit", await send("deposit (LP, pool top-up)", base, wallet, buildIx(idl, "deposit", {
     pool: POOL, share_mint: SHARE_MINT, vault: POOL_VAULT, depositor: wallet.publicKey, depositor_ata: musdAta,
-    depositor_shares: ataOf(wallet.publicKey, SHARE_MINT), token_program: TOKEN_PROGRAM,
+    depositor_shares: ataOf(wallet.publicKey, SHARE_MINT), insurance_vault: INSURANCE_VAULT, token_program: TOKEN_PROGRAM,
     system_program: SystemProgram.programId, associated_token_program: ATA_PROGRAM,
   }, u64(deposit))), "solana");
   return deposit;

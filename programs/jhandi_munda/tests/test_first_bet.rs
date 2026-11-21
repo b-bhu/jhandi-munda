@@ -663,6 +663,7 @@ fn deposit(t: &mut Table, funder: &Keypair, amount: u64) {
                 depositor: funder.pubkey(),
                 depositor_ata: jhandi_munda::musd_ata(&funder.pubkey(), &t.musd_mint),
                 depositor_shares: jhandi_munda::share_ata(&funder.pubkey(), &share_mint),
+                insurance_vault: Pubkey::find_program_address(&[jhandi_munda::INSURANCE_VAULT_SEED], &jhandi_munda::id()).0,
                 token_program: SPL_TOKEN_PROGRAM_ID,
                 system_program: SYS,
                 associated_token_program: jhandi_munda::ATA_PROGRAM_ID,
@@ -2631,4 +2632,65 @@ fn test_delegate_and_undelegate_a_chip_slip() {
     t.svm.set_account(slip_key, acc).unwrap();
     let e = undelegate_bet_by(&mut t, &alice, 0, &alice.pubkey(), 5).expect_err("already undelegating");
     assert!(format!("{:?}", e.meta.logs).contains("BetAlreadyUndelegating"), "{:?}", e.meta.logs);
+}
+
+// --- D43: orphan MUSD (no shares, MUSD in the vault) ---
+
+// Moves MUSD straight into the pool vault, like a lost stake landing in an empty pool.
+fn musd_transfer_to_vault(t: &mut Table, from: &Keypair, amount: u64) -> TransactionResult {
+    let mut data = vec![3u8]; // SPL token Transfer
+    data.extend_from_slice(&amount.to_le_bytes());
+    let transfer = Instruction::new_with_bytes(
+        SPL_TOKEN_PROGRAM_ID,
+        &data,
+        vec![
+            AccountMeta::new(jhandi_munda::musd_ata(&from.pubkey(), &t.musd_mint), false),
+            AccountMeta::new(t.vault, false),
+            AccountMeta::new_readonly(from.pubkey(), true),
+        ],
+    );
+    send(&mut t.svm, from, transfer)
+}
+
+// SPL mint supply (36..44).
+fn mint_supply(t: &Table, mint: &Pubkey) -> u64 {
+    let data = t.svm.get_account(mint).unwrap().data;
+    u64::from_le_bytes(data[36..44].try_into().unwrap())
+}
+
+#[test]
+fn test_deposit_into_orphan_vault() {
+    let mut t = setup();
+    let alice = new_player(&mut t); // the only LP, then gone
+    let bob = new_player(&mut t); // the losing bettor whose stake lands in the empty pool
+    let carol = new_player(&mut t); // the first new LP
+    let dave = new_player(&mut t); // a later LP, priced pro rata
+    init_insurance(&mut t, &alice);
+    let share_mint = pda(&[SHARE_MINT_SEED]);
+    let insurance = pda(&[INSURANCE_VAULT_SEED]);
+    let shares = |t: &Table, who: &Keypair| token_amount(&t.svm, &jhandi_munda::share_ata(&who.pubkey(), &share_mint));
+
+    // Alice is the only LP, and she withdraws everything: no shares, empty vault.
+    deposit(&mut t, &alice, 1_000_000);
+    let alice_shares = shares(&t, &alice);
+    assert!(lp_withdraw(&mut t, &alice, alice_shares).is_ok(), "the only LP leaves");
+    assert_eq!((mint_supply(&t, &share_mint), token_amount(&t.svm, &t.vault)), (0, 0));
+
+    // A lost stake lands in the empty pool: MUSD in the vault with zero shares outstanding.
+    assert!(musd_transfer_to_vault(&mut t, &bob, 1_000_000).is_ok(), "the stake lands");
+    assert_eq!((mint_supply(&t, &share_mint), token_amount(&t.svm, &t.vault)), (0, 1_000_000));
+
+    // Carol deposits 2 MUSD. The orphan 1 MUSD moves to insurance first; she owns exactly her 2 MUSD.
+    let insurance_before = token_amount(&t.svm, &insurance);
+    deposit(&mut t, &carol, 2_000_000);
+    assert_eq!(shares(&t, &carol), 2_000_000, "1:1 with what she put in");
+    assert_eq!(token_amount(&t.svm, &insurance), insurance_before + 1_000_000, "the orphan MUSD is in insurance");
+    assert_eq!(token_amount(&t.svm, &t.vault), 2_000_000, "the vault holds only Carol's deposit");
+    assert_eq!(mint_supply(&t, &share_mint), 2_000_000);
+
+    // Dave comes later: priced pro rata at NAV $1.00, so 1 MUSD buys 1 MUSD of shares.
+    deposit(&mut t, &dave, 1_000_000);
+    assert_eq!(shares(&t, &dave), 1_000_000, "pro rata at NAV $1.00");
+    assert_eq!(token_amount(&t.svm, &t.vault), 3_000_000);
+    assert_eq!(mint_supply(&t, &share_mint), 3_000_000);
 }

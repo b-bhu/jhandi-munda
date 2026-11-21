@@ -52,7 +52,7 @@ pub enum ErrorCode {
     ClaimLocked,
     #[msg("This claim was already paid out")]
     ClaimAlreadyRedeemed,
-    #[msg("The pool does not hold enough MUSD to pay this now (the queue is Step 8)")]
+    #[msg("The pool cannot pay this right now: it does not hold enough MUSD in its vault")]
     InsufficientPoolFunds,
     #[msg("The insurance fund does not hold enough MUSD for this Take now")]
     InsufficientInsuranceFunds,
