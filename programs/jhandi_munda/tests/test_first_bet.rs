@@ -2265,3 +2265,77 @@ fn test_migrate_rolled_round_then_finish() {
     assert_eq!((r.status, r.round_id), (RoundStatus::Idle, 1));
     assert!(r.players.is_empty(), "finish clears the players");
 }
+
+// --- commit and undelegate (Step 11.4, #44) ---
+// UNVERIFIED on a validator: the magic program is a no-op stub here, so only our
+// checks and the SDK's builder call run. The rollup performs the commit.
+
+fn magic_program_id() -> Pubkey {
+    Pubkey::new_from_array(ephemeral_rollups_sdk::consts::MAGIC_PROGRAM_ID.to_bytes())
+}
+
+fn magic_context_id() -> Pubkey {
+    Pubkey::new_from_array(ephemeral_rollups_sdk::consts::MAGIC_CONTEXT_ID.to_bytes())
+}
+
+fn undelegate_round_by(t: &mut Table, signer: &Keypair) -> TransactionResult {
+    send(
+        &mut t.svm,
+        signer,
+        ix(
+            jhandi_munda::accounts::UndelegateRound {
+                payer: signer.pubkey(),
+                config: t.config,
+                round: t.round,
+                magic_context: magic_context_id(),
+                magic_program: magic_program_id(),
+            },
+            jhandi_munda::instruction::UndelegateRound {},
+        ),
+    )
+}
+
+fn undelegate_chips_by(t: &mut Table, signer: &Keypair, owner: &Pubkey) -> TransactionResult {
+    send(
+        &mut t.svm,
+        signer,
+        ix(
+            jhandi_munda::accounts::UndelegateChips {
+                payer: signer.pubkey(),
+                config: t.config,
+                chips: pda(&[jhandi_munda::CHIPS_SEED, owner.as_ref()]),
+                magic_context: magic_context_id(),
+                magic_program: magic_program_id(),
+            },
+            jhandi_munda::instruction::UndelegateChips { owner: *owner },
+        ),
+    )
+}
+
+#[test]
+fn test_undelegate_round_and_chips_admin_only() {
+    let mut t = setup();
+    stub_vrf(&mut t);
+    t.svm.add_program(magic_program_id(), include_bytes!("fixtures/vrf_stub.so")).unwrap();
+    let admin = t.admin.insecure_clone();
+    let stranger = new_player(&mut t);
+    let alice = new_player(&mut t);
+
+    // A live round and a chip stack, as they would be on the rollup.
+    assert!(place(&mut t, &alice, 2, 1_000_000).is_ok());
+    let funder = new_player(&mut t);
+    init_cage(&mut t, &funder);
+    assert!(buy_chips(&mut t, &alice, 5_000_000).is_ok());
+
+    // Only the table authority (D40) can commit and undelegate the round.
+    assert!(undelegate_round_by(&mut t, &stranger).is_err(), "a stranger cannot undelegate the round");
+    assert!(undelegate_round_by(&mut t, &admin).is_ok(), "the admin undelegates the round");
+
+    // The chip stack: the admin with the right owner; a wrong owner is refused.
+    let bob = new_player(&mut t);
+    assert!(undelegate_chips_by(&mut t, &admin, &bob.pubkey()).is_err(), "the wrong owner is refused");
+    assert!(undelegate_chips_by(&mut t, &stranger, &alice.pubkey()).is_err(), "a stranger cannot undelegate chips");
+    assert!(undelegate_chips_by(&mut t, &admin, &alice.pubkey()).is_ok(), "the admin undelegates Alice's chips");
+    // The round and chips are still readable on Solana in this stub test.
+    assert_eq!(t.svm.get_account(&t.round).unwrap().owner, jhandi_munda::id());
+}

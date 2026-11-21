@@ -108,6 +108,14 @@ pub mod jhandi_munda {
         migrate::handle_migrate_round(ctx)
     }
 
+    pub fn undelegate_round<'info>(ctx: Context<'info, UndelegateRound<'info>>) -> Result<()> {
+        undelegate::handle_undelegate_round(ctx)
+    }
+
+    pub fn undelegate_chips<'info>(ctx: Context<'info, UndelegateChips<'info>>, owner: Pubkey) -> Result<()> {
+        undelegate::handle_undelegate_chips(ctx, owner)
+    }
+
     pub fn init_cage(ctx: Context<InitCage>) -> Result<()> {
         chips::handle_init_cage(ctx)
     }
