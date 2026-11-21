@@ -28,3 +28,8 @@ Step 2: MUSD test mint + faucet on devnet, with an Explorer link. First explain 
 - Build: Step 4.4, reject bets after the 90-second timer (#15), being coded by Claude Code.
 - Recall question for next session: "Why did `[\"bet\", wallet]` as a bet address break multi-symbol bets? What did we add to the seeds?"
 - Open item: an admin-only check on initialize_table/initialize_pool before the demo (Bibhu not asked yet to confirm).
+
+## 21 Nov, 4:15 PM IST: program side finished (PR #115 merged, 81 tests)
+Next step: **code walkthrough session before any UI** (Bibhu's request). Walk his own code file by file: lib.rs and #[ephemeral], account structs and PDAs (Round, ChipStack, Bet, Pool), deposit/withdraw share maths (D43, D44), settle and the FIFO queue, the delegate/undelegate flow, session keys. Explain first, then one question each.
+Open design questions to use as systems-thinking material: NAV readout ignores queued IOUs (should be (vault - owed) / shares); 0 shares + queue owes more than the vault; strict FIFO vs small wins skipping the stuck 99 MUSD jackpot IOU.
+Still to do on devnet: upgrade with PR #115 and prove the 0-payout burn clears the stuck pool.
