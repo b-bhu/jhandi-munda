@@ -1,49 +1,48 @@
 #!/usr/bin/env node
 /**
- * Devnet ER round, end to end (Steps 11.2 to 11.4; D20, D39, D40). Run by the PR checker.
+ * Devnet ER round on round_v2 (Steps 11.2 to 11.4; D20, D39, D40, D41). Run by the PR checker.
  *
  *   node scripts/devnet-er-round.mjs [keypair.json] [devnetRpc] [erRouter]
  *
- * Steps. Each prints its signature and an Explorer link (Solana) or its rollup signature.
- *   0. layout check: prints each account's size against the IDL struct. Table: migrate_table
- *      (Solana). Round: if delegated and old-size, undelegate it on the rollup, wait until
- *      Solana owns it, migrate_round on Solana (the wallet pays rent), finish_round if
- *      Rolled, delegate again. A round not delegated and old-size: migrate_round on Solana.
+ * Order:
+ *   0. layout check: tables and config only (migrate_table on Solana if old). round_v2 is the
+ *      current size; there is no round migration. The old v1 round is not touched (D41).
  *   1. migrate_config, if the config is still in the old 42-byte layout (upgrade authority).
  *   2. init_cage, if the cage vault does not exist.
  *   3. musd_faucet, if the wallet has no MUSD account.
- *   4. chips: buy (on Solana) if needed, then delegate_chip_stack (Solana). If the chip stack
- *      is delegated but short of chips, undelegate it on the rollup first.
- *   5. delegate_round (Solana), if not delegated.
+ *   4a. undelegate_chips FIRST, if the chip stack is delegated. It must come home to Solana: that
+ *       is the real-validator proof of the #[ephemeral] callback. If it does not, print the failed
+ *       Solana tx and stop (round_v2 is not touched).
+ *   4b/4c. buy_chips if short, then delegate_chip_stack.
+ *   5. init_round (table authority, if round_v2 is missing), then delegate_round.
  *   6. place_bet_chips on the rollup (no token transfer).
- *   7. request_roll on the rollup, on DEFAULT_EPHEMERAL_QUEUE, after the 90 s window.
- *   8. wait for the VRF callback: the round turns Rolled with six faces.
- *   9. commit and undelegate the round and the chip stack (rollup), wait until Solana owns
- *      them, settle_chip_bets and finish_round on Solana (only if the round holds one bet).
+ *   7. request_roll on DEFAULT_EPHEMERAL_QUEUE after the 90 s window.
+ *   8. wait for the VRF callback: round_v2 turns Rolled with six faces.
+ *   9. undelegate_round and undelegate_chips (rollup), wait until Solana owns them, then
+ *      settle_chip_bets and finish_round on Solana (only for a one-bet round).
  *
- * Stuck undelegate: if Solana still does not own a round or chip stack after the wait, the
- * undelegate is sent once more on the rollup (2 tries in all) and the Solana-side commit
- * signature from the rollup log is printed (UNVERIFIED). If that also fails, the script stops and
- * prints "PATH: fresh round NOT taken": the round PDA has no round id in its seeds, so a fresh
- * round needs a program change, which this script does not make.
+ * Stuck undelegate: if Solana still does not own an account after the wait, the rollup
+ * undelegate is sent once more (2 tries in all), and the Solana-side commit signature from the
+ * rollup log is printed (UNVERIFIED). If that also fails, the script stops with the error.
  *
  * Retries: a rollup call that fails with InstructionFallbackNotFound (error 101) is retried,
- * 30 s apart, up to 4 tries (the rollup takes about 2 minutes to load an upgrade). Every
- * other error is final.
+ * 30 s apart, up to 4 tries (the rollup takes about 2 minutes to load an upgrade). Every other
+ * error is final. Every Solana transaction and the rollup signatures are printed in the summary.
  *
  * Devnet only: any URL that mentions mainnet is refused. The keypair is a gitignored wallet
  * (keys/); its secret is never printed or logged.
  *
  * UNVERIFIED (not checked from the box that wrote this script):
- *   - whether the rollup lets a delegated round grow (paying rent), and whether it accepts
- *     commit_and_undelegate from this program (the rollup's magic-program CPI);
+ *   - whether the #[ephemeral] callback brings a chip stack home on a real validator (step 4a);
+ *   - whether the rollup accepts a second undelegate for an account it has already scheduled;
+ *   - whether the rollup lets a delegated round grow, and whether it accepts commit_and_undelegate
+ *     from this program (magic-program CPI);
  *   - how long Solana takes to own an undelegated account again;
- *   - whether the Magic Router accepts sendRawTransaction and getSignatureStatuses for
- *     rollup transactions, as notes.md describes;
- *   - whether place_bet_chips can init a new Bet account on the rollup for a bettor who is
- *     not delegated;
+ *   - whether the Magic Router accepts sendRawTransaction and getSignatureStatuses for rollup
+ *     transactions, as notes.md describes;
+ *   - whether place_bet_chips can init a new Bet account on the rollup for a bettor who is not
+ *     delegated;
  *   - whether the rollup's Clock matches wall-clock time for the 90 s window.
- * If a step fails, the script prints the error and exits 1. It does not retry other errors.
  *
  * @solana/web3.js is resolved from app/node_modules (same pin as the UI, 1.98.4).
  */
@@ -83,7 +82,6 @@ const FALLBACK_PATTERNS = ["InstructionFallbackNotFound", "Error Number: 101", "
 const FALLBACK_TRIES = 4;
 const FALLBACK_WAIT_MS = 30_000;
 // Rounds in the current layout: 392 bytes (see migrate.rs). Old: 388.
-const ROUND_OLD_LEN = 388;
 
 const enc = (s) => new TextEncoder().encode(s);
 const P = (seeds) => PublicKey.findProgramAddressSync(seeds, PROGRAM_ID)[0];
@@ -94,7 +92,8 @@ const CAGE = P([enc("cage_vault")]);
 const MUSD_MINT = P([enc("musd_mint")]);
 const MUSD_AUTH = P([enc("musd_mint_authority")]);
 const TABLE = P([enc("table")]);
-const ROUND = P([enc("round")]);
+// round_v2 (D41): the v1 round ("round") is left alone.
+const ROUND = P([enc("round_v2")]);
 const PROGRAM_IDENTITY = P([enc("identity")]);
 const PROGRAM_DATA = PublicKey.findProgramAddressSync([PROGRAM_ID.toBytes()], BPF_LOADER_UPGRADEABLE)[0];
 const chipsPda = (owner) => P([enc("chips"), owner.toBytes()]);
@@ -277,10 +276,23 @@ async function undelegateHome({ label, account, instruction, routerUrl, er, base
   }
   throw new Error(
     `${label}: Solana still does not own ${account.toBase58()} after ${UNDELEGATE_TRIES} undelegates.\n` +
-    `  PATH: fresh round NOT taken. The round PDA is seeds ["round"] and the table PDA is seeds ["table"]; ` +
-    `neither carries a round id, so a fresh round at a new address needs a program change (a new seed). ` +
-    `Not made in this script. Stopping here.`,
+    `  PATH: stopped at ${label}. The round_v2 account was not touched.`,
   );
+}
+
+// Prints the failed Solana transactions that touched `account`, with Explorer links, so a stuck
+// undelegate shows its own error. UNVERIFIED: that the validator's undelegate tx is indexed under
+// the account's own address (getSignaturesForAddress).
+async function printSolanaFailures(base, account) {
+  const recent = await base.getSignaturesForAddress(account, { limit: 5 }).catch(() => []);
+  const failed = recent.filter((x) => x.err);
+  if (failed.length === 0) {
+    console.log(`  no failed Solana tx found for ${account.toBase58()} (UNVERIFIED lookup)`);
+  }
+  for (const f of failed) {
+    console.log(`  failed Solana tx: ${explorer(f.signature)}`);
+    console.log(`    error: ${JSON.stringify(f.err)}`);
+  }
 }
 
 // Round account (current 392-byte layout, or the old 388-byte one).
@@ -327,20 +339,18 @@ function sizeOf(idl, t, field) {
 }
 const expectedLen = (idl, name) => 8 + sizeOf(idl, { defined: { name } });
 
-async function layoutCheck(idl, base, er, wallet, routerUrl, record) {
+// Layout check for the tables and config (D41). round_v2 is always the current size, so there is
+// no round migration here; the old v1 round is never touched.
+async function layoutCheck(idl, base, wallet, record) {
   console.log("0. layout check (account size vs the IDL struct)");
   const tableAcc = await base.getAccountInfo(TABLE);
-  const table = { name: "TableConfig (Solana)", len: tableAcc?.data.length ?? 0, want: expectedLen(idl, "TableConfig") };
-  const roundBase = await base.getAccountInfo(ROUND);
-  const roundDelegated = !!roundBase && roundBase.owner.equals(DLP_ID);
-  const roundLen = roundDelegated ? (await er.getAccountInfo(ROUND))?.data.length ?? 0 : roundBase?.data.length ?? 0;
-  const round = { name: `Round (${roundDelegated ? "rollup copy" : "Solana"})`, len: roundLen, want: expectedLen(idl, "Round") };
-  const cfgAcc = await base.getAccountInfo(CONFIG);
-  const config = { name: "ProgramConfig (Solana)", len: cfgAcc?.data.length ?? 0, want: expectedLen(idl, "ProgramConfig") };
-  for (const r of [table, round, config]) {
-    console.log(`   ${r.name}: ${r.len} bytes, expected ${r.want} -> ${r.len === r.want ? "ok" : "needs migration"}`);
+  const table = { name: "TableConfig", len: tableAcc?.data.length ?? 0, want: expectedLen(idl, "TableConfig") };
+  const roundAcc = await base.getAccountInfo(ROUND);
+  const round = { name: "Round (round_v2, Solana copy)", len: roundAcc?.data.length ?? 0, want: expectedLen(idl, "Round") };
+  for (const r of [table, round]) {
+    const state = r.len === 0 ? "missing" : r.len === r.want ? "ok" : "not the current size";
+    console.log(`   ${r.name}: ${r.len} bytes, expected ${r.want} -> ${state}`);
   }
-
   if (table.len !== table.want) {
     if (table.len !== 34) throw new Error(`TableConfig is ${table.len} bytes: no known migration.`);
     console.log("0a. migrate_table (Solana, upgrade authority)");
@@ -349,43 +359,9 @@ async function layoutCheck(idl, base, er, wallet, routerUrl, record) {
       system_program: SystemProgram.programId,
     })), "solana");
   }
-
-  if (round.len === round.want) return;
-  if (round.len !== ROUND_OLD_LEN) throw new Error(`Round is ${round.len} bytes: no known migration.`);
-  const migrateAccounts = {
-    round: ROUND, upgrade_authority: wallet.publicKey, program_data: PROGRAM_DATA,
-    system_program: SystemProgram.programId,
-  };
-
-  if (!roundDelegated) {
-    console.log("0b. migrate_round on Solana (upgrade authority)");
-    record("migrate_round", await send("migrate_round", base, wallet, buildIx(idl, "migrate_round", migrateAccounts)), "solana");
-    return;
+  if (roundAcc && round.len !== round.want) {
+    throw new Error(`round_v2 is ${round.len} bytes, not the current size. D41: there is no migration path for round_v2; stopping.`);
   }
-
-  // The round is delegated and old-size: take it home, migrate it on Solana, delegate it again.
-  // UNVERIFIED: whether the rollup allows the resize at all (growing a delegated account).
-  console.log("0b. the delegated round is old-size: undelegate it on the rollup (table authority)");
-  await undelegateHome({
-    label: "undelegate_round", account: ROUND, routerUrl, er, base, wallet, record,
-    instruction: () => buildIx(idl, "undelegate_round", { payer: wallet.publicKey, config: CONFIG, round: ROUND }),
-  });
-
-  console.log("0c. migrate_round on Solana (the wallet pays the rent here)");
-  record("migrate_round", await send("migrate_round", base, wallet, buildIx(idl, "migrate_round", migrateAccounts)), "solana");
-  const migrated = decodeRound((await base.getAccountInfo(ROUND)).data);
-  if (migrated.status === 3) {
-    console.log("0d. the round is Rolled: finish_round on Solana (no bet counts were kept, see migrate.rs)");
-    record("finish_round", await send("finish_round", base, wallet, buildIx(idl, "finish_round", { round: ROUND })), "solana");
-  }
-
-  console.log("0e. delegate_round again (table authority)");
-  const roundAcc = delegateAccounts(ROUND);
-  record("delegate_round", await send("delegate_round", base, wallet, buildIx(idl, "delegate_round", {
-    payer: wallet.publicKey, config: CONFIG, round: ROUND, buffer_round: roundAcc.buffer,
-    delegation_record_round: roundAcc.record, delegation_metadata_round: roundAcc.metadata,
-    owner_program: PROGRAM_ID, delegation_program: DLP_ID, system_program: SystemProgram.programId,
-  })), "solana");
 }
 
 async function main() {
@@ -402,13 +378,15 @@ async function main() {
   console.log(`Devnet RPC: ${rpc}`);
   console.log(`Rollup router: ${routerUrl} (region: Asia, validator ${ASIA_VALIDATOR}, validator 1.1.1)`);
   console.log(`Wallet: ${wallet.publicKey.toBase58()}`);
+  console.log(`Round PDA: ${ROUND.toBase58()} (round_v2, D41). The old v1 round is not touched.`);
+  console.log("PATH: 1) undelegate the chip stack (proves the #[ephemeral] callback), 2) round_v2 end to end.");
   if ((await base.getBalance(wallet.publicKey)) < 0.05 * 1e9) throw new Error("The wallet needs more devnet SOL (at least 0.05).");
 
   const sigs = [];
   const record = (label, sig, where) => sigs.push({ label, sig, where });
 
-  // 0. Layout check and the migrations it needs.
-  await layoutCheck(idl, base, er, wallet, routerUrl, record);
+  // 0. Layout check (tables and config) and migrate_table if the table is old.
+  await layoutCheck(idl, base, wallet, record);
 
   // 1. The config (42-byte layout -> current).
   const cfg = await base.getAccountInfo(CONFIG);
@@ -451,28 +429,45 @@ async function main() {
     console.log("3. MUSD account exists");
   }
 
-  // 4. Chips: enough for the bet, on the rollup, and delegated.
+  // 4. The chip stack first. If it is delegated, undelegate it: this is the real-validator proof
+  // of the #[ephemeral] callback. If it does not come home, print the Solana failure and stop; the
+  // round is not touched.
   const chips = chipsPda(wallet.publicKey);
+  const chipsUndelegate = () => ({
+    label: "undelegate_chips", account: chips, routerUrl, er, base, wallet, record,
+    instruction: () => buildIx(idl, "undelegate_chips", { payer: wallet.publicKey, config: CONFIG, chips },
+      wallet.publicKey.toBuffer()),
+  });
   const chipsBase = await base.getAccountInfo(chips);
-  const chipsDelegated = !!chipsBase && chipsBase.owner.equals(DLP_ID);
-  let chipsOnEr = chipsDelegated ? decodeChips((await er.getAccountInfo(chips)).data) : null;
-  if (chipsDelegated && chipsOnEr.balance >= BET_AMOUNT) {
-    console.log("4. chip stack is delegated and holds enough chips; skipping buy");
-  } else {
-    if (chipsDelegated) {
-      console.log("4. chip stack is delegated but short of chips: undelegate_chips on the rollup");
-      await undelegateHome({
-        label: "undelegate_chips", account: chips, routerUrl, er, base, wallet, record,
-        instruction: () => buildIx(idl, "undelegate_chips", { payer: wallet.publicKey, config: CONFIG, chips },
-          wallet.publicKey.toBuffer()),
-      });
+  if (chipsBase && chipsBase.owner.equals(DLP_ID)) {
+    console.log("4a. chip stack is delegated: undelegate_chips first (proves the callback on a real validator)");
+    try {
+      await undelegateHome(chipsUndelegate());
+    } catch (err) {
+      console.error("  STOP: the chip stack did not come home. The round was not touched.");
+      await printSolanaFailures(base, chips);
+      throw err;
     }
-    console.log("4. buy_chips (10 MUSD) into the cage vault");
+    console.log("  PROOF: the chip stack came home through the callback (Solana owns it again).");
+  } else {
+    console.log("4a. chip stack is not delegated; no undelegate needed");
+  }
+
+  // 4b. Chips: buy if short, then delegate (Solana).
+  const chipsNow = await base.getAccountInfo(chips);
+  const balance = chipsNow && chipsNow.owner.equals(PROGRAM_ID) ? decodeChips(chipsNow.data).balance : 0n;
+  if (balance >= BET_AMOUNT) {
+    console.log(`4b. chip stack holds ${balance} base units; skipping buy`);
+  } else {
+    console.log("4b. buy_chips (10 MUSD) into the cage vault");
     record("buy_chips", await send("buy_chips", base, wallet, buildIx(idl, "buy_chips", {
       pool: POOL, cage_vault: CAGE, chips, owner: wallet.publicKey, owner_musd_ata: musdAta,
       token_program: TOKEN_PROGRAM, system_program: SystemProgram.programId,
     }, u64(BUY_AMOUNT))), "solana");
-    console.log("4. delegate_chip_stack (owner signs)");
+  }
+  const chipsAfterBuy = await base.getAccountInfo(chips);
+  if (chipsAfterBuy.owner.equals(PROGRAM_ID)) {
+    console.log("4c. delegate_chip_stack (owner signs)");
     const chipAcc = delegateAccounts(chips);
     record("delegate_chip_stack", await send("delegate_chip_stack", base, wallet, buildIx(idl, "delegate_chip_stack", {
       owner: wallet.publicKey, chips, buffer_chips: chipAcc.buffer, delegation_record_chips: chipAcc.record,
@@ -481,12 +476,21 @@ async function main() {
     })), "solana");
   }
 
-  // 5. The round, delegated.
-  const roundBase = await base.getAccountInfo(ROUND);
-  if (roundBase && roundBase.owner.equals(DLP_ID)) {
-    console.log("5. round already delegated; skipping delegate_round");
+  // 5. round_v2: init if missing (table authority), then delegate.
+  let roundBase = await base.getAccountInfo(ROUND);
+  if (!roundBase) {
+    console.log("5a. round_v2 missing; init_round (table authority)");
+    record("init_round", await send("init_round", base, wallet, buildIx(idl, "init_round", {
+      config: CONFIG, round: ROUND, payer: wallet.publicKey, system_program: SystemProgram.programId,
+    })), "solana");
+    roundBase = await base.getAccountInfo(ROUND);
   } else {
-    console.log("5. delegate_round to the Asia validator");
+    console.log("5a. round_v2 exists");
+  }
+  if (roundBase.owner.equals(DLP_ID)) {
+    console.log("5b. round_v2 already delegated; skipping delegate_round");
+  } else {
+    console.log("5b. delegate_round (round_v2) to the Asia validator");
     const roundAcc = delegateAccounts(ROUND);
     record("delegate_round", await send("delegate_round", base, wallet, buildIx(idl, "delegate_round", {
       payer: wallet.publicKey, config: CONFIG, round: ROUND, buffer_round: roundAcc.buffer,
@@ -537,18 +541,13 @@ async function main() {
     console.log(`Round ${final.roundId} is ${final.statusName}; faces: [${final.faces.join(", ")}]`);
   }
 
-  // 9. Commit and undelegate the round and the chip stack (the table authority), then settle on Solana.
+  // 9. Undelegate the round and the chip stack (table authority), then settle on Solana.
   if (final) {
-    console.log("9. commit and undelegate the round and the chip stack (rollup)");
     await undelegateHome({
       label: "undelegate_round", account: ROUND, routerUrl, er, base, wallet, record,
       instruction: () => buildIx(idl, "undelegate_round", { payer: wallet.publicKey, config: CONFIG, round: ROUND }),
     });
-    await undelegateHome({
-      label: "undelegate_chips", account: chips, routerUrl, er, base, wallet, record,
-      instruction: () => buildIx(idl, "undelegate_chips", { payer: wallet.publicKey, config: CONFIG, chips },
-        wallet.publicKey.toBuffer()),
-    });
+    await undelegateHome(chipsUndelegate());
 
     const home = decodeRound((await base.getAccountInfo(ROUND)).data);
     if (home.betCount === 1) {

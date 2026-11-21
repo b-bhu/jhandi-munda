@@ -45,6 +45,11 @@ pub mod jhandi_munda {
         table_init::handler(ctx)
     }
 
+    /// Creates the versioned round PDA (D41) on an existing table. Table authority only.
+    pub fn init_round(ctx: Context<InitRound>) -> Result<()> {
+        table_init::handle_init_round(ctx)
+    }
+
     pub fn place_bet(ctx: Context<PlaceBet>, symbol: u8, amount: u64) -> Result<()> {
         place_bet::handler(ctx, symbol, amount)
     }

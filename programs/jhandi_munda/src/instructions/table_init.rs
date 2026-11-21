@@ -64,3 +64,44 @@ pub fn handler(ctx: Context<InitializeTable>) -> Result<()> {
     msg!("Table config and idle round initialized");
     Ok(())
 }
+
+/// Creates the round PDA (`ROUND_SEED`, D41) on a table that was set up before the round was
+/// versioned. Table authority only (D40). `init` fails if the account already exists.
+#[derive(Accounts)]
+pub struct InitRound<'info> {
+    #[account(
+        seeds = [crate::CONFIG_SEED],
+        bump,
+        constraint = config.admin == payer.key() @ crate::error::ErrorCode::NotTableAuthority
+    )]
+    pub config: Account<'info, crate::state::ProgramConfig>,
+
+    #[account(
+        init,
+        payer = payer,
+        space = 8 + Round::INIT_SPACE,
+        seeds = [ROUND_SEED],
+        bump
+    )]
+    pub round: Account<'info, Round>,
+
+    #[account(mut)]
+    pub payer: Signer<'info>,
+
+    pub system_program: Program<'info, System>,
+}
+
+pub fn handle_init_round(ctx: Context<InitRound>) -> Result<()> {
+    let round = &mut ctx.accounts.round;
+    round.status = RoundStatus::Idle;
+    round.opened_at = 0;
+    round.round_id = 0;
+    round.players = Vec::new();
+    round.request_id = [0u8; 32];
+    round.faces = [0u8; 6];
+    round.bet_count = 0;
+    round.settled_count = 0;
+    round.bump = ctx.bumps.round;
+    msg!("Round (round_v2) initialized, idle");
+    Ok(())
+}

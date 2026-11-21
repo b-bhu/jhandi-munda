@@ -104,4 +104,8 @@ pub enum ErrorCode {
     ConfigAlreadyMigrated,
     #[msg("A payout or fee amount overflowed")]
     MathOverflow,
+    #[msg("The round is already undelegating (the delegation program owns it); it cannot be undelegated again here")]
+    RoundAlreadyUndelegating,
+    #[msg("The chip stack is already undelegating (the delegation program owns it); it cannot be undelegated again here")]
+    ChipStackAlreadyUndelegating,
 }

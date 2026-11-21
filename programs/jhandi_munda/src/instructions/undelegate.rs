@@ -22,6 +22,18 @@ use crate::{
     CHIPS_SEED, CONFIG_SEED, ROUND_SEED,
 };
 
+/// The rollup copy must be this program's account. If the delegation program owns it, the
+/// rollup has already scheduled its undelegate (the account is "undelegating"), so say that
+/// rather than the migration message (`AccountNotProgramOwned`).
+fn require_undelegatable(info: &AccountInfo, already: ErrorCode) -> Result<()> {
+    let dlp = Pubkey::new_from_array(ephemeral_rollups_sdk::id().to_bytes());
+    if *info.owner == dlp {
+        return Err(already.into());
+    }
+    require_keys_eq!(*info.owner, crate::ID, ErrorCode::AccountNotProgramOwned);
+    Ok(())
+}
+
 #[derive(Accounts)]
 pub struct UndelegateRound<'info> {
     /// The table authority (D40), checked against the config below.
@@ -50,7 +62,7 @@ pub struct UndelegateRound<'info> {
 
 pub fn handle_undelegate_round<'info>(ctx: Context<'info, UndelegateRound<'info>>) -> Result<()> {
     let round_info = ctx.accounts.round.to_account_info();
-    require_keys_eq!(*round_info.owner, crate::ID, ErrorCode::AccountNotProgramOwned);
+    require_undelegatable(&round_info, ErrorCode::RoundAlreadyUndelegating)?;
     {
         let data = round_info.try_borrow_data()?;
         Round::try_deserialize(&mut &data[..])?;
@@ -97,7 +109,7 @@ pub fn handle_undelegate_chips<'info>(
     owner: Pubkey,
 ) -> Result<()> {
     let chips_info = ctx.accounts.chips.to_account_info();
-    require_keys_eq!(*chips_info.owner, crate::ID, ErrorCode::AccountNotProgramOwned);
+    require_undelegatable(&chips_info, ErrorCode::ChipStackAlreadyUndelegating)?;
     {
         let data = chips_info.try_borrow_data()?;
         let stack = ChipStack::try_deserialize(&mut &data[..])?;

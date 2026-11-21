@@ -42,7 +42,7 @@ const POOL = pda(seed("pool"));
 const VAULT = pda(seed("pool_vault"));
 const SHARE_MINT = pda(seed("pool_share_mint"));
 const TABLE = pda(seed("table"));
-const ROUND = pda(seed("round"));
+const ROUND = pda(seed("round_v2")); // D41: round_v2
 const PROGRAM_IDENTITY = pda(seed("identity"));
 const faucetPda = (w) => pda(seed("faucet"), w.toBytes());
 const musdAta = (w) => PublicKey.findProgramAddressSync(

@@ -22,7 +22,7 @@ use anchor_lang::Discriminator;
 use crate::{
     error::ErrorCode,
     state::{ProgramConfig, Round, RoundStatus, TableConfig},
-    CONFIG_SEED, MAX_PLAYERS, ROUND_SEED, TABLE_SEED,
+    CONFIG_SEED, MAX_PLAYERS, ROUND_V1_SEED, TABLE_SEED,
 };
 
 /// The config before `admin`: 8 discriminator + musd_mint 32 + bump 1 + musd_bump 1.
@@ -211,9 +211,10 @@ pub fn handle_migrate_table<'info>(ctx: Context<'info, MigrateTable<'info>>) -> 
 
 #[derive(Accounts)]
 pub struct MigrateRound<'info> {
-    /// CHECK: the round PDA in the old layout; resized and rewritten here. Must be
-    /// owned by this program (a delegated round is refused on Solana).
-    #[account(mut, seeds = [ROUND_SEED], bump)]
+    /// CHECK: the v1 round PDA in the old layout (D41: only v1 is migrated; round_v2 is
+    /// always the current size); resized and rewritten here. Must be owned by this program
+    /// (a delegated round is refused on Solana).
+    #[account(mut, seeds = [ROUND_V1_SEED], bump)]
     pub round: UncheckedAccount<'info>,
 
     #[account(mut)]

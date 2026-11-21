@@ -2123,6 +2123,11 @@ fn migrate_table_ix(t: &mut Table, signer: &Keypair) -> TransactionResult {
     )
 }
 
+/// The v1 round PDA (`ROUND_V1_SEED`, D41). `migrate_round` migrates this account only.
+fn v1_round() -> Pubkey {
+    Pubkey::find_program_address(&[jhandi_munda::ROUND_V1_SEED], &jhandi_munda::id()).0
+}
+
 fn migrate_round_ix(t: &mut Table, signer: &Keypair) -> TransactionResult {
     let pd = pda_with(&[jhandi_munda::id().as_ref()], &anchor_lang::solana_program::bpf_loader_upgradeable::id());
     send(
@@ -2130,7 +2135,7 @@ fn migrate_round_ix(t: &mut Table, signer: &Keypair) -> TransactionResult {
         signer,
         ix(
             jhandi_munda::accounts::MigrateRound {
-                round: t.round,
+                round: v1_round(),
                 upgrade_authority: signer.pubkey(),
                 program_data: pd,
                 system_program: SYS,
@@ -2188,7 +2193,7 @@ fn test_migrate_round_388_to_392() {
     set_upgrade_authority(&mut t, &admin.pubkey());
 
     // The deployed round is 388 bytes: no bet_count or settled_count. Idle, round 0.
-    let round_bump = Pubkey::find_program_address(&[ROUND_SEED], &jhandi_munda::id()).1;
+    let round_bump = Pubkey::find_program_address(&[jhandi_munda::ROUND_V1_SEED], &jhandi_munda::id()).1;
     let write_old_round = |t: &mut Table, status: u8| write_old_round_with(t, status, &[], round_bump);
 
     // A live round is never migrated.
@@ -2199,20 +2204,22 @@ fn test_migrate_round_388_to_392() {
     write_old_round(&mut t, 0); // Idle
     assert!(migrate_round_ix(&mut t, &stranger).is_err(), "a stranger cannot migrate the round");
     assert!(migrate_round_ix(&mut t, &admin).is_ok(), "the upgrade authority migrates the round");
-    let acc = t.svm.get_account(&t.round).unwrap();
+    let acc = t.svm.get_account(&v1_round()).unwrap();
     assert_eq!(acc.data.len(), 8 + Round::INIT_SPACE, "392 bytes, sized from the struct");
     let r = Round::try_deserialize(&mut acc.data.as_slice()).unwrap();
     assert_eq!((r.status, r.round_id, r.bet_count, r.settled_count), (RoundStatus::Idle, 0, 0, 0));
     assert_eq!(r.bump, round_bump, "the old fields are kept");
 
-    // The migrated round takes bets.
+    // The current round (round_v2) takes bets. The migrated v1 account is no longer the table's round.
     let alice = new_player(&mut t);
-    assert!(place(&mut t, &alice, 2, 1_000_000).is_ok(), "the migrated round takes a bet");
+    assert!(place(&mut t, &alice, 2, 1_000_000).is_ok(), "the current round takes a bet");
 }
 
 // Writes the deployed 388-byte round layout: status, opened_at, round_id, players
 // (with room for 10), request_id, faces, bump. No counters.
 fn write_old_round_with(t: &mut Table, status: u8, players: &[Pubkey], bump: u8) {
+    // The v1 account does not exist in setup (only round_v2 does): create it from the v2 account's
+    // owner and rent, then overwrite its data with the old layout.
     let mut acc = t.svm.get_account(&t.round).unwrap();
     let mut b = acc.data[0..8].to_vec();
     b.push(status);
@@ -2228,7 +2235,7 @@ fn write_old_round_with(t: &mut Table, status: u8, players: &[Pubkey], bump: u8)
     b.push(bump);
     assert_eq!(b.len(), 388);
     acc.data = b;
-    t.svm.set_account(t.round, acc).unwrap();
+    t.svm.set_account(v1_round(), acc).unwrap();
 }
 
 #[test]
@@ -2239,18 +2246,18 @@ fn test_migrate_rolled_round_then_finish() {
     let stranger = new_player(&mut t);
     let alice = new_player(&mut t);
     set_upgrade_authority(&mut t, &admin.pubkey());
-    let round_bump = Pubkey::find_program_address(&[ROUND_SEED], &jhandi_munda::id()).1;
+    let round_bump = Pubkey::find_program_address(&[jhandi_munda::ROUND_V1_SEED], &jhandi_munda::id()).1;
 
     // The devnet leftover: a finished (Rolled) round with one player, in the old layout.
     write_old_round_with(&mut t, 3, &[alice.pubkey()], round_bump);
 
     // Only the upgrade authority may migrate it.
     assert!(migrate_round_ix(&mut t, &stranger).is_err(), "a stranger cannot migrate the round");
-    assert_eq!(t.svm.get_account(&t.round).unwrap().data.len(), 388, "the refused call changed nothing");
+    assert_eq!(t.svm.get_account(&v1_round()).unwrap().data.len(), 388, "the refused call changed nothing");
 
     // The authority migrates: it grows, adds zero counters, and changes nothing else.
     assert!(migrate_round_ix(&mut t, &admin).is_ok());
-    let r = Round::try_deserialize(&mut t.svm.get_account(&t.round).unwrap().data.as_slice()).unwrap();
+    let r = Round::try_deserialize(&mut t.svm.get_account(&v1_round()).unwrap().data.as_slice()).unwrap();
     assert_eq!(r.status, RoundStatus::Rolled, "the migration keeps the status");
     assert_eq!((r.bet_count, r.settled_count), (0, 0), "the counters start at zero");
     assert_eq!(r.players, vec![alice.pubkey()], "players are kept by the migration");
@@ -2259,11 +2266,10 @@ fn test_migrate_rolled_round_then_finish() {
     // A second migration is refused: the account is already the current size.
     assert!(migrate_round_ix(&mut t, &admin).is_err(), "already migrated: refused cleanly");
 
-    // Finishing the round (nothing to settle: 0 of 0) takes it to Idle for the next round.
-    assert!(finish_round(&mut t, &admin).is_ok(), "finish_round after the migration");
-    let r = Round::try_deserialize(&mut t.svm.get_account(&t.round).unwrap().data.as_slice()).unwrap();
-    assert_eq!((r.status, r.round_id), (RoundStatus::Idle, 1));
-    assert!(r.players.is_empty(), "finish clears the players");
+    // finish_round works on round_v2 (D41), not the v1 account, so the migrated v1 round is not
+    // finished here. The table's current round (round_v2) is untouched by the v1 migration.
+    let cur = Round::try_deserialize(&mut t.svm.get_account(&t.round).unwrap().data.as_slice()).unwrap();
+    assert_eq!((cur.status, cur.round_id), (RoundStatus::Idle, 0), "round_v2 is untouched");
 }
 
 // --- commit and undelegate (Step 11.4, #44) ---
@@ -2371,4 +2377,60 @@ fn test_external_undelegate_callback_is_routed() {
             "the undelegate callback must be routed, not fall back: {text}"
         );
     }
+}
+
+// --- round_v2 (D41): init, and clear undelegate errors ---
+
+fn init_round_by(t: &mut Table, signer: &Keypair) -> TransactionResult {
+    send(
+        &mut t.svm,
+        signer,
+        ix(
+            jhandi_munda::accounts::InitRound {
+                config: t.config,
+                round: t.round,
+                payer: signer.pubkey(),
+                system_program: SYS,
+            },
+            jhandi_munda::instruction::InitRound {},
+        ),
+    )
+}
+
+#[test]
+fn test_init_round_is_table_authority_only_and_not_twice() {
+    let mut t = setup();
+    let admin = t.admin.insecure_clone();
+    let stranger = new_player(&mut t);
+    // initialize_table already created round_v2, so init_round cannot create it again.
+    assert!(init_round_by(&mut t, &stranger).is_err(), "a stranger cannot init the round");
+    assert!(init_round_by(&mut t, &admin).is_err(), "round_v2 already exists: init is refused");
+}
+
+#[test]
+fn test_undelegate_on_an_account_already_undelegating_says_so() {
+    let mut t = setup();
+    let admin = t.admin.insecure_clone();
+    let alice = new_player(&mut t);
+    let funder = new_player(&mut t);
+    init_cage(&mut t, &funder);
+    assert!(buy_chips(&mut t, &alice, 5_000_000).is_ok());
+
+    // The rollup copy the delegation program owns: the rollup has already scheduled the undelegate.
+    let mut round = t.svm.get_account(&t.round).unwrap();
+    round.owner = dlp_id();
+    t.svm.set_account(t.round, round).unwrap();
+    let e = undelegate_round_by(&mut t, &admin).expect_err("an undelegating round is refused");
+    let logs = format!("{:?}", e.meta.logs);
+    assert!(logs.contains("RoundAlreadyUndelegating"), "the error names the cause: {logs}");
+    assert!(!logs.contains("cannot be migrated"), "not the migration message: {logs}");
+
+    // Same for a chip stack the delegation program owns.
+    let chips = Pubkey::find_program_address(&[jhandi_munda::CHIPS_SEED, alice.pubkey().as_ref()], &jhandi_munda::id()).0;
+    let mut stack = t.svm.get_account(&chips).unwrap();
+    stack.owner = dlp_id();
+    t.svm.set_account(chips, stack).unwrap();
+    let e = undelegate_chips_by(&mut t, &admin, &alice.pubkey()).expect_err("an undelegating stack is refused");
+    let logs = format!("{:?}", e.meta.logs);
+    assert!(logs.contains("ChipStackAlreadyUndelegating"), "the error names the cause: {logs}");
 }

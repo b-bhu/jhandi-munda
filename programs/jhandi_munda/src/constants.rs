@@ -28,7 +28,12 @@ pub const SHARE_MINT_SEED: &[u8] = b"pool_share_mint";
 pub const TABLE_SEED: &[u8] = b"table";
 
 /// Round PDA seed. One round account per table, reused round after round (D5).
-pub const ROUND_SEED: &[u8] = b"round";
+/// The round PDA seed (D41). Versioned: the v1 round (`ROUND_V1_SEED`) got stuck mid-undelegate on
+/// devnet before the `#[ephemeral]` callback existed, and an account the rollup marks as
+/// undelegating cannot be reused from our side.
+pub const ROUND_SEED: &[u8] = b"round_v2";
+/// The v1 round seed (D41). Only `migrate_round` uses it, for the v1 account.
+pub const ROUND_V1_SEED: &[u8] = b"round";
 
 /// Round length: 90 seconds start to finish (D8). Stored in `TableConfig`.
 pub const ROUND_LENGTH_SECS: i64 = 90;
