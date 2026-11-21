@@ -623,6 +623,17 @@ async function main() {
     console.log("2. cage vault exists");
   }
 
+  // 2b. The insurance vault (#111): the deposit sweeps orphan MUSD here (D43), so it must exist.
+  if (!(await base.getAccountInfo(INSURANCE_VAULT))) {
+    console.log("2b. insurance vault missing; init_insurance");
+    record("init_insurance", await send("init_insurance", base, wallet, buildIx(idl, "init_insurance", {
+      config: CONFIG, insurance_vault: INSURANCE_VAULT, musd_mint: MUSD_MINT, payer: wallet.publicKey,
+      token_program: TOKEN_PROGRAM, system_program: SystemProgram.programId,
+    })), "solana");
+  } else {
+    console.log("2b. insurance vault exists");
+  }
+
   // 3. MUSD for the wallet (the faucet; one claim per hour per wallet).
   const musdAta = ataOf(wallet.publicKey, MUSD_MINT);
   if (!(await base.getAccountInfo(musdAta))) {

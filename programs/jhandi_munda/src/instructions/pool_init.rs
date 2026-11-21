@@ -97,6 +97,12 @@ pub struct InitializePool<'info> {
 }
 
 pub fn handler(ctx: Context<InitializePool>) -> Result<()> {
+    // Only the table authority (the config admin, D40) may create the pool (#111).
+    require_keys_eq!(
+        ctx.accounts.config.admin,
+        ctx.accounts.payer.key(),
+        ErrorCode::NotTableAuthority
+    );
     let pool_key = ctx.accounts.pool.key();
 
     require_keys_eq!(

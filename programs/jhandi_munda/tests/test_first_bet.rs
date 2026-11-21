@@ -108,6 +108,7 @@ fn setup() -> Table {
         ),
         ix(
             jhandi_munda::accounts::InitializeTable {
+                config: c,
                 table: t.table,
                 round: t.round,
                 payer: a.pubkey(),
