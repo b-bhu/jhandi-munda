@@ -102,8 +102,13 @@ const P = (seeds) => PublicKey.findProgramAddressSync(seeds, PROGRAM_ID)[0];
 const CONFIG = P([enc("config")]);
 const POOL = P([enc("pool")]);
 const POOL_VAULT = P([enc("pool_vault")]);
+const SHARE_MINT = P([enc("pool_share_mint")]); // SHARE_MINT_SEED (LP shares)
 const CAGE = P([enc("cage_vault")]);
 const MUSD_MINT = P([enc("musd_mint")]);
+// Payout math, copied from payout.rs (MULTIPLIERS, WIN_FEE_BPS = 200). Used only to size the pool top-up.
+const MULTIPLIERS = [0n, 0n, 3n, 5n, 9n, 26n, 101n];
+const WIN_FEE_BPS = 200n;
+const POOL_TOPUP_MARGIN = 1_000_000n; // 1 MUSD spare on top of the shortfall
 const MUSD_AUTH = P([enc("musd_mint_authority")]);
 const TABLE = P([enc("table")]);
 // round_v2 (D41): the v1 round ("round") is left alone.
@@ -354,7 +359,8 @@ function decodeRound(data) {
   o += 4 + n * 32 + 32;
   const faces = [...data.subarray(o, o + 6)];
   const betCount = data.length >= 392 ? data.readUInt16LE(o + 6) : null;
-  return { status, statusName: STATUS[status] ?? `unknown(${status})`, openedAt, roundId, faces, betCount, players: n };
+  const settledCount = data.length >= 392 ? data.readUInt16LE(o + 8) : null;
+  return { status, statusName: STATUS[status] ?? `unknown(${status})`, openedAt, roundId, faces, betCount, settledCount, players: n };
 }
 
 // Chip stack: owner (32) then balance (u64).
@@ -425,6 +431,136 @@ async function layoutCheck(idl, base, wallet, record) {
   }
 }
 
+// What settle_chip_bets owes one chip slip, in base units: the stake moves cage -> pool first, then the
+// win (stake + 98% of the profit, payout.rs settle_win) is paid from the pool. Settle needs the pool
+// to hold at least `owed` after the stake arrives.
+function owedFor(stake, faces, symbol) {
+  const k = BigInt(faces.filter((f) => f === symbol).length);
+  const gross = stake * MULTIPLIERS[Number(k)];
+  if (gross <= stake) return gross;
+  const profit = gross - stake;
+  return stake + (profit * (10_000n - WIN_FEE_BPS)) / 10_000n;
+}
+
+// Tops up the pool vault with the LP `deposit` (the dev wallet is the depositor) when a settle would
+// fail. Devnet only; no program change. Returns the deposit amount (0n if none was needed).
+async function topUpPoolFor({ idl, base, wallet, bet, faces, record, rpc }) {
+  const vault = await base.getAccountInfo(POOL_VAULT);
+  const poolBal = vault.data.readBigUInt64LE(64);
+  const slip = decodeBet(((await base.getAccountInfo(bet)) ?? { data: Buffer.alloc(0) }).data);
+  if (!slip.amount) throw new Error("the bet slip has no stake on Solana; nothing to settle");
+  const owed = owedFor(slip.amount, faces, slip.symbol);
+  const shortfall = owed - (poolBal + slip.amount);
+  console.log(`   pool vault ${poolBal} base units; stake ${slip.amount}; owed ${owed} (face ${slip.symbol}, ${faces.filter((f) => f === slip.symbol).length} matches)`);
+  if (shortfall <= 0n) {
+    console.log("   the pool can pay this win; no deposit");
+    return 0n;
+  }
+  const deposit = shortfall + POOL_TOPUP_MARGIN;
+  console.log(`   the pool is short by ${shortfall}; depositing ${deposit} base units (LP deposit, dev wallet)`);
+  const musdAta = ataOf(wallet.publicKey, MUSD_MINT);
+  const have = (await base.getAccountInfo(musdAta))?.data.readBigUInt64LE(64) ?? 0n;
+  if (have < deposit) {
+    console.log(`   the wallet holds ${have} MUSD base units; musd_faucet first (100 MUSD per call, 1-hour cooldown, D33)`);
+    try {
+      record("musd_faucet", await send("musd_faucet", base, wallet, buildIx(idl, "musd_faucet", {
+        config: CONFIG, musd_mint: MUSD_MINT, musd_mint_authority: MUSD_AUTH, faucet_record: faucetPda(wallet.publicKey),
+        wallet: wallet.publicKey, destination: musdAta, associated_token_program: ATA_PROGRAM,
+        token_program: TOKEN_PROGRAM, system_program: SystemProgram.programId,
+      })), "solana");
+    } catch (err) {
+      throw new Error(`the wallet is short of MUSD for the pool top-up (${have} < ${deposit}) and the faucet refused: ${err.message ?? err}`);
+    }
+  }
+  const nowHave = (await base.getAccountInfo(musdAta))?.data.readBigUInt64LE(64) ?? 0n;
+  if (nowHave < deposit) throw new Error(`the wallet holds ${nowHave} MUSD base units, below the ${deposit} deposit`);
+  record("deposit", await send("deposit (LP, pool top-up)", base, wallet, buildIx(idl, "deposit", {
+    pool: POOL, share_mint: SHARE_MINT, vault: POOL_VAULT, depositor: wallet.publicKey, depositor_ata: musdAta,
+    depositor_shares: ataOf(wallet.publicKey, SHARE_MINT), token_program: TOKEN_PROGRAM,
+    system_program: SystemProgram.programId, associated_token_program: ATA_PROGRAM,
+  }, u64(deposit))), "solana");
+  return deposit;
+}
+
+// Brings round_v2, the chip stack and the bet slip home (whichever are still on the validator),
+// then settles the one chip bet and finishes the round on Solana. Idempotent: each step is skipped
+// when it is already done, so a re-run after a partial success continues.
+async function settleFromSolana({ idl, base, er, wallet, record, roundId, bet, chips }) {
+  const chipsUndelegate = () => ({
+    label: "undelegate_chips", account: chips, er, base, wallet, record,
+    instruction: () => buildIx(idl, "undelegate_chips", { payer: wallet.publicKey, config: CONFIG, chips },
+      wallet.publicKey.toBuffer()),
+  });
+  if ((await base.getAccountInfo(ROUND)).owner.equals(DLP_ID)) {
+    await undelegateHome({
+      label: "undelegate_round", account: ROUND, er, base, wallet, record,
+      instruction: () => buildIx(idl, "undelegate_round", { payer: wallet.publicKey, config: CONFIG, round: ROUND }),
+    });
+  } else {
+    console.log("9. round_v2 is already on Solana (undelegated); skipping undelegate_round");
+  }
+  if ((await base.getAccountInfo(chips))?.owner.equals(DLP_ID)) {
+    await undelegateHome(chipsUndelegate());
+  } else {
+    console.log("9. the chip stack is already on Solana; skipping undelegate_chips");
+  }
+  if ((await base.getAccountInfo(bet))?.owner.equals(DLP_ID)) {
+    await undelegateHome({
+      label: "undelegate_bet", account: bet, er, base, wallet, record,
+      instruction: () => buildIx(idl, "undelegate_bet", { payer: wallet.publicKey, config: CONFIG, bet },
+        Buffer.concat([u64(roundId), wallet.publicKey.toBuffer(), u8(BET_SYMBOL)])),
+    });
+  } else {
+    console.log("9. the bet slip is already on Solana; skipping undelegate_bet");
+  }
+
+  const home = decodeRound((await base.getAccountInfo(ROUND)).data);
+  if (home.status === 0) {
+    console.log("9a. round_v2 is already finished (Idle on Solana): nothing left to settle.");
+  } else if (home.betCount === 1) {
+    const slipHome = await base.getAccountInfo(bet);
+    const alreadySettled = !!slipHome && slipHome.owner.equals(PROGRAM_ID) && decodeBet(slipHome.data).settled;
+    if (alreadySettled) {
+      console.log("9a. the bet slip is already settled on Solana: skipping settle_chip_bets (resume)");
+    } else {
+      console.log("9a. top up the pool if it is short, then settle_chip_bets on Solana");
+      await topUpPoolFor({ idl, base, wallet, bet, faces: home.faces, record });
+      const settle = buildIx(idl, "settle_chip_bets", {
+        table: TABLE, round: ROUND, pool: POOL, pool_vault: POOL_VAULT, cage_vault: CAGE, token_program: TOKEN_PROGRAM,
+      });
+      settle.keys.push({ pubkey: bet, isSigner: false, isWritable: true }, { pubkey: chips, isSigner: false, isWritable: true });
+      try {
+        record("settle_chip_bets", await send("settle_chip_bets", base, wallet, settle), "solana");
+      } catch (err) {
+        if (String(err.message ?? err).includes("InsufficientPoolFunds")) {
+          throw new Error("settle_chip_bets: the pool vault cannot pay this chip win now (InsufficientPoolFunds, 6025). The top-up above did not cover it; rerun, or top up the pool by hand. (The program's message still says 'queue is Step 8'; that text is fixed in a later program change.)");
+        }
+        throw err;
+      }
+    }
+    const homeAfter = decodeRound((await base.getAccountInfo(ROUND)).data);
+    if (homeAfter.settledCount !== homeAfter.betCount) {
+      throw new Error(`the round has ${homeAfter.betCount} bets and ${homeAfter.settledCount} settled; finish_round needs all settled.`);
+    }
+    record("finish_round", await send("finish_round", base, wallet, buildIx(idl, "finish_round", { round: ROUND })), "solana");
+  } else {
+    console.log(`9a. the round holds ${home.betCount} bets; this script settles only a one-bet round (UNVERIFIED: settling every bet is not built here).`);
+  }
+  const chipsHome = decodeChips((await base.getAccountInfo(chips)).data);
+  console.log(`   chips on Solana: ${chipsHome.balance} base units`);
+}
+
+function printSummary(sigs, validator) {
+  console.log("\n=== Summary ===");
+  console.log(`Validator for rollup transactions: ${validator.url}`);
+  for (const r of sigs) {
+    const link = r.where === "solana"
+      ? explorer(r.sig)
+      : `(validator ${validator.url}; Explorer link UNVERIFIED) signature ${r.sig}`;
+    console.log(`${r.label}: ${r.sig}\n   ${link}`);
+  }
+}
+
 async function main() {
   const [keyArg, rpcArg, routerArg] = process.argv.slice(2);
   const rpc = rpcArg ?? DEFAULT_RPC;
@@ -491,6 +627,30 @@ async function main() {
     })), "solana");
   } else {
     console.log("3. MUSD account exists");
+  }
+
+  // Resume: round_v2 may already be past the rollup. A finished round, or a Rolled round that is back
+  // on Solana (undelegated by an earlier run that stopped before settle), is finished here.
+  const roundTopNow = await base.getAccountInfo(ROUND);
+  if (roundTopNow.owner.equals(PROGRAM_ID)) {
+    const r0 = decodeRound(roundTopNow.data);
+    if (r0.status === 0 && r0.roundId > 0n) {
+      const prev = await base.getAccountInfo(betPda(r0.roundId - 1n, wallet.publicKey, BET_SYMBOL));
+      if (prev && prev.owner.equals(PROGRAM_ID) && decodeBet(prev.data).settled) {
+        console.log(`RESUME: round_v2 is already finished (round ${r0.roundId - 1n} is settled and the round is Idle). Nothing to do.`);
+        printSummary(sigs, validator);
+        return;
+      }
+    }
+    if (r0.status === 3) {
+      console.log(`RESUME: round_v2 is Rolled (faces [${r0.faces.join(", ")}]) and already back on Solana; going straight to settle.`);
+      await settleFromSolana({
+        idl, base, er, wallet, record, roundId: r0.roundId,
+        bet: betPda(r0.roundId, wallet.publicKey, BET_SYMBOL), chips: chipsPda(wallet.publicKey),
+      });
+      printSummary(sigs, validator);
+      return;
+    }
   }
 
   // 4a. The chip stack. It is NOT undelegated at the start of every run. Only when it is delegated
@@ -564,7 +724,9 @@ async function main() {
   }
 
   // 4d. The bet slip (D42): opened and delegated on Solana, unless it already is.
-  const roundIdNow = decodeRound((await base.getAccountInfo(ROUND)).data).roundId;
+  const roundOnSolana = await base.getAccountInfo(ROUND);
+  // While delegated, Solana's copy of the round is zeroed (the SDK clears the PDA); the live state is on the validator.
+  const roundIdNow = decodeRound((roundOnSolana.owner.equals(DLP_ID) ? await er.getAccountInfo(ROUND) : roundOnSolana).data).roundId;
   const bet = betPda(roundIdNow, wallet.publicKey, BET_SYMBOL);
   let slipBase = await base.getAccountInfo(bet);
   if (!slipBase) {
@@ -671,41 +833,10 @@ async function main() {
 
   // 9. Undelegate round, chips and bet (D40, bettor or table authority), then settle and finish on Solana.
   if (final) {
-    await undelegateHome({
-      label: "undelegate_round", account: ROUND, er, base, wallet, record,
-      instruction: () => buildIx(idl, "undelegate_round", { payer: wallet.publicKey, config: CONFIG, round: ROUND }),
-    });
-    await undelegateHome(chipsUndelegate());
-    await undelegateHome({
-      label: "undelegate_bet", account: bet, er, base, wallet, record,
-      instruction: () => buildIx(idl, "undelegate_bet", { payer: wallet.publicKey, config: CONFIG, bet },
-        Buffer.concat([u64(roundIdNow), wallet.publicKey.toBuffer(), u8(BET_SYMBOL)])),
-    });
-
-    const home = decodeRound((await base.getAccountInfo(ROUND)).data);
-    if (home.betCount === 1) {
-      console.log("9a. settle_chip_bets on Solana, then finish_round");
-      const settle = buildIx(idl, "settle_chip_bets", {
-        table: TABLE, round: ROUND, pool: POOL, pool_vault: POOL_VAULT, cage_vault: CAGE, token_program: TOKEN_PROGRAM,
-      });
-      settle.keys.push({ pubkey: bet, isSigner: false, isWritable: true }, { pubkey: chips, isSigner: false, isWritable: true });
-      record("settle_chip_bets", await send("settle_chip_bets", base, wallet, settle), "solana");
-      record("finish_round", await send("finish_round", base, wallet, buildIx(idl, "finish_round", { round: ROUND })), "solana");
-    } else {
-      console.log(`9a. the round holds ${home.betCount} bets; this script settles only a one-bet round (UNVERIFIED: settling every bet is not built here).`);
-    }
-    const chipsHome = decodeChips((await base.getAccountInfo(chips)).data);
-    console.log(`   chips on Solana: ${chipsHome.balance} base units`);
+    await settleFromSolana({ idl, base, er, wallet, record, roundId: roundIdNow, bet, chips });
   }
 
-  console.log("\n=== Summary ===");
-  console.log(`Validator for rollup transactions: ${validator.url}`);
-  for (const r of sigs) {
-    const link = r.where === "solana"
-      ? explorer(r.sig)
-      : `(validator ${validator.url}; Explorer link UNVERIFIED) signature ${r.sig}`;
-    console.log(`${r.label}: ${r.sig}\n   ${link}`);
-  }
+  printSummary(sigs, validator);
 }
 
 main().catch((err) => {
