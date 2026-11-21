@@ -3000,3 +3000,46 @@ fn test_two_snapshots_a_day_apart() {
     // A day that is not today is refused.
     assert!(take_snapshot_by(&mut t, &keeper, day2 + 1).is_err(), "only the current UTC day");
 }
+
+// #53: a settled round exposes its proof trail: the faces, the bet summaries, and an Explorer link
+// to the VRF callback whose log names the request and the faces. The link is built from the
+// callback's real signature. UNVERIFIED on devnet: the link resolves on Explorer (not checked here).
+#[test]
+fn test_settled_round_exposes_proof_trail() {
+    let mut t = setup();
+    stub_vrf(&mut t);
+    let funder = new_player(&mut t);
+    deposit(&mut t, &funder, 100_000_000);
+    init_cage(&mut t, &funder);
+    let a = new_player(&mut t);
+    assert!(buy_chips(&mut t, &a, 20_000_000).is_ok());
+    assert!(place_chip_bet(&mut t, &a, 2, 10_000_000).is_ok());
+
+    set_time(&mut t, BASE_TIME + 90);
+    let ephemeral_queue: Pubkey = "5hBR571xnXppuCPveTrctfTU7tJLSN94nq7kv7FRK5Tc".parse().unwrap();
+    assert!(request_roll_on(&mut t, &a, ephemeral_queue).is_ok());
+    let mut randomness = [0u8; 32];
+    randomness[..6].copy_from_slice(&[1, 1, 4, 5, 0, 2]);
+    let request_id = round(&t).request_id;
+    let callback = send_callback(&mut t, &a, randomness, request_id).expect("the VRF callback");
+
+    // The callback's log names the request and the faces; the Explorer link is to this transaction.
+    let request_hex: String = request_id.iter().map(|b| format!("{b:02x}")).collect();
+    assert!(
+        callback.logs.iter().any(|l| l.contains("VRF callback") && l.contains(&request_hex) && l.contains("[2, 2, 5, 6, 1, 3]")),
+        "the callback log is the proof: {:?}",
+        callback.logs
+    );
+    let sig = callback.signature.to_string();
+    let url = format!("https://explorer.solana.com/tx/{sig}?cluster=devnet");
+    assert!(url.starts_with("https://explorer.solana.com/tx/") && url.contains(&sig));
+
+    // Settle, then read the round and its bets as the fairness page would.
+    set_time(&mut t, BASE_TIME + 100);
+    let (ab, ac) = (bet_pda_r(0, &a, 2), pda(&[jhandi_munda::CHIPS_SEED, a.pubkey().as_ref()]));
+    assert!(settle_chip_bets(&mut t, &a, &[(ab, ac)]).is_ok());
+    let r = round(&t);
+    assert_eq!(r.faces, [2, 2, 5, 6, 1, 3], "the six faces are on the round");
+    let b = Bet::try_deserialize(&mut t.svm.get_account(&ab).unwrap().data.as_slice()).unwrap();
+    assert_eq!((b.player, b.symbol, b.amount, b.settled), (a.pubkey(), 2, 10_000_000, true), "the bet summary");
+}

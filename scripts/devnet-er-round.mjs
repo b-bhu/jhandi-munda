@@ -56,6 +56,7 @@
 import { createRequire } from "node:module";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { explorerUrl as proofLink, callbackProof } from "./lib/round-proof.mjs";
 
 const web3 = createRequire(new URL("../app/package.json", import.meta.url))("@solana/web3.js");
 const {
@@ -276,6 +277,17 @@ async function sendErOnce(label, conn, wallet, instruction) {
     console.error(`  ${label} FAILED: ${err.message ?? err}`);
     throw err;
   }
+}
+
+// The VRF callback transaction for the round, from the validator's recent signatures (#53). Its log
+// names the request and the faces (callback_roll.rs). UNVERIFIED: that the validator indexes it under the round.
+async function findCallbackSig(er, account) {
+  const recent = await er.getSignaturesForAddress(account, { limit: 20 }).catch(() => []);
+  for (const entry of recent) {
+    const tx = await er.getTransaction(entry.signature, { commitment: "confirmed", maxSupportedTransactionVersion: 0 }).catch(() => null);
+    if (callbackProof(tx?.meta?.logMessages ?? [])) return entry.signature;
+  }
+  return null;
 }
 
 // Waits until `account` is owned by `owner` on Solana (after an undelegate, or a delegate).
@@ -848,6 +860,16 @@ async function main() {
     }
   }
   if (final) console.log(`Round ${final.roundId} is ${final.statusName}; faces: [${final.faces.join(", ")}]`);
+  // #53: the callback's transaction is the proof trail. Find it on the validator and print its link.
+  if (final) {
+    const cb = await findCallbackSig(er, ROUND);
+    if (cb) {
+      record("vrf_callback", cb, "rollup");
+      console.log(`VRF callback (validator tx; Explorer link UNVERIFIED for validator txs): ${proofLink(cb)}`);
+    } else {
+      console.log("VRF callback: not found in the round's recent validator signatures (UNVERIFIED lookup).");
+    }
+  }
 
   // 9. Undelegate round, chips and bet (D40, bettor or table authority), then settle and finish on Solana.
   if (final) {

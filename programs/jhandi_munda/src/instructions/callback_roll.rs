@@ -60,6 +60,10 @@ pub fn handler(
     require!(round.request_id == request_id, ErrorCode::UnexpectedCallback);
 
     round.faces = faces_from_randomness(&randomness)?;
+    // The proof trail (#53): this transaction's log names the request and the faces, so the
+    // Explorer link to the callback is the proof. The round stores the faces; the request id is
+    // cleared here as before (a test pins that).
+    msg!("VRF callback: round {} request {} faces {:?}", round.round_id, hex32(&request_id), round.faces);
     round.request_id = [0u8; 32];
     round.status = RoundStatus::Rolled;
 
@@ -106,4 +110,9 @@ mod tests {
         let faces = faces_from_randomness(&r).unwrap();
         assert_eq!(faces, [5, 6, 1, 2, 3, 4]);
     }
+}
+
+/// Lowercase hex of a 32-byte id, for the callback's log line (#53).
+fn hex32(bytes: &[u8; 32]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
