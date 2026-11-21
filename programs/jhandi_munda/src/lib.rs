@@ -5,6 +5,10 @@ pub mod payout;
 pub mod state;
 
 use anchor_lang::prelude::*;
+// `#[ephemeral]` adds `process_undelegation`, the callback the delegation program calls on
+// Solana when a delegated account is undelegated (notes.md §2, SDK 0.18.0).
+// UNVERIFIED on devnet: the callback path is covered only by LiteSVM (no real delegation program).
+use ephemeral_rollups_sdk::anchor::ephemeral;
 
 pub use constants::*;
 pub use instructions::*;
@@ -12,6 +16,7 @@ pub use state::*;
 
 declare_id!("4nsQ6ntZgpBhsDJt4bN5nu4bBvyqXtD4ReQdhAdSRhtH");
 
+#[ephemeral]
 #[program]
 pub mod jhandi_munda {
     use super::*;

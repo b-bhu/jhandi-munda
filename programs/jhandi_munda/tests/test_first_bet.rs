@@ -2339,3 +2339,36 @@ fn test_undelegate_round_and_chips_admin_only() {
     // The round and chips are still readable on Solana in this stub test.
     assert_eq!(t.svm.get_account(&t.round).unwrap().owner, jhandi_munda::id());
 }
+
+// The delegation program calls back into our program on Solana when a delegated account is
+// undelegated, with the SDK's external-undelegate instruction (`process_undelegation`, added by
+// `#[ephemeral]`). Without that callback the call fails with InstructionFallbackNotFound (101),
+// which is what stuck devnet undelegates. UNVERIFIED on a validator: the delegation program is a
+// no-op stub here, so this checks only that the instruction is routed, not that it undelegates.
+#[test]
+fn test_external_undelegate_callback_is_routed() {
+    let mut t = setup();
+    let payer = t.admin.insecure_clone();
+    // Anchor discriminator: first 8 bytes of sha256("global:process_undelegation").
+    let disc: [u8; 8] = [196, 28, 41, 206, 48, 37, 51, 167];
+    let (buffer, _) = Pubkey::find_program_address(&[b"undelegate-buffer", t.round.as_ref()], &dlp_id());
+    let mut data = disc.to_vec();
+    data.extend_from_slice(&0u32.to_le_bytes()); // account_seeds: an empty Vec<Vec<u8>>
+    let ix = Instruction::new_with_bytes(
+        jhandi_munda::id(),
+        &data,
+        vec![
+            AccountMeta::new(t.round, false),
+            AccountMeta::new_readonly(buffer, false),
+            AccountMeta::new(payer.pubkey(), true),
+            AccountMeta::new_readonly(anchor_lang::solana_program::system_program::ID, false),
+        ],
+    );
+    if let Err(e) = send(&mut t.svm, &payer, ix) {
+        let text = format!("{:?} {:?}", e.err, e.meta.logs);
+        assert!(
+            !text.contains("Custom(101)") && !text.contains("InstructionFallbackNotFound"),
+            "the undelegate callback must be routed, not fall back: {text}"
+        );
+    }
+}

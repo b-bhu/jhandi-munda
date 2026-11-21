@@ -21,6 +21,12 @@
  *   9. commit and undelegate the round and the chip stack (rollup), wait until Solana owns
  *      them, settle_chip_bets and finish_round on Solana (only if the round holds one bet).
  *
+ * Stuck undelegate: if Solana still does not own a round or chip stack after the wait, the
+ * undelegate is sent once more on the rollup (2 tries in all) and the Solana-side commit
+ * signature from the rollup log is printed (UNVERIFIED). If that also fails, the script stops and
+ * prints "PATH: fresh round NOT taken": the round PDA has no round id in its seeds, so a fresh
+ * round needs a program change, which this script does not make.
+ *
  * Retries: a rollup call that fails with InstructionFallbackNotFound (error 101) is retried,
  * 30 s apart, up to 4 tries (the rollup takes about 2 minutes to load an upgrade). Every
  * other error is final.
@@ -71,7 +77,8 @@ const BET_AMOUNT = 1_000_000n;
 const BUY_AMOUNT = 10_000_000n;
 const WINDOW_SECS = 90n;
 const CALLBACK_MS = 4 * 60 * 1000;
-const OWNER_WAIT_MS = 15 * 60 * 1000;
+const OWNER_WAIT_MS = 10 * 60 * 1000;
+const UNDELEGATE_TRIES = 2;
 const FALLBACK_PATTERNS = ["InstructionFallbackNotFound", "Error Number: 101", "custom program error: 0x65"];
 const FALLBACK_TRIES = 4;
 const FALLBACK_WAIT_MS = 30_000;
@@ -218,18 +225,62 @@ async function sendErOnce(label, routerUrl, conn, wallet, instruction, routedAcc
 }
 
 // Waits until `account` is owned by `owner` on Solana (after an undelegate, or a delegate).
-async function waitForOwner(base, account, owner, label) {
-  const deadline = Date.now() + OWNER_WAIT_MS;
+// Returns false if the wait times out.
+async function waitForOwner(base, account, owner, label, waitMs = OWNER_WAIT_MS) {
+  const deadline = Date.now() + waitMs;
   while (Date.now() < deadline) {
     const acc = await base.getAccountInfo(account);
     if (acc && acc.owner.equals(owner)) {
       console.log(`  ${label}: Solana owns ${account.toBase58()} again`);
-      return;
+      return true;
     }
     console.log(`  ${label}: waiting for Solana to own ${account.toBase58()} (owner ${acc ? acc.owner.toBase58() : "missing"})`);
     await sleep(10_000);
   }
-  throw new Error(`${label}: Solana did not take ${account.toBase58()} back within 15 minutes (UNVERIFIED timing).`);
+  return false;
+}
+
+// The rollup's commit log lines for a tx, and any base58 signatures in them (the Solana-side commit).
+// UNVERIFIED: the log wording and the signature format are assumed from the 1.1.1 logs, not checked on devnet.
+async function commitLogSigs(er, sig) {
+  const tx = await er.getTransaction(sig, { commitment: "confirmed", maxSupportedTransactionVersion: 0 }).catch(() => null);
+  const lines = (tx?.meta?.logMessages ?? []).filter((l) => /commit/i.test(l));
+  const sigs = lines.flatMap((l) => l.match(/[1-9A-HJ-NP-Za-km-z]{80,90}/g) ?? []);
+  return { lines, sigs: [...new Set(sigs)] };
+}
+
+// Takes `account` home from the rollup: undelegate, then wait for Solana to own it. If Solana
+// still does not own it after the wait, send the undelegate once more (UNDELEGATE_TRIES in all).
+// If the rollup refuses the second one, or Solana still does not own it, stop with the path note.
+// UNVERIFIED: whether the rollup accepts a second undelegate for a round it has already scheduled.
+async function undelegateHome({ label, account, instruction, routerUrl, er, base, wallet, record }) {
+  for (let attempt = 1; attempt <= UNDELEGATE_TRIES; attempt++) {
+    console.log(`  ${label}: undelegate try ${attempt} of ${UNDELEGATE_TRIES} on the rollup`);
+    let sig;
+    try {
+      sig = await sendEr(`${label} undelegate try ${attempt}`, routerUrl, er, wallet, instruction(), [account]);
+    } catch (err) {
+      console.error(`  ${label}: the rollup refused undelegate try ${attempt}: ${err.message ?? err}`);
+      break;
+    }
+    record(`${label} undelegate try ${attempt}`, sig, "rollup");
+    const commit = await commitLogSigs(er, sig);
+    commit.lines.forEach((l) => console.log(`    rollup log: ${l}`));
+    for (const s of commit.sigs) {
+      console.log(`    Solana-side commit tx (UNVERIFIED that it is the undelegate): ${explorer(s)}`);
+      record(`${label} Solana-side commit (from rollup log)`, s, "solana");
+    }
+    if (await waitForOwner(base, account, PROGRAM_ID, label)) {
+      console.log(`  PATH: ${label} came home by retrying the undelegate (attempt ${attempt})`);
+      return;
+    }
+  }
+  throw new Error(
+    `${label}: Solana still does not own ${account.toBase58()} after ${UNDELEGATE_TRIES} undelegates.\n` +
+    `  PATH: fresh round NOT taken. The round PDA is seeds ["round"] and the table PDA is seeds ["table"]; ` +
+    `neither carries a round id, so a fresh round at a new address needs a program change (a new seed). ` +
+    `Not made in this script. Stopping here.`,
+  );
 }
 
 // Round account (current 392-byte layout, or the old 388-byte one).
@@ -315,10 +366,10 @@ async function layoutCheck(idl, base, er, wallet, routerUrl, record) {
   // The round is delegated and old-size: take it home, migrate it on Solana, delegate it again.
   // UNVERIFIED: whether the rollup allows the resize at all (growing a delegated account).
   console.log("0b. the delegated round is old-size: undelegate it on the rollup (table authority)");
-  const undelegateSig = await sendEr("undelegate_round (rollup)", routerUrl, er, wallet,
-    buildIx(idl, "undelegate_round", { payer: wallet.publicKey, config: CONFIG, round: ROUND }), [ROUND]);
-  record("undelegate_round", undelegateSig, "rollup");
-  await waitForOwner(base, ROUND, PROGRAM_ID, "undelegate_round");
+  await undelegateHome({
+    label: "undelegate_round", account: ROUND, routerUrl, er, base, wallet, record,
+    instruction: () => buildIx(idl, "undelegate_round", { payer: wallet.publicKey, config: CONFIG, round: ROUND }),
+  });
 
   console.log("0c. migrate_round on Solana (the wallet pays the rent here)");
   record("migrate_round", await send("migrate_round", base, wallet, buildIx(idl, "migrate_round", migrateAccounts)), "solana");
@@ -410,10 +461,11 @@ async function main() {
   } else {
     if (chipsDelegated) {
       console.log("4. chip stack is delegated but short of chips: undelegate_chips on the rollup");
-      record("undelegate_chips", await sendEr("undelegate_chips (rollup)", routerUrl, er, wallet,
-        buildIx(idl, "undelegate_chips", { payer: wallet.publicKey, config: CONFIG, chips, magic_context: undefined },
-          wallet.publicKey.toBuffer()), [chips]), "rollup");
-      await waitForOwner(base, chips, PROGRAM_ID, "undelegate_chips");
+      await undelegateHome({
+        label: "undelegate_chips", account: chips, routerUrl, er, base, wallet, record,
+        instruction: () => buildIx(idl, "undelegate_chips", { payer: wallet.publicKey, config: CONFIG, chips },
+          wallet.publicKey.toBuffer()),
+      });
     }
     console.log("4. buy_chips (10 MUSD) into the cage vault");
     record("buy_chips", await send("buy_chips", base, wallet, buildIx(idl, "buy_chips", {
@@ -488,13 +540,15 @@ async function main() {
   // 9. Commit and undelegate the round and the chip stack (the table authority), then settle on Solana.
   if (final) {
     console.log("9. commit and undelegate the round and the chip stack (rollup)");
-    record("undelegate_round", await sendEr("undelegate_round (rollup)", routerUrl, er, wallet,
-      buildIx(idl, "undelegate_round", { payer: wallet.publicKey, config: CONFIG, round: ROUND }), [ROUND]), "rollup");
-    record("undelegate_chips", await sendEr("undelegate_chips (rollup)", routerUrl, er, wallet,
-      buildIx(idl, "undelegate_chips", { payer: wallet.publicKey, config: CONFIG, chips },
-        wallet.publicKey.toBuffer()), [chips]), "rollup");
-    await waitForOwner(base, ROUND, PROGRAM_ID, "undelegate_round");
-    await waitForOwner(base, chips, PROGRAM_ID, "undelegate_chips");
+    await undelegateHome({
+      label: "undelegate_round", account: ROUND, routerUrl, er, base, wallet, record,
+      instruction: () => buildIx(idl, "undelegate_round", { payer: wallet.publicKey, config: CONFIG, round: ROUND }),
+    });
+    await undelegateHome({
+      label: "undelegate_chips", account: chips, routerUrl, er, base, wallet, record,
+      instruction: () => buildIx(idl, "undelegate_chips", { payer: wallet.publicKey, config: CONFIG, chips },
+        wallet.publicKey.toBuffer()),
+    });
 
     const home = decodeRound((await base.getAccountInfo(ROUND)).data);
     if (home.betCount === 1) {
