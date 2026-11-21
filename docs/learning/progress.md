@@ -33,3 +33,7 @@ Step 2: MUSD test mint + faucet on devnet, with an Explorer link. First explain 
 Next step: **code walkthrough session before any UI** (Bibhu's request). Walk his own code file by file: lib.rs and #[ephemeral], account structs and PDAs (Round, ChipStack, Bet, Pool), deposit/withdraw share maths (D43, D44), settle and the FIFO queue, the delegate/undelegate flow, session keys. Explain first, then one question each.
 Open design questions to use as systems-thinking material: NAV readout ignores queued IOUs (should be (vault - owed) / shares); 0 shares + queue owes more than the vault; strict FIFO vs small wins skipping the stuck 99 MUSD jackpot IOU.
 Still to do on devnet: upgrade with PR #115 and prove the 0-payout burn clears the stuck pool.
+
+
+## 21 Nov 2026, 6:30 PM IST
+The walkthrough has started (plan in walkthrough.md). Bibhu wants explanations and references first, a quiz later, and speed. Module 1 (accounts and PDAs) has been taught. Open question: why do the bet seeds include round_id, the wallet AND the symbol, and what would break if symbol were dropped?
