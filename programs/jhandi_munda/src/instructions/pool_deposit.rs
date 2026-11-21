@@ -15,8 +15,8 @@ use anchor_lang::solana_program::{
 };
 
 use crate::{
-    error::ErrorCode, state::PoolState, ATA_PROGRAM_ID, INSURANCE_VAULT_SEED, POOL_SEED, POOL_VAULT_SEED,
-    SHARE_MINT_SEED, SPL_TOKEN_PROGRAM_ID,
+    error::ErrorCode, state::{PayoutQueue, PoolState}, ATA_PROGRAM_ID, INSURANCE_VAULT_SEED, POOL_SEED,
+    POOL_VAULT_SEED, QUEUE_CAPACITY, QUEUE_SEED, SHARE_MINT_SEED, SPL_TOKEN_PROGRAM_ID,
 };
 
 /// SPL token `Transfer` (3), `MintTo` (7) and ATA `CreateIdempotent` (1)
@@ -69,6 +69,11 @@ pub struct Deposit<'info> {
     /// shares. Its seeds pin the address; it is only touched in that case.
     #[account(mut, seeds = [INSURANCE_VAULT_SEED], bump)]
     pub insurance_vault: UncheckedAccount<'info>,
+
+    /// The payout queue (D30, #110). MUSD owed to queued wins is not orphan money: the
+    /// orphan sweep leaves it in the vault.
+    #[account(seeds = [QUEUE_SEED], bump)]
+    pub queue: AccountLoader<'info, PayoutQueue>,
 
     /// CHECK: verified against SPL_TOKEN_PROGRAM_ID in the handler.
     pub token_program: UncheckedAccount<'info>,
@@ -175,7 +180,17 @@ pub fn handler(ctx: Context<Deposit>, amount: u64) -> Result<()> {
 
     // D43: no shares, but MUSD in the vault: sweep it to insurance before the new deposit lands,
     // so the new LP owns exactly what they put in. UNVERIFIED on devnet: the insurance vault exists there.
-    if share_supply == 0 && vault_amount > 0 {
+    // Money the queue still owes is not orphan: only the rest of the vault is swept.
+    let queued_owed: u64 = {
+        let queue = ctx.accounts.queue.load()?;
+        let mut owed = 0u64;
+        for i in queue.head..queue.tail {
+            owed = owed.saturating_add(queue.entries[(i % QUEUE_CAPACITY as u64) as usize].amount);
+        }
+        owed
+    };
+    let orphan = vault_amount.saturating_sub(queued_owed);
+    if share_supply == 0 && orphan > 0 {
         require_keys_eq!(
             *ctx.accounts.insurance_vault.owner,
             SPL_TOKEN_PROGRAM_ID,
@@ -183,7 +198,7 @@ pub fn handler(ctx: Context<Deposit>, amount: u64) -> Result<()> {
         );
         let mut data = Vec::with_capacity(9);
         data.push(TOKEN_IX_TRANSFER);
-        data.extend_from_slice(&vault_amount.to_le_bytes());
+        data.extend_from_slice(&orphan.to_le_bytes());
         let sweep = Instruction {
             program_id: SPL_TOKEN_PROGRAM_ID,
             accounts: vec![
@@ -202,7 +217,7 @@ pub fn handler(ctx: Context<Deposit>, amount: u64) -> Result<()> {
             ],
             &[&[POOL_SEED, &[ctx.bumps.pool]]],
         )?;
-        msg!("D43: {} orphan base MUSD moved from the pool vault to insurance", vault_amount);
+        msg!("D43: {} orphan base MUSD moved from the pool vault to insurance", orphan);
     }
 
     // Pull the MUSD into the vault; the depositor's transaction signature

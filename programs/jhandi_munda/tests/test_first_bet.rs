@@ -108,6 +108,7 @@ fn setup() -> Table {
         ),
         ix(
             jhandi_munda::accounts::InitializeTable {
+                config: c,
                 table: t.table,
                 round: t.round,
                 payer: a.pubkey(),
@@ -664,6 +665,7 @@ fn deposit(t: &mut Table, funder: &Keypair, amount: u64) {
                 depositor_ata: jhandi_munda::musd_ata(&funder.pubkey(), &t.musd_mint),
                 depositor_shares: jhandi_munda::share_ata(&funder.pubkey(), &share_mint),
                 insurance_vault: Pubkey::find_program_address(&[jhandi_munda::INSURANCE_VAULT_SEED], &jhandi_munda::id()).0,
+                queue: Pubkey::find_program_address(&[jhandi_munda::QUEUE_SEED], &jhandi_munda::id()).0,
                 token_program: SPL_TOKEN_PROGRAM_ID,
                 system_program: SYS,
                 associated_token_program: jhandi_munda::ATA_PROGRAM_ID,
@@ -1794,6 +1796,7 @@ fn settle_chip_bets(t: &mut Table, signer: &Keypair, pairs: &[(Pubkey, Pubkey)])
             pool_vault: t.vault,
             cage_vault: cage(),
             token_program: SPL_TOKEN_PROGRAM_ID,
+            queue: pda(&[QUEUE_SEED]),
         },
         jhandi_munda::instruction::SettleChipBets {},
     );
@@ -2693,4 +2696,350 @@ fn test_deposit_into_orphan_vault() {
     assert_eq!(shares(&t, &dave), 1_000_000, "pro rata at NAV $1.00");
     assert_eq!(token_amount(&t.svm, &t.vault), 3_000_000);
     assert_eq!(mint_supply(&t, &share_mint), 3_000_000);
+}
+
+// #110: pays queued chip wins. `stacks` are the ChipStacks in queue order (cage vault added here).
+fn pay_queue_chips(t: &mut Table, signer: &Keypair, stacks: &[Pubkey]) -> TransactionResult {
+    let mut instruction = ix(
+        jhandi_munda::accounts::PayQueue {
+            queue: pda(&[QUEUE_SEED]),
+            pool: t.pool,
+            pool_vault: t.vault,
+            token_program: SPL_TOKEN_PROGRAM_ID,
+        },
+        jhandi_munda::instruction::PayQueue {},
+    );
+    for stack in stacks {
+        instruction.accounts.push(AccountMeta::new(*stack, false));
+        instruction.accounts.push(AccountMeta::new(cage(), false));
+    }
+    send(&mut t.svm, signer, instruction)
+}
+
+// #110 (D30): a chip win the pool cannot pay joins the FIFO queue; the round still settles.
+#[test]
+fn test_chip_win_queues_when_pool_short_then_pays_after_deposit() {
+    let mut t = setup();
+    stub_vrf(&mut t);
+    let funder = new_player(&mut t);
+    init_cage(&mut t, &funder);
+    let a = new_player(&mut t);
+    let b = new_player(&mut t);
+    assert!(buy_chips(&mut t, &a, 20_000_000).is_ok());
+    assert!(buy_chips(&mut t, &b, 5_000_000).is_ok());
+    // No LP yet: the pool vault is empty, so Alice's win cannot be paid when it settles.
+    assert_eq!(token_amount(&t.svm, &t.vault), 0);
+
+    assert!(place_chip_bet(&mut t, &a, 2, 10_000_000).is_ok());
+    assert!(place_chip_bet(&mut t, &b, 4, 1_000_000).is_ok());
+    set_time(&mut t, BASE_TIME + 90);
+    let ephemeral_queue: Pubkey = "5hBR571xnXppuCPveTrctfTU7tJLSN94nq7kv7FRK5Tc".parse().unwrap();
+    assert!(request_roll_on(&mut t, &a, ephemeral_queue).is_ok());
+    let mut randomness = [0u8; 32];
+    randomness[..6].copy_from_slice(&[1, 1, 4, 5, 0, 2]);
+    let request_id = round(&t).request_id;
+    assert!(send_callback(&mut t, &a, randomness, request_id).is_ok());
+    assert_eq!(round(&t).faces, [2, 2, 5, 6, 1, 3]);
+
+    // Alice matches twice on face 2: owed 10 + 0.98 x 20 = 29.60, but the pool holds only the
+    // 11 of stakes that just moved in. Settle must succeed: her win is queued, Bob's loss settles.
+    set_time(&mut t, BASE_TIME + 100);
+    let (ab, bb) = (bet_pda_r(0, &a, 2), bet_pda_r(0, &b, 4));
+    let (ac, bc) = (pda(&[jhandi_munda::CHIPS_SEED, a.pubkey().as_ref()]), pda(&[jhandi_munda::CHIPS_SEED, b.pubkey().as_ref()]));
+    assert!(settle_chip_bets(&mut t, &a, &[(ab, ac), (bb, bc)]).is_ok(), "a short pool does not fail the settle");
+    assert_eq!(chip_balance(&t, &a), 10_000_000, "the win is queued, not credited yet");
+    assert_eq!(token_amount(&t.svm, &cage()), 14_000_000, "stakes moved to the pool; nothing paid out");
+    assert_eq!(token_amount(&t.svm, &t.vault), 11_000_000);
+    let bob_slip = Bet::try_deserialize(&mut t.svm.get_account(&bb).unwrap().data.as_slice()).unwrap();
+    assert!(bob_slip.settled, "the other bet settled in the same round");
+    assert!(finish_round(&mut t, &a).is_ok(), "the round finishes with a win still queued");
+
+    // An LP deposit funds the pool. The queued win is paid into the cage and credited to chips.
+    deposit(&mut t, &funder, 100_000_000);
+    let stack_a = pda(&[jhandi_munda::CHIPS_SEED, a.pubkey().as_ref()]);
+    assert!(pay_queue_chips(&mut t, &a, &[stack_a]).is_ok(), "the queued chip win is paid");
+    assert_eq!(chip_balance(&t, &a), 39_600_000, "Alice's win is credited to chips");
+    assert_eq!(token_amount(&t.svm, &cage()), 14_000_000 + 29_600_000, "the win came out of the pool into the cage");
+    // Invariant: the cage holds exactly the chips players hold.
+    assert_eq!(token_amount(&t.svm, &cage()), chip_balance(&t, &a) + chip_balance(&t, &b));
+}
+
+// --- #46: program-enforced session spend cap (D12, notes.md §4) ---
+
+fn slip_pda(round_id: u64, owner: &Pubkey, symbol: u8) -> Pubkey {
+    pda(&[BET_SEED, &round_id.to_le_bytes(), owner.as_ref(), &[symbol]])
+}
+
+fn session_cap_pda(owner: &Pubkey) -> Pubkey {
+    pda(&[jhandi_munda::SESSION_CAP_SEED, owner.as_ref()])
+}
+
+// The SDK's V1 session token address for (session key, wallet, this program).
+fn session_token_pda(owner: &Pubkey, session_key: &Pubkey) -> Pubkey {
+    Pubkey::find_program_address(
+        &[
+            session_keys::SessionToken::SEED_PREFIX.as_bytes(),
+            jhandi_munda::id().as_ref(),
+            session_key.as_ref(),
+            owner.as_ref(),
+        ],
+        &session_keys::ID,
+    )
+    .0
+}
+
+fn grant_session_by(t: &mut Table, owner: &Keypair, session_key: &Pubkey, cap: u64, valid_for_secs: i64) -> TransactionResult {
+    send(
+        &mut t.svm,
+        owner,
+        ix(
+            jhandi_munda::accounts::GrantSession {
+                owner: owner.pubkey(),
+                cap: session_cap_pda(&owner.pubkey()),
+                system_program: SYS,
+            },
+            jhandi_munda::instruction::GrantSession {
+                session_signer: *session_key,
+                cap,
+                valid_for_secs,
+            },
+        ),
+    )
+}
+
+// Writes the SDK's V1 SessionToken for (wallet, session key) at its PDA, owned by the session
+// program, the way the session program would create it. LiteSVM has no session program binary here.
+fn put_session_token(t: &mut Table, owner: &Pubkey, session_key: &Pubkey, valid_until: i64) {
+    let token = session_keys::SessionToken {
+        authority: *owner,
+        target_program: jhandi_munda::id(),
+        session_signer: *session_key,
+        valid_until,
+    };
+    let mut data = Vec::new();
+    anchor_lang::AccountSerialize::try_serialize(&token, &mut data).unwrap();
+    let mut acc = t.svm.get_account(&t.round).unwrap(); // any program-owned account, reshaped
+    acc.data = data;
+    acc.owner = session_keys::ID;
+    t.svm.set_account(session_token_pda(owner, session_key), acc).unwrap();
+}
+
+fn place_session_bet(t: &mut Table, session_key: &Keypair, owner: &Pubkey, symbol: u8, amount: u64) -> TransactionResult {
+    let round_id = round(t).round_id;
+    send(
+        &mut t.svm,
+        session_key,
+        ix(
+            jhandi_munda::accounts::PlaceBetChipsSession {
+                table: t.table,
+                round: t.round,
+                bet: slip_pda(round_id, owner, symbol),
+                chips: pda(&[jhandi_munda::CHIPS_SEED, owner.as_ref()]),
+                cap: session_cap_pda(owner),
+                session_token: session_token_pda(owner, &session_key.pubkey()),
+                owner: *owner,
+                session_signer: session_key.pubkey(),
+            },
+            jhandi_munda::instruction::PlaceBetChipsSession { symbol, amount },
+        ),
+    )
+}
+
+// A wallet with chips and a session key with a 15 MUSD cap for an hour.
+fn session_setup() -> (Table, Keypair, Keypair) {
+    let mut t = setup();
+    stub_vrf(&mut t);
+    let funder = new_player(&mut t);
+    init_cage(&mut t, &funder);
+    let alice = new_player(&mut t);
+    assert!(buy_chips(&mut t, &alice, 20_000_000).is_ok());
+    let session = Keypair::new();
+    t.svm.airdrop(&session.pubkey(), 1_000_000_000).unwrap();
+    set_time(&mut t, BASE_TIME);
+    assert!(grant_session_by(&mut t, &alice, &session.pubkey(), 15_000_000, 3600).is_ok(), "the wallet grants the session");
+    put_session_token(&mut t, &alice.pubkey(), &session.pubkey(), BASE_TIME + 3600);
+    (t, alice, session)
+}
+
+#[test]
+fn test_session_bet_under_cap() {
+    let (mut t, alice, session) = session_setup();
+    assert!(open_chip_bet(&mut t, &alice, 0, 2).is_ok());
+
+    assert!(place_session_bet(&mut t, &session, &alice.pubkey(), 2, 10_000_000).is_ok(), "a session bet under the cap");
+    assert_eq!(slip(&t, &alice, 2).amount, 10_000_000, "the session filled Alice's slip");
+    assert_eq!(chip_balance(&t, &alice), 10_000_000, "the stake came off her chips");
+    let cap = jhandi_munda::state::SessionCap::try_deserialize(
+        &mut t.svm.get_account(&session_cap_pda(&alice.pubkey())).unwrap().data.as_slice(),
+    )
+    .unwrap();
+    assert_eq!(cap.spent, 10_000_000, "the cap records what the session staked");
+}
+
+#[test]
+fn test_session_bet_over_cap_rejected() {
+    let (mut t, alice, session) = session_setup();
+    assert!(open_chip_bet(&mut t, &alice, 0, 2).is_ok());
+    assert!(open_chip_bet(&mut t, &alice, 0, 4).is_ok());
+    assert!(place_session_bet(&mut t, &session, &alice.pubkey(), 2, 10_000_000).is_ok());
+
+    // 10 + 6 = 16 MUSD is over the 15 MUSD cap: refused, nothing moves.
+    let e = place_session_bet(&mut t, &session, &alice.pubkey(), 4, 6_000_000).expect_err("over the cap");
+    assert!(format!("{:?}", e.meta.logs).contains("SessionCapExceeded"), "{:?}", e.meta.logs);
+    assert_eq!(slip(&t, &alice, 4).amount, 0, "the refused bet filled nothing");
+    assert_eq!(chip_balance(&t, &alice), 10_000_000);
+
+    // Past the hour the session stops: the cap has no value after expiry.
+    set_time(&mut t, BASE_TIME + 3600);
+    assert!(place_session_bet(&mut t, &session, &alice.pubkey(), 4, 1_000_000).is_err(), "an expired session is refused");
+}
+
+#[test]
+fn test_session_key_cannot_use_other_instructions() {
+    let (mut t, alice, session) = session_setup();
+    assert!(open_chip_bet(&mut t, &alice, 0, 2).is_ok());
+    let before = chip_balance(&t, &alice);
+
+    // Cash-out and the wallet's bet need the wallet to sign. The session key cannot reach Alice's
+    // chips through them: it passes its own accounts and gets nothing.
+    let cashout = send(
+        &mut t.svm,
+        &session,
+        ix(
+            jhandi_munda::accounts::CashOut {
+                pool: t.pool,
+                cage_vault: cage(),
+                queue: pda(&[QUEUE_SEED]),
+                chips: chip_stack(&session),
+                owner: session.pubkey(),
+                owner_musd_ata: jhandi_munda::musd_ata(&session.pubkey(), &t.musd_mint),
+                token_program: SPL_TOKEN_PROGRAM_ID,
+            },
+            jhandi_munda::instruction::CashOut { amount: 1_000_000 },
+        ),
+    );
+    assert!(cashout.is_err(), "a session cannot cash out");
+    let bet = send(
+        &mut t.svm,
+        &session,
+        ix(
+            jhandi_munda::accounts::PlaceBetChips {
+                table: t.table,
+                round: t.round,
+                bet: slip_pda(0, &alice.pubkey(), 2),
+                chips: chip_stack(&alice),
+                bettor: session.pubkey(),
+                system_program: SYS,
+            },
+            jhandi_munda::instruction::PlaceBetChips { symbol: 2, amount: 1_000_000 },
+        ),
+    );
+    assert!(bet.is_err(), "the wallet's bet path does not take a session signer");
+    assert_eq!(chip_balance(&t, &alice), before, "Alice's chips are untouched");
+}
+
+// --- #50: daily snapshot of the house (D28) ---
+
+fn take_snapshot_by(t: &mut Table, payer: &Keypair, day: u64) -> TransactionResult {
+    send(
+        &mut t.svm,
+        payer,
+        ix(
+            jhandi_munda::accounts::TakeSnapshot {
+                payer: payer.pubkey(),
+                snapshot: pda(&[jhandi_munda::SNAPSHOT_SEED, &day.to_le_bytes()]),
+                pool: t.pool,
+                share_mint: pda(&[SHARE_MINT_SEED]),
+                vault: t.vault,
+                stake_pool: pda(&[jhandi_munda::STAKE_POOL_SEED]),
+                queue: pda(&[QUEUE_SEED]),
+                system_program: SYS,
+            },
+            jhandi_munda::instruction::TakeSnapshot { day },
+        ),
+    )
+}
+
+fn snapshot_of(t: &Table, day: u64) -> jhandi_munda::DailySnapshot {
+    let data = t.svm.get_account(&pda(&[jhandi_munda::SNAPSHOT_SEED, &day.to_le_bytes()])).unwrap().data;
+    jhandi_munda::DailySnapshot::try_deserialize(&mut data.as_slice()).unwrap()
+}
+
+// Two snapshots a UTC day apart with different NAVs; a third on the same day is refused (D28, #50).
+#[test]
+fn test_two_snapshots_a_day_apart() {
+    let mut t = setup();
+    let funder = new_player(&mut t);
+    // The staking accounts need the MUNDA mint first (init_munda), as the staking tests do.
+    init_munda(&mut t, &funder);
+    init_staking(&mut t, &funder);
+    let lp = new_player(&mut t);
+    let keeper = new_player(&mut t); // anyone can crank
+    let day1 = (BASE_TIME / 86_400) as u64;
+    let day2 = ((BASE_TIME + 86_400) / 86_400) as u64;
+
+    set_time(&mut t, BASE_TIME);
+    assert!(take_snapshot_by(&mut t, &keeper, day1).is_ok(), "today's snapshot");
+    assert_eq!(snapshot_of(&t, day1).nav_per_share, 1_000_000, "no shares: NAV is $1.00");
+
+    // A day passes; in between, an LP deposits 100 MUSD and a 50 MUSD profit lands in the vault.
+    deposit(&mut t, &lp, 100_000_000);
+    assert!(musd_transfer_to_vault(&mut t, &keeper, 50_000_000).is_ok(), "the profit");
+    set_time(&mut t, BASE_TIME + 86_400);
+    assert!(take_snapshot_by(&mut t, &keeper, day2).is_ok(), "the next day's snapshot");
+
+    let (first, second) = (snapshot_of(&t, day1), snapshot_of(&t, day2));
+    assert_ne!(first.nav_per_share, second.nav_per_share, "NAV moved with the profit");
+    assert_eq!(second.nav_per_share, 1_500_000, "150 MUSD over 100 MUSD of shares");
+    assert_eq!(second.pool_size, 150_000_000);
+    assert_eq!((second.day, second.taken_at), (day2, BASE_TIME + 86_400));
+    assert_eq!((second.open_claims, second.queue_size), (0, 0), "nothing queued");
+
+    // A third crank on the same day is refused: the day's PDA already exists.
+    assert!(take_snapshot_by(&mut t, &keeper, day2).is_err(), "one snapshot per day");
+    // A day that is not today is refused.
+    assert!(take_snapshot_by(&mut t, &keeper, day2 + 1).is_err(), "only the current UTC day");
+}
+
+// #53: a settled round exposes its proof trail: the faces, the bet summaries, and an Explorer link
+// to the VRF callback whose log names the request and the faces. The link is built from the
+// callback's real signature. UNVERIFIED on devnet: the link resolves on Explorer (not checked here).
+#[test]
+fn test_settled_round_exposes_proof_trail() {
+    let mut t = setup();
+    stub_vrf(&mut t);
+    let funder = new_player(&mut t);
+    deposit(&mut t, &funder, 100_000_000);
+    init_cage(&mut t, &funder);
+    let a = new_player(&mut t);
+    assert!(buy_chips(&mut t, &a, 20_000_000).is_ok());
+    assert!(place_chip_bet(&mut t, &a, 2, 10_000_000).is_ok());
+
+    set_time(&mut t, BASE_TIME + 90);
+    let ephemeral_queue: Pubkey = "5hBR571xnXppuCPveTrctfTU7tJLSN94nq7kv7FRK5Tc".parse().unwrap();
+    assert!(request_roll_on(&mut t, &a, ephemeral_queue).is_ok());
+    let mut randomness = [0u8; 32];
+    randomness[..6].copy_from_slice(&[1, 1, 4, 5, 0, 2]);
+    let request_id = round(&t).request_id;
+    let callback = send_callback(&mut t, &a, randomness, request_id).expect("the VRF callback");
+
+    // The callback's log names the request and the faces; the Explorer link is to this transaction.
+    let request_hex: String = request_id.iter().map(|b| format!("{b:02x}")).collect();
+    assert!(
+        callback.logs.iter().any(|l| l.contains("VRF callback") && l.contains(&request_hex) && l.contains("[2, 2, 5, 6, 1, 3]")),
+        "the callback log is the proof: {:?}",
+        callback.logs
+    );
+    let sig = callback.signature.to_string();
+    let url = format!("https://explorer.solana.com/tx/{sig}?cluster=devnet");
+    assert!(url.starts_with("https://explorer.solana.com/tx/") && url.contains(&sig));
+
+    // Settle, then read the round and its bets as the fairness page would.
+    set_time(&mut t, BASE_TIME + 100);
+    let (ab, ac) = (bet_pda_r(0, &a, 2), pda(&[jhandi_munda::CHIPS_SEED, a.pubkey().as_ref()]));
+    assert!(settle_chip_bets(&mut t, &a, &[(ab, ac)]).is_ok());
+    let r = round(&t);
+    assert_eq!(r.faces, [2, 2, 5, 6, 1, 3], "the six faces are on the round");
+    let b = Bet::try_deserialize(&mut t.svm.get_account(&ab).unwrap().data.as_slice()).unwrap();
+    assert_eq!((b.player, b.symbol, b.amount, b.settled), (a.pubkey(), 2, 10_000_000, true), "the bet summary");
 }

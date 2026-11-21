@@ -105,6 +105,21 @@ fn setup() -> (
     let res = send(&mut svm, &payer, &instruction);
     assert!(res.is_ok(), "initialize_pool failed: {:?}", res.err());
 
+    // deposit reads the payout queue (#110), so it must exist.
+    let queue = Pubkey::find_program_address(&[jhandi_munda::QUEUE_SEED], &jhandi_munda::id()).0;
+    let instruction = Instruction::new_with_bytes(
+        jhandi_munda::id(),
+        &jhandi_munda::instruction::InitQueue {}.data(),
+        jhandi_munda::accounts::InitQueue {
+            queue,
+            payer: payer.pubkey(),
+            system_program: anchor_lang::solana_program::system_program::ID,
+        }
+        .to_account_metas(None),
+    );
+    let res = send(&mut svm, &payer, &instruction);
+    assert!(res.is_ok(), "init_queue failed: {:?}", res.err());
+
     (svm, payer, config, musd_mint, musd_mint_authority, pool, vault, share_mint)
 }
 
@@ -165,6 +180,7 @@ fn try_deposit(svm: &mut LiteSVM, wallet: &Keypair, pool: &Pubkey, musd_mint: &P
             depositor_ata,
             depositor_shares,
             insurance_vault: Pubkey::find_program_address(&[jhandi_munda::INSURANCE_VAULT_SEED], &jhandi_munda::id()).0,
+            queue: Pubkey::find_program_address(&[jhandi_munda::QUEUE_SEED], &jhandi_munda::id()).0,
             token_program: SPL_TOKEN_PROGRAM_ID,
             system_program: anchor_lang::solana_program::system_program::ID,
             associated_token_program: jhandi_munda::ATA_PROGRAM_ID,

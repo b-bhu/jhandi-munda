@@ -131,6 +131,12 @@ pub const CAGE_VAULT_SEED: &[u8] = b"cage_vault";
 
 /// Chip stack PDA seed: ["chips", owner] (D39).
 pub const CHIPS_SEED: &[u8] = b"chips";
+/// The session spend cap for one wallet (#46): `["session_cap", owner]`.
+pub const SESSION_CAP_SEED: &[u8] = b"session_cap";
+/// The daily snapshot PDA (#50, D28): `["snapshot", day]`.
+pub const SNAPSHOT_SEED: &[u8] = b"snapshot";
+/// The longest a session may last (D12, #46): 60 minutes, the intended default.
+pub const SESSION_MAX_SECS: i64 = 3600;
 
 /// Minimum bet: $1 MUSD in base units (D3).
 pub const MIN_BET: u64 = 1_000_000;

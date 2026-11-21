@@ -50,6 +50,11 @@ pub mod jhandi_munda {
         table_init::handle_init_round(ctx)
     }
 
+    /// #50: anyone takes today's (UTC) snapshot of the house. One per day.
+    pub fn take_snapshot(ctx: Context<TakeSnapshot>, day: u64) -> Result<()> {
+        snapshot::handle_take_snapshot(ctx, day)
+    }
+
     pub fn place_bet(ctx: Context<PlaceBet>, symbol: u8, amount: u64) -> Result<()> {
         place_bet::handler(ctx, symbol, amount)
     }
@@ -140,6 +145,16 @@ pub mod jhandi_munda {
 
     pub fn place_bet_chips(ctx: Context<PlaceBetChips>, symbol: u8, amount: u64) -> Result<()> {
         chips::handle_place_bet_chips(ctx, symbol, amount)
+    }
+
+    /// #46: the wallet grants a session signer a spend cap, for at most 60 minutes.
+    pub fn grant_session(ctx: Context<GrantSession>, session_signer: Pubkey, cap: u64, valid_for_secs: i64) -> Result<()> {
+        chips::handle_grant_session(ctx, session_signer, cap, valid_for_secs)
+    }
+
+    /// #46: a session signer places a chip bet within the wallet's cap and expiry.
+    pub fn place_bet_chips_session(ctx: Context<PlaceBetChipsSession>, symbol: u8, amount: u64) -> Result<()> {
+        chips::handle_place_bet_chips_session(ctx, symbol, amount)
     }
 
     pub fn delegate_chip_stack<'info>(ctx: Context<'info, DelegateChipStack<'info>>) -> Result<()> {

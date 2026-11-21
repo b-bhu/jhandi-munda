@@ -116,4 +116,14 @@ pub enum ErrorCode {
     NotBetOwner,
     #[msg("The bet slip is already undelegating (the delegation program owns it); it cannot be undelegated again here")]
     BetAlreadyUndelegating,
+    #[msg("The session token does not match this wallet, this session signer, or this program")]
+    InvalidSession,
+    #[msg("The session has expired")]
+    SessionExpired,
+    #[msg("This bet would take the session past its spend cap")]
+    SessionCapExceeded,
+    #[msg("A session can last at most 60 minutes")]
+    SessionTooLong,
+    #[msg("A snapshot is taken for the current UTC day only")]
+    SnapshotNotToday,
 }

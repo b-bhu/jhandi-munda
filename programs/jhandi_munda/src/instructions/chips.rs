@@ -24,10 +24,12 @@ use crate::{
         claim_redeem::{spl_transfer, token_balance},
         place_bet::{check_bet, record_bet},
     },
-    state::{Bet, ChipStack, PayoutQueue, PoolState, ProgramConfig, Round, TableConfig},
+    state::{Bet, ChipStack, PayoutQueue, PoolState, ProgramConfig, Round, SessionCap, TableConfig},
     BET_SEED, CAGE_VAULT_SEED, CHIPS_SEED, CONFIG_SEED, ER_VALIDATOR_ASIA, MUSD_MINT_SEED, POOL_SEED,
-    QUEUE_SEED, ROUND_SEED, SPL_TOKEN_PROGRAM_ID, TABLE_SEED, TOKEN_ACCOUNT_SPACE,
+    QUEUE_SEED, ROUND_SEED, SESSION_CAP_SEED, SESSION_MAX_SECS, SPL_TOKEN_PROGRAM_ID, TABLE_SEED,
+    TOKEN_ACCOUNT_SPACE,
 };
+use session_keys::SessionToken;
 
 // --- buy_chips (Solana only) ---
 
@@ -186,29 +188,167 @@ pub struct PlaceBetChips<'info> {
 
 pub fn handle_place_bet_chips(ctx: Context<PlaceBetChips>, symbol: u8, amount: u64) -> Result<()> {
     let bettor = ctx.accounts.bettor.key();
-    // The slip is opened empty (amount 0). A filled slip cannot be filled again (D42).
-    require!(
-        ctx.accounts.bet.amount == 0 && !ctx.accounts.bet.settled,
-        ErrorCode::BetSlipAlreadyFilled
-    );
     let now = Clock::get()?.unix_timestamp;
-    let is_new_player = check_bet(&ctx.accounts.round, &ctx.accounts.table, &bettor, symbol, amount, now)?;
-    require!(ctx.accounts.chips.balance >= amount, ErrorCode::InsufficientChips);
-    ctx.accounts.chips.balance -= amount;
-    let bump = ctx.accounts.bet.bump;
-    record_bet(
+    fill_chip_slip(
         &mut ctx.accounts.round,
+        &ctx.accounts.table,
         &mut ctx.accounts.bet,
+        &mut ctx.accounts.chips,
         bettor,
         symbol,
         amount,
-        bump,
-        is_new_player,
         now,
-    );
+    )
+}
+
+/// Fills an opened chip slip (D42) for `bettor`: checks the bet, takes the stake from the chips
+/// (D39), and records it on the round. Shared by the wallet's bet and the session's bet (#46).
+#[allow(clippy::too_many_arguments)]
+fn fill_chip_slip(
+    round: &mut Round,
+    table: &TableConfig,
+    bet: &mut Bet,
+    chips: &mut ChipStack,
+    bettor: Pubkey,
+    symbol: u8,
+    amount: u64,
+    now: i64,
+) -> Result<()> {
+    // The slip is opened empty (amount 0). A filled slip cannot be filled again (D42).
+    require!(bet.amount == 0 && !bet.settled, ErrorCode::BetSlipAlreadyFilled);
+    let is_new_player = check_bet(round, table, &bettor, symbol, amount, now)?;
+    require!(chips.balance >= amount, ErrorCode::InsufficientChips);
+    chips.balance -= amount;
+    let bump = bet.bump;
+    record_bet(round, bet, bettor, symbol, amount, bump, is_new_player, now);
     // A chip bet: its stake is in the cage until settle_chip_bets moves it (D39).
-    ctx.accounts.bet.paid_with_chips = true;
+    bet.paid_with_chips = true;
     msg!("Chip bet of {} on face {}", amount, symbol);
+    Ok(())
+}
+
+// --- #46: a session signer places a chip bet within the wallet's spend cap ---
+//
+// Session keys sign for the wallet only where the program allows it (notes.md §4). Here only this
+// instruction accepts a session: a session cannot cash out, buy chips, or open slips, because
+// those need the wallet to sign. The bet is a chip bet, so no token moves and no wallet is
+// needed to pay. The session token is the SDK's V1 `SessionToken` (session-keys 3.1.1).
+
+#[derive(Accounts)]
+#[instruction(symbol: u8, amount: u64)]
+pub struct PlaceBetChipsSession<'info> {
+    #[account(seeds = [TABLE_SEED], bump)]
+    pub table: Account<'info, TableConfig>,
+
+    #[account(mut, seeds = [ROUND_SEED], bump)]
+    pub round: Account<'info, Round>,
+
+    /// The wallet's slip for this round and face (D42). Filled here; never created.
+    #[account(
+        mut,
+        seeds = [BET_SEED, round.round_id.to_le_bytes().as_ref(), owner.key().as_ref(), &[symbol]],
+        bump = bet.bump
+    )]
+    pub bet: Account<'info, Bet>,
+
+    /// The wallet's chips. The session takes the stake from them (D39).
+    #[account(mut, seeds = [CHIPS_SEED, owner.key().as_ref()], bump = chips.bump)]
+    pub chips: Account<'info, ChipStack>,
+
+    /// The session's spend cap, granted by the wallet (#46).
+    #[account(mut, seeds = [SESSION_CAP_SEED, owner.key().as_ref()], bump = cap.bump)]
+    pub cap: Account<'info, SessionCap>,
+
+    /// The session token: the SDK's V1 session (authority = the wallet, signer = the session key,
+    /// target = this program). Checked in the handler.
+    pub session_token: Account<'info, SessionToken>,
+
+    /// CHECK: the wallet the session acts for. It does not sign; the session token and the cap
+    /// name it, and the handler checks both.
+    pub owner: UncheckedAccount<'info>,
+
+    /// The session key: signs the bet.
+    pub session_signer: Signer<'info>,
+}
+
+pub fn handle_place_bet_chips_session(ctx: Context<PlaceBetChipsSession>, symbol: u8, amount: u64) -> Result<()> {
+    let now = Clock::get()?.unix_timestamp;
+    let owner = ctx.accounts.owner.key();
+    let signer = ctx.accounts.session_signer.key();
+
+    // The session token: this session key, for this wallet, for this program, not expired (the
+    // session program's own checks, repeated here because the program must not trust them alone).
+    let token = &ctx.accounts.session_token;
+    require_keys_eq!(token.session_signer, signer, ErrorCode::InvalidSession);
+    require_keys_eq!(token.authority, owner, ErrorCode::InvalidSession);
+    require_keys_eq!(token.target_program, crate::ID, ErrorCode::InvalidSession);
+    let (expected_token, _) = Pubkey::find_program_address(
+        &[SessionToken::SEED_PREFIX.as_bytes(), crate::ID.as_ref(), signer.as_ref(), owner.as_ref()],
+        &session_keys::ID,
+    );
+    require_keys_eq!(expected_token, token.key(), ErrorCode::InvalidSession);
+    require!(now < token.valid_until, ErrorCode::SessionExpired);
+
+    // The program's own cap (#46): this session, this wallet, before expiry, and within the cap.
+    let cap = &mut ctx.accounts.cap;
+    require_keys_eq!(cap.owner, owner, ErrorCode::InvalidSession);
+    require_keys_eq!(cap.session_signer, signer, ErrorCode::InvalidSession);
+    require!(now < cap.expires_at, ErrorCode::SessionExpired);
+    let spent = cap.spent.checked_add(amount).ok_or(ErrorCode::SessionCapExceeded)?;
+    require!(spent <= cap.cap, ErrorCode::SessionCapExceeded);
+
+    fill_chip_slip(
+        &mut ctx.accounts.round,
+        &ctx.accounts.table,
+        &mut ctx.accounts.bet,
+        &mut ctx.accounts.chips,
+        owner,
+        symbol,
+        amount,
+        now,
+    )?;
+    ctx.accounts.cap.spent = spent;
+    msg!("Session bet of {} for {}; {} of {} spent", amount, owner, spent, ctx.accounts.cap.cap);
+    Ok(())
+}
+
+// --- #46: the wallet grants a session a spend cap (its own signature, at most 60 minutes) ---
+
+#[derive(Accounts)]
+pub struct GrantSession<'info> {
+    /// The wallet granting the session. Pays the cap account's rent.
+    #[account(mut)]
+    pub owner: Signer<'info>,
+
+    #[account(
+        init,
+        payer = owner,
+        space = 8 + SessionCap::INIT_SPACE,
+        seeds = [SESSION_CAP_SEED, owner.key().as_ref()],
+        bump
+    )]
+    pub cap: Account<'info, SessionCap>,
+
+    pub system_program: Program<'info, System>,
+}
+
+pub fn handle_grant_session(
+    ctx: Context<GrantSession>,
+    session_signer: Pubkey,
+    cap: u64,
+    valid_for_secs: i64,
+) -> Result<()> {
+    require!(valid_for_secs > 0 && valid_for_secs <= SESSION_MAX_SECS, ErrorCode::SessionTooLong);
+    require!(cap > 0, ErrorCode::SessionCapExceeded);
+    let now = Clock::get()?.unix_timestamp;
+    let session = &mut ctx.accounts.cap;
+    session.owner = ctx.accounts.owner.key();
+    session.session_signer = session_signer;
+    session.cap = cap;
+    session.spent = 0;
+    session.expires_at = now + valid_for_secs;
+    session.bump = ctx.bumps.cap;
+    msg!("Session granted for {} secs, cap {}", valid_for_secs, cap);
     Ok(())
 }
 

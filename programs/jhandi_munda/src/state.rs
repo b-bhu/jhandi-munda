@@ -272,6 +272,26 @@ pub struct ChipStack {
     pub bump: u8,
 }
 
+/// The spend cap a wallet grants a session signer (#46, D12). Session keys do not cap spending
+/// (notes.md §4), so the program does: a session can place chip bets up to `cap` in total, until
+/// `expires_at`. At `["session_cap", owner]`.
+#[account]
+#[derive(InitSpace)]
+pub struct SessionCap {
+    /// The wallet that granted the session.
+    pub owner: Pubkey,
+    /// The session signer the cap is for.
+    pub session_signer: Pubkey,
+    /// Most chips (base units) the session may stake in total.
+    pub cap: u64,
+    /// Chips already staked through the session.
+    pub spent: u64,
+    /// Unix time after which the session cannot bet (at most 60 minutes after the grant).
+    pub expires_at: i64,
+    /// Bump seed for the cap PDA.
+    pub bump: u8,
+}
+
 /// The MUSD faucet cooldown record for one wallet (D33): a small PDA at
 /// `["faucet", user_pubkey]`, created by the wallet's first faucet call, that
 /// stores when that wallet last claimed. One record per wallet, so every

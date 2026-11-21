@@ -56,6 +56,7 @@
 import { createRequire } from "node:module";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { explorerUrl as proofLink, callbackProof } from "./lib/round-proof.mjs";
 
 const web3 = createRequire(new URL("../app/package.json", import.meta.url))("@solana/web3.js");
 const {
@@ -103,7 +104,8 @@ const CONFIG = P([enc("config")]);
 const POOL = P([enc("pool")]);
 const POOL_VAULT = P([enc("pool_vault")]);
 const SHARE_MINT = P([enc("pool_share_mint")]); // SHARE_MINT_SEED (LP shares)
-const INSURANCE_VAULT = P([enc("insurance_vault")]); // D43: orphan MUSD is swept here by deposit
+const INSURANCE_VAULT = P([enc("insurance_vault")]);
+const QUEUE = P([enc("queue")]); // QUEUE_SEED: the FIFO payout queue (D30, #110) // D43: orphan MUSD is swept here by deposit
 const CAGE = P([enc("cage_vault")]);
 const MUSD_MINT = P([enc("musd_mint")]);
 // Payout math, copied from payout.rs (MULTIPLIERS, WIN_FEE_BPS = 200). Used only to size the pool top-up.
@@ -275,6 +277,17 @@ async function sendErOnce(label, conn, wallet, instruction) {
     console.error(`  ${label} FAILED: ${err.message ?? err}`);
     throw err;
   }
+}
+
+// The VRF callback transaction for the round, from the validator's recent signatures (#53). Its log
+// names the request and the faces (callback_roll.rs). UNVERIFIED: that the validator indexes it under the round.
+async function findCallbackSig(er, account) {
+  const recent = await er.getSignaturesForAddress(account, { limit: 20 }).catch(() => []);
+  for (const entry of recent) {
+    const tx = await er.getTransaction(entry.signature, { commitment: "confirmed", maxSupportedTransactionVersion: 0 }).catch(() => null);
+    if (callbackProof(tx?.meta?.logMessages ?? [])) return entry.signature;
+  }
+  return null;
 }
 
 // Waits until `account` is owned by `owner` on Solana (after an undelegate, or a delegate).
@@ -481,7 +494,7 @@ async function topUpPoolFor({ idl, base, wallet, bet, faces, record, rpc }) {
   }
   record("deposit", await send("deposit (LP, pool top-up)", base, wallet, buildIx(idl, "deposit", {
     pool: POOL, share_mint: SHARE_MINT, vault: POOL_VAULT, depositor: wallet.publicKey, depositor_ata: musdAta,
-    depositor_shares: ataOf(wallet.publicKey, SHARE_MINT), insurance_vault: INSURANCE_VAULT, token_program: TOKEN_PROGRAM,
+    depositor_shares: ataOf(wallet.publicKey, SHARE_MINT), insurance_vault: INSURANCE_VAULT, queue: QUEUE, token_program: TOKEN_PROGRAM,
     system_program: SystemProgram.programId, associated_token_program: ATA_PROGRAM,
   }, u64(deposit))), "solana");
   return deposit;
@@ -532,6 +545,7 @@ async function settleFromSolana({ idl, base, er, wallet, record, roundId, bet, c
       await topUpPoolFor({ idl, base, wallet, bet, faces: home.faces, record });
       const settle = buildIx(idl, "settle_chip_bets", {
         table: TABLE, round: ROUND, pool: POOL, pool_vault: POOL_VAULT, cage_vault: CAGE, token_program: TOKEN_PROGRAM,
+        queue: QUEUE,
       });
       settle.keys.push({ pubkey: bet, isSigner: false, isWritable: true }, { pubkey: chips, isSigner: false, isWritable: true });
       try {
@@ -619,6 +633,17 @@ async function main() {
     })), "solana");
   } else {
     console.log("2. cage vault exists");
+  }
+
+  // 2b. The insurance vault (#111): the deposit sweeps orphan MUSD here (D43), so it must exist.
+  if (!(await base.getAccountInfo(INSURANCE_VAULT))) {
+    console.log("2b. insurance vault missing; init_insurance");
+    record("init_insurance", await send("init_insurance", base, wallet, buildIx(idl, "init_insurance", {
+      config: CONFIG, insurance_vault: INSURANCE_VAULT, musd_mint: MUSD_MINT, payer: wallet.publicKey,
+      token_program: TOKEN_PROGRAM, system_program: SystemProgram.programId,
+    })), "solana");
+  } else {
+    console.log("2b. insurance vault exists");
   }
 
   // 3. MUSD for the wallet (the faucet; one claim per hour per wallet).
@@ -835,6 +860,16 @@ async function main() {
     }
   }
   if (final) console.log(`Round ${final.roundId} is ${final.statusName}; faces: [${final.faces.join(", ")}]`);
+  // #53: the callback's transaction is the proof trail. Find it on the validator and print its link.
+  if (final) {
+    const cb = await findCallbackSig(er, ROUND);
+    if (cb) {
+      record("vrf_callback", cb, "rollup");
+      console.log(`VRF callback (validator tx; Explorer link UNVERIFIED for validator txs): ${proofLink(cb)}`);
+    } else {
+      console.log("VRF callback: not found in the round's recent validator signatures (UNVERIFIED lookup).");
+    }
+  }
 
   // 9. Undelegate round, chips and bet (D40, bettor or table authority), then settle and finish on Solana.
   if (final) {

@@ -16,9 +16,11 @@ use anchor_lang::prelude::*;
 use crate::{
     error::ErrorCode,
     instructions::claim_redeem::{spl_transfer, token_balance},
+    instructions::payout_queue::enqueue,
+    state::PayoutQueue,
     payout::{gross_return, matches, settle_win, split_fee, FeeSplit, Settled},
     state::{Bet, ChipStack, PoolState, Round, RoundStatus, TableConfig},
-    BET_SEED, CAGE_VAULT_SEED, CHIPS_SEED, POOL_SEED, POOL_VAULT_SEED, ROUND_SEED,
+    BET_SEED, CAGE_VAULT_SEED, CHIPS_SEED, POOL_SEED, POOL_VAULT_SEED, QUEUE_SEED, ROUND_SEED,
     SPL_TOKEN_PROGRAM_ID, TABLE_SEED,
 };
 
@@ -49,7 +51,7 @@ fn load_bet(info: &AccountInfo, round_id: u64) -> Result<Bet> {
 }
 
 /// Writes a bet or chip stack back to its account.
-fn save_account<T: AccountSerialize>(info: &AccountInfo, value: &T) -> Result<()> {
+pub(crate) fn save_account<T: AccountSerialize>(info: &AccountInfo, value: &T) -> Result<()> {
     let mut bytes = Vec::new();
     value.try_serialize(&mut bytes)?;
     let mut data = info.try_borrow_mut_data()?;
@@ -136,6 +138,10 @@ pub struct SettleChipBets<'info> {
 
     /// CHECK: verified against SPL_TOKEN_PROGRAM_ID in the handler.
     pub token_program: UncheckedAccount<'info>,
+
+    /// The payout queue (D30). A chip win the pool cannot pay now joins its back (#110).
+    #[account(mut, seeds = [QUEUE_SEED], bump)]
+    pub queue: AccountLoader<'info, PayoutQueue>,
     // Remaining accounts, in pairs: each chip bet (writable), then its player's
     // ChipStack (writable).
 }
@@ -151,6 +157,7 @@ pub fn handle_settle_chip_bets<'info>(ctx: Context<'info, SettleChipBets<'info>>
     let pool_info = ctx.accounts.pool.to_account_info();
     let pool_vault = ctx.accounts.pool_vault.to_account_info();
     let cage_vault = ctx.accounts.cage_vault.to_account_info();
+    let mut queue = ctx.accounts.queue.load_mut()?;
 
     let mut processed: u16 = 0;
     let (mut treasury, mut devs, mut stakers) = (0u64, 0u64, 0u64);
@@ -171,12 +178,20 @@ pub fn handle_settle_chip_bets<'info>(ctx: Context<'info, SettleChipBets<'info>>
 
         // 1. The stake moves from the cage to the pool: it is pool money from now on.
         spl_transfer(&cage_vault, &pool_vault, &pool_info, bet.amount, &[seeds])?;
-        // 2. The win (if any) is paid from the pool back to the cage, and credited to chips.
+        // 2. The win (if any). D30: when the pool can pay it now and nothing is queued ahead, it is
+        // paid from the pool back to the cage and credited to chips. Otherwise it joins the back of
+        // the FIFO queue, keyed by the chip stack, and `pay_queue` credits it later (#110). The round
+        // still settles, so one big win cannot freeze everyone else's bets.
         let (settled, split) = price(&mut bet, &faces, now)?;
         if settled.owed > 0 {
-            require!(token_balance(&pool_vault)? >= settled.owed, ErrorCode::InsufficientPoolFunds);
-            spl_transfer(&pool_vault, &cage_vault, &pool_info, settled.owed, &[seeds])?;
-            chips.balance = chips.balance.checked_add(settled.owed).ok_or(ErrorCode::MathOverflow)?;
+            let queue_empty = queue.head == queue.tail;
+            if queue_empty && token_balance(&pool_vault)? >= settled.owed {
+                spl_transfer(&pool_vault, &cage_vault, &pool_info, settled.owed, &[seeds])?;
+                chips.balance = chips.balance.checked_add(settled.owed).ok_or(ErrorCode::MathOverflow)?;
+            } else {
+                enqueue(&mut queue, chips_info.key(), settled.owed)?;
+                msg!("Chip win of {} queued: the pool cannot pay it now (D30)", settled.owed);
+            }
         }
         treasury += split.treasury;
         devs += split.devs;

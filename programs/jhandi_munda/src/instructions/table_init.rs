@@ -12,6 +12,11 @@ use crate::{
 
 #[derive(Accounts)]
 pub struct InitializeTable<'info> {
+    /// The program config from `initialize`. Only its admin (the table authority, D40) may set up the
+    /// table: otherwise anyone could set it up first (#111).
+    #[account(seeds = [crate::CONFIG_SEED], bump)]
+    pub config: Account<'info, crate::state::ProgramConfig>,
+
     /// Table settings. One per program; seeds include no arguments.
     #[account(
         init,
@@ -39,6 +44,11 @@ pub struct InitializeTable<'info> {
 }
 
 pub fn handler(ctx: Context<InitializeTable>) -> Result<()> {
+    require_keys_eq!(
+        ctx.accounts.config.admin,
+        ctx.accounts.payer.key(),
+        crate::error::ErrorCode::NotTableAuthority
+    );
     let table = &mut ctx.accounts.table;
     table.round_length_secs = ROUND_LENGTH_SECS;
     table.min_bet = MIN_BET;
