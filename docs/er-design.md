@@ -68,3 +68,7 @@ The Magic Router and the ER VRF queue are the same as in Step 11.3. See #42–#4
   the delegation program's address, so only the SDK's own checks and our account
   checks run for real.
 - The Ephemeral SPL Token Rust API (see above).
+
+## Bet slips (D42)
+
+Accounts are never created on the rollup. A chip bet slip (`Bet` PDA) is opened and delegated on Solana first (`open_chip_bet`, `delegate_bet`), `place_bet_chips` on the rollup only fills it in, and `undelegate_bet` brings it home before settle. Why: the rollup refuses to change a non-delegated fee payer's balance (`InvalidAccountForFee`), so it cannot take rent for a new account from the bettor. UNVERIFIED on a validator: that the rollup accepts `place_bet_chips` on a delegated slip.

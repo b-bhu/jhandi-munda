@@ -108,4 +108,12 @@ pub enum ErrorCode {
     RoundAlreadyUndelegating,
     #[msg("The chip stack is already undelegating (the delegation program owns it); it cannot be undelegated again here")]
     ChipStackAlreadyUndelegating,
+    #[msg("This bet slip is already filled; a slip takes one stake")]
+    BetSlipAlreadyFilled,
+    #[msg("The round id does not match the current round")]
+    RoundIdMismatch,
+    #[msg("Only the bettor or the table authority can do this to this bet slip")]
+    NotBetOwner,
+    #[msg("The bet slip is already undelegating (the delegation program owns it); it cannot be undelegated again here")]
+    BetAlreadyUndelegating,
 }

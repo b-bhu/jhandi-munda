@@ -146,6 +146,26 @@ pub mod jhandi_munda {
         chips::handle_delegate_chip_stack(ctx)
     }
 
+    /// D42: opens an empty chip bet slip on Solana (the bettor pays the rent here).
+    pub fn open_chip_bet(ctx: Context<OpenChipBet>, round_id: u64, symbol: u8) -> Result<()> {
+        chips::handle_open_chip_bet(ctx, round_id, symbol)
+    }
+
+    /// D42: delegates the bettor's own slip to the rollup, with the round.
+    pub fn delegate_bet<'info>(ctx: Context<'info, DelegateBet<'info>>, round_id: u64, symbol: u8) -> Result<()> {
+        chips::handle_delegate_bet(ctx, round_id, symbol)
+    }
+
+    /// D42: brings a chip bet slip home from the rollup (bettor or table authority).
+    pub fn undelegate_bet<'info>(
+        ctx: Context<'info, UndelegateBet<'info>>,
+        round_id: u64,
+        player: Pubkey,
+        symbol: u8,
+    ) -> Result<()> {
+        undelegate::handle_undelegate_bet(ctx, round_id, player, symbol)
+    }
+
     pub fn init_munda(ctx: Context<InitMunda>) -> Result<()> {
         claim_redeem::handle_init_munda(ctx)
     }

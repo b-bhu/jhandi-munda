@@ -81,6 +81,12 @@ const UNDELEGATE_TRIES = 2;
 const FALLBACK_PATTERNS = ["InstructionFallbackNotFound", "Error Number: 101", "custom program error: 0x65"];
 const FALLBACK_TRIES = 4;
 const FALLBACK_WAIT_MS = 30_000;
+// After an upgrade the rollup can keep running the old program for ~3-5 minutes (PR #109 devnet
+// run: seeds error on the old round PDA). The first rollup call gets this budget, and also retries
+// on a seeds error. UNVERIFIED: the time it takes the rollup to load the new program.
+const WARMUP_MS = 5 * 60 * 1000;
+const SEEDS_PATTERNS = ["ConstraintSeeds", "Error Number: 2006", "seeds constraint was violated"];
+let rollupWarm = false;
 // Rounds in the current layout: 392 bytes (see migrate.rs). Old: 388.
 
 const enc = (s) => new TextEncoder().encode(s);
@@ -168,14 +174,21 @@ async function send(label, conn, wallet, instruction) {
 
 // Rollup: one transaction through the router, confirmed. Retries on the post-upgrade fallback error.
 async function sendEr(label, routerUrl, conn, wallet, instruction, routedAccounts) {
+  const warm = !rollupWarm;
+  const budget = warm ? WARMUP_MS : FALLBACK_TRIES * FALLBACK_WAIT_MS;
+  const started = Date.now();
   for (let attempt = 1; ; attempt++) {
     try {
-      return await sendErOnce(label, routerUrl, conn, wallet, instruction, routedAccounts);
+      const sig = await sendErOnce(label, routerUrl, conn, wallet, instruction, routedAccounts);
+      rollupWarm = true;
+      return sig;
     } catch (err) {
       const msg = String(err.message ?? err);
-      const retryable = FALLBACK_PATTERNS.some((p) => msg.includes(p));
-      if (!retryable || attempt >= FALLBACK_TRIES) throw err;
-      console.log(`  ${label}: try ${attempt} hit InstructionFallbackNotFound (the rollup is still loading the upgrade); waiting 30 s, then retrying`);
+      const fallback = FALLBACK_PATTERNS.some((p) => msg.includes(p));
+      const seeds = warm && SEEDS_PATTERNS.some((p) => msg.includes(p));
+      if (!(fallback || seeds) || Date.now() - started >= budget) throw err;
+      const why = fallback ? "InstructionFallbackNotFound (the rollup is still loading the upgrade)" : "a seeds error (the rollup may still run the old program)";
+      console.log(`  ${label}: try ${attempt} hit ${why}; waiting 30 s, then retrying`);
       await sleep(FALLBACK_WAIT_MS);
     }
   }
@@ -312,6 +325,19 @@ function decodeRound(data) {
 // Chip stack: owner (32) then balance (u64).
 function decodeChips(data) {
   return { owner: new PublicKey(data.subarray(8, 40)), balance: data.readBigUInt64LE(40) };
+}
+
+// Bet slip (76 bytes after the discriminator): player 32, amount u64, symbol u8, round_id u64,
+// owed u64, settled bool, settled_at i64, paid_with_chips bool, bump u8.
+function decodeBet(data) {
+  return {
+    player: new PublicKey(data.subarray(8, 40)),
+    amount: data.readBigUInt64LE(40),
+    symbol: data[48],
+    roundId: data.readBigUInt64LE(49),
+    settled: data[65] === 1,
+    paidWithChips: data[74] === 1,
+  };
 }
 
 // Sizes from the IDL types (no hardcoded struct sizes). `Round::players` is a Vec with
@@ -476,6 +502,36 @@ async function main() {
     })), "solana");
   }
 
+  // 4d. The bet slip (D42): the bettor opens it on Solana (the wallet pays the rent there), then
+  // delegates it to the rollup. The rollup only fills it in (place_bet_chips).
+  const roundIdNow = decodeRound((await base.getAccountInfo(ROUND)).data).roundId;
+  const slipKey = betPda(roundIdNow, wallet.publicKey, BET_SYMBOL);
+  let slipBase = await base.getAccountInfo(slipKey);
+  if (!slipBase) {
+    console.log(`4d. open_chip_bet for round ${roundIdNow}, face ${BET_SYMBOL} (Solana; the wallet pays the slip's rent)`);
+    record("open_chip_bet", await send("open_chip_bet", base, wallet, buildIx(idl, "open_chip_bet", {
+      round: ROUND, bet: slipKey, bettor: wallet.publicKey, system_program: SystemProgram.programId,
+    }, Buffer.concat([u64(roundIdNow), u8(BET_SYMBOL)]))), "solana");
+    slipBase = await base.getAccountInfo(slipKey);
+  } else {
+    console.log("4d. the bet slip exists");
+  }
+  if (slipBase.owner.equals(PROGRAM_ID)) {
+    const slipData = decodeBet(slipBase.data);
+    if (slipData.amount > 0n) {
+      throw new Error(`The bet slip for round ${roundIdNow}, face ${BET_SYMBOL} is already filled (${slipData.amount} base units). Use a fresh round or face.`);
+    }
+    console.log("4d. delegate_bet (the bettor signs)");
+    const slipAcc = delegateAccounts(slipKey);
+    record("delegate_bet", await send("delegate_bet", base, wallet, buildIx(idl, "delegate_bet", {
+      owner: wallet.publicKey, bet: slipKey, buffer_bet: slipAcc.buffer, delegation_record_bet: slipAcc.record,
+      delegation_metadata_bet: slipAcc.metadata, owner_program: PROGRAM_ID, delegation_program: DLP_ID,
+      system_program: SystemProgram.programId,
+    }, Buffer.concat([u64(roundIdNow), u8(BET_SYMBOL)]))), "solana");
+  } else {
+    console.log("4d. the bet slip is already delegated; skipping delegate_bet");
+  }
+
   // 5. round_v2: init if missing (table authority), then delegate.
   let roundBase = await base.getAccountInfo(ROUND);
   if (!roundBase) {
@@ -499,8 +555,9 @@ async function main() {
     })), "solana");
   }
 
-  // 6. A chip bet on the rollup (no token transfer). UNVERIFIED: the Bet init there.
-  console.log("6. place_bet_chips on the rollup (UNVERIFIED: init of the Bet account there)");
+  // 6. Fill the slip on the rollup (no token transfer, no account created). UNVERIFIED: that the
+  // rollup accepts this call on a delegated slip.
+  console.log("6. place_bet_chips on the rollup (fills the slip opened on Solana, D42)");
   const roundOnEr = decodeRound((await er.getAccountInfo(ROUND)).data);
   const betRoundId = roundOnEr.roundId;
   const bet = betPda(betRoundId, wallet.publicKey, BET_SYMBOL);
@@ -548,6 +605,11 @@ async function main() {
       instruction: () => buildIx(idl, "undelegate_round", { payer: wallet.publicKey, config: CONFIG, round: ROUND }),
     });
     await undelegateHome(chipsUndelegate());
+    await undelegateHome({
+      label: "undelegate_bet", account: bet, routerUrl, er, base, wallet, record,
+      instruction: () => buildIx(idl, "undelegate_bet", { payer: wallet.publicKey, config: CONFIG, bet },
+        Buffer.concat([u64(betRoundId), wallet.publicKey.toBuffer(), u8(BET_SYMBOL)])),
+    });
 
     const home = decodeRound((await base.getAccountInfo(ROUND)).data);
     if (home.betCount === 1) {

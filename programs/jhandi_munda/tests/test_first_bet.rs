@@ -1842,8 +1842,17 @@ fn cash_out(t: &mut Table, owner: &Keypair, amount: u64) -> TransactionResult {
 }
 
 // A bet paid from chips: no token transfer, the round is the only thing that changes.
+// D42: the slip is opened on Solana first. The helper opens it when it is not open yet, so
+// existing chip-bet tests keep their meaning; `place_chip_bet_raw` does not open anything.
 fn place_chip_bet(t: &mut Table, bettor: &Keypair, symbol: u8, amount: u64) -> TransactionResult {
-    let bet = bet_pda_r(round(t).round_id, bettor, symbol);
+    let round_id = round(t).round_id;
+    if t.svm.get_account(&bet_pda_r(round_id, bettor, symbol)).is_none() {
+        open_chip_bet(t, bettor, round_id, symbol).expect("open the slip");
+    }
+    place_chip_bet_raw(t, bettor, bet_pda_r(round_id, bettor, symbol), symbol, amount)
+}
+
+fn place_chip_bet_raw(t: &mut Table, bettor: &Keypair, bet: Pubkey, symbol: u8, amount: u64) -> TransactionResult {
     send(
         &mut t.svm,
         bettor,
@@ -2433,4 +2442,193 @@ fn test_undelegate_on_an_account_already_undelegating_says_so() {
     let e = undelegate_chips_by(&mut t, &admin, &alice.pubkey()).expect_err("an undelegating stack is refused");
     let logs = format!("{:?}", e.meta.logs);
     assert!(logs.contains("ChipStackAlreadyUndelegating"), "the error names the cause: {logs}");
+}
+
+
+// --- open_chip_bet, place_bet_chips on an opened slip, delegate_bet, undelegate_bet (D42) ---
+
+fn open_chip_bet(t: &mut Table, bettor: &Keypair, round_id: u64, symbol: u8) -> TransactionResult {
+    send(
+        &mut t.svm,
+        bettor,
+        ix(
+            jhandi_munda::accounts::OpenChipBet {
+                round: t.round,
+                bet: bet_pda_r(round_id, bettor, symbol),
+                bettor: bettor.pubkey(),
+                system_program: SYS,
+            },
+            jhandi_munda::instruction::OpenChipBet { round_id, symbol },
+        ),
+    )
+}
+
+fn delegate_bet_by(t: &mut Table, signer: &Keypair, round_id: u64, symbol: u8) -> TransactionResult {
+    let bet = bet_pda_r(round_id, signer, symbol);
+    let buffer = pda_with(&[ephemeral_rollups_sdk::pda::DELEGATE_BUFFER_TAG, bet.as_ref()], &jhandi_munda::id());
+    let record = pda_with(&[ephemeral_rollups_sdk::pda::DELEGATION_RECORD_TAG, bet.as_ref()], &dlp_id());
+    let metadata = pda_with(&[ephemeral_rollups_sdk::pda::DELEGATION_METADATA_TAG, bet.as_ref()], &dlp_id());
+    send(
+        &mut t.svm,
+        signer,
+        ix(
+            jhandi_munda::accounts::DelegateBet {
+                owner: signer.pubkey(),
+                bet,
+                buffer_bet: buffer,
+                delegation_record_bet: record,
+                delegation_metadata_bet: metadata,
+                owner_program: jhandi_munda::id(),
+                delegation_program: dlp_id(),
+                system_program: SYS,
+            },
+            jhandi_munda::instruction::DelegateBet { round_id, symbol },
+        ),
+    )
+}
+
+fn undelegate_bet_by(t: &mut Table, signer: &Keypair, round_id: u64, player: &Pubkey, symbol: u8) -> TransactionResult {
+    send(
+        &mut t.svm,
+        signer,
+        ix(
+            jhandi_munda::accounts::UndelegateBet {
+                payer: signer.pubkey(),
+                config: t.config,
+                bet: pda_with(
+                    &[BET_SEED, &round_id.to_le_bytes(), player.as_ref(), &[symbol]],
+                    &jhandi_munda::id(),
+                ),
+                magic_context: magic_context_id(),
+                magic_program: magic_program_id(),
+            },
+            jhandi_munda::instruction::UndelegateBet { round_id, player: *player, symbol },
+        ),
+    )
+}
+
+fn slip(t: &Table, bettor: &Keypair, symbol: u8) -> Bet {
+    let data = t.svm.get_account(&bet_pda_r(round(t).round_id, bettor, symbol)).unwrap().data;
+    Bet::try_deserialize(&mut data.as_slice()).unwrap()
+}
+
+#[test]
+fn test_open_chip_bet_creates_an_empty_slip() {
+    let mut t = setup();
+    let funder = new_player(&mut t);
+    init_cage(&mut t, &funder);
+    let alice = new_player(&mut t);
+    assert!(buy_chips(&mut t, &alice, 5_000_000).is_ok());
+
+    assert!(open_chip_bet(&mut t, &alice, 0, 2).is_ok(), "the bettor opens a slip");
+    let acc = t.svm.get_account(&bet_pda_r(0, &alice, 2)).unwrap();
+    assert_eq!(acc.owner, jhandi_munda::id());
+    let b = slip(&t, &alice, 2);
+    assert_eq!((b.player, b.amount, b.symbol, b.round_id), (alice.pubkey(), 0, 2, 0), "empty, for this bettor and face");
+    assert!(b.paid_with_chips && !b.settled, "a chip slip, not yet settled");
+
+    // A wrong round id, an invalid face, and a second open are all refused.
+    assert!(open_chip_bet(&mut t, &alice, 7, 3).is_err(), "a round id that is not the current round");
+    assert!(open_chip_bet(&mut t, &alice, 0, 7).is_err(), "face 7 is not a face");
+    assert!(open_chip_bet(&mut t, &alice, 0, 2).is_err(), "the slip already exists");
+}
+
+#[test]
+fn test_place_bet_chips_fills_the_slip_and_creates_nothing() {
+    let mut t = setup();
+    let funder = new_player(&mut t);
+    init_cage(&mut t, &funder);
+    let alice = new_player(&mut t);
+    assert!(buy_chips(&mut t, &alice, 5_000_000).is_ok());
+    assert!(open_chip_bet(&mut t, &alice, 0, 2).is_ok());
+
+    let bet = bet_pda_r(0, &alice, 2);
+    let before = t.svm.get_account(&bet).unwrap();
+    let chips_before = chip_balance(&t, &alice);
+    assert!(place_chip_bet_raw(&mut t, &alice, bet, 2, 1_000_000).is_ok(), "fills the opened slip");
+
+    // The same account, same size, same rent: nothing was created or paid for.
+    let after = t.svm.get_account(&bet).unwrap();
+    assert_eq!((after.lamports, after.data.len()), (before.lamports, before.data.len()), "no rent moved");
+    let b = slip(&t, &alice, 2);
+    assert_eq!((b.amount, b.symbol, b.paid_with_chips), (1_000_000, 2, true));
+    assert_eq!(chip_balance(&t, &alice), chips_before - 1_000_000, "the stake comes off the chips");
+    assert!(round(&t).players.contains(&alice.pubkey()), "the bettor takes a seat");
+
+    // A filled slip cannot be filled again.
+    let e = place_chip_bet_raw(&mut t, &alice, bet, 2, 1_000_000).expect_err("a second fill is refused");
+    assert!(format!("{:?}", e.meta.logs).contains("BetSlipAlreadyFilled"), "{:?}", e.meta.logs);
+}
+
+#[test]
+fn test_place_bet_chips_fails_when_the_slip_was_not_opened() {
+    let mut t = setup();
+    let funder = new_player(&mut t);
+    init_cage(&mut t, &funder);
+    let alice = new_player(&mut t);
+    assert!(buy_chips(&mut t, &alice, 5_000_000).is_ok());
+
+    // No open_chip_bet for face 3: the place fails and creates nothing (the rollup can't pay rent).
+    let bet = bet_pda_r(0, &alice, 3);
+    assert!(place_chip_bet_raw(&mut t, &alice, bet, 3, 1_000_000).is_err(), "no slip, no bet");
+    assert!(t.svm.get_account(&bet).is_none(), "the failed place created no account");
+    assert_eq!(chip_balance(&t, &alice), 5_000_000, "no chips were taken");
+}
+
+#[test]
+fn test_stranger_cannot_fill_someone_elses_slip() {
+    let mut t = setup();
+    let funder = new_player(&mut t);
+    init_cage(&mut t, &funder);
+    let alice = new_player(&mut t);
+    let bob = new_player(&mut t);
+    assert!(buy_chips(&mut t, &alice, 5_000_000).is_ok());
+    assert!(buy_chips(&mut t, &bob, 5_000_000).is_ok());
+    assert!(open_chip_bet(&mut t, &alice, 0, 4).is_ok());
+
+    // Bob signs, but the slip is Alice's: the seeds include her key, so Bob cannot fill it.
+    let alice_slip = bet_pda_r(0, &alice, 4);
+    assert!(place_chip_bet_raw(&mut t, &bob, alice_slip, 4, 1_000_000).is_err(), "a stranger cannot fill it");
+    assert_eq!(slip(&t, &alice, 4).amount, 0, "Alice's slip is still empty");
+    assert_eq!(chip_balance(&t, &bob), 5_000_000, "Bob's chips are untouched");
+}
+
+#[test]
+fn test_delegate_and_undelegate_a_chip_slip() {
+    let mut t = setup();
+    stub_vrf(&mut t);
+    t.svm.add_program(dlp_id(), include_bytes!("fixtures/vrf_stub.so")).unwrap();
+    t.svm.add_program(magic_program_id(), include_bytes!("fixtures/vrf_stub.so")).unwrap();
+    let funder = new_player(&mut t);
+    init_cage(&mut t, &funder);
+    let alice = new_player(&mut t);
+    let stranger = new_player(&mut t);
+    let admin = t.admin.insecure_clone();
+    assert!(buy_chips(&mut t, &alice, 5_000_000).is_ok());
+    assert!(open_chip_bet(&mut t, &alice, 0, 5).is_ok());
+    let slip_key = bet_pda_r(0, &alice, 5);
+    let original = t.svm.get_account(&slip_key).unwrap();
+
+    // Only the slip's owner delegates it.
+    assert!(delegate_bet_by(&mut t, &stranger, 0, 5).is_err(), "a stranger cannot delegate Alice's slip");
+    assert!(delegate_bet_by(&mut t, &alice, 0, 5).is_ok(), "the owner delegates the slip");
+    // The SDK zeroes the PDA's data on delegation (cpi.rs); the rollup holds the real bytes. Model
+    // that rollup copy here: owned by this program, with the slip's own data.
+    assert_eq!(t.svm.get_account(&bet_pda_r(0, &alice, 5)).unwrap().owner, dlp_id(), "the slip moved to the rollup");
+
+    // Bringing it home: the owner or the table authority; a stranger is refused.
+    assert!(undelegate_bet_by(&mut t, &stranger, 0, &alice.pubkey(), 5).is_err(), "a stranger cannot undelegate it");
+
+    // The rollup's view of the slip: owned by this program, so undelegate is allowed.
+    let mut acc = original.clone();
+    acc.owner = jhandi_munda::id();
+    t.svm.set_account(slip_key, acc.clone()).unwrap();
+    assert!(undelegate_bet_by(&mut t, &alice, 0, &alice.pubkey(), 5).is_ok(), "the owner brings it home");
+    assert!(undelegate_bet_by(&mut t, &admin, 0, &alice.pubkey(), 5).is_ok(), "the table authority can too");
+
+    // Already undelegating (owned by the delegation program): named, not the migration message.
+    acc.owner = dlp_id();
+    t.svm.set_account(slip_key, acc).unwrap();
+    let e = undelegate_bet_by(&mut t, &alice, 0, &alice.pubkey(), 5).expect_err("already undelegating");
+    assert!(format!("{:?}", e.meta.logs).contains("BetAlreadyUndelegating"), "{:?}", e.meta.logs);
 }

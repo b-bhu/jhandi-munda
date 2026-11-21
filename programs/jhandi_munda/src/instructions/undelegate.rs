@@ -18,16 +18,20 @@ use ephemeral_rollups_sdk::{
 
 use crate::{
     error::ErrorCode,
-    state::{ChipStack, ProgramConfig, Round},
-    CHIPS_SEED, CONFIG_SEED, ROUND_SEED,
+    state::{Bet, ChipStack, ProgramConfig, Round},
+    BET_SEED, CHIPS_SEED, CONFIG_SEED, ROUND_SEED,
 };
+
+/// The delegation program's id as a `Pubkey` (the SDK's id, converted).
+pub fn delegation_program_id() -> Pubkey {
+    Pubkey::new_from_array(ephemeral_rollups_sdk::id().to_bytes())
+}
 
 /// The rollup copy must be this program's account. If the delegation program owns it, the
 /// rollup has already scheduled its undelegate (the account is "undelegating"), so say that
 /// rather than the migration message (`AccountNotProgramOwned`).
 fn require_undelegatable(info: &AccountInfo, already: ErrorCode) -> Result<()> {
-    let dlp = Pubkey::new_from_array(ephemeral_rollups_sdk::id().to_bytes());
-    if *info.owner == dlp {
+    if *info.owner == delegation_program_id() {
         return Err(already.into());
     }
     require_keys_eq!(*info.owner, crate::ID, ErrorCode::AccountNotProgramOwned);
@@ -123,5 +127,58 @@ pub fn handle_undelegate_chips<'info>(
     .commit_and_undelegate(&[chips_info])
     .build_and_invoke()?;
     msg!("Chip stack committed and undelegated back to Solana");
+    Ok(())
+}
+
+/// Brings a chip bet slip home from the rollup (D42). Its owner or the table authority may sign.
+/// Settle runs on Solana after this, so a slip is not settled while it is still on the rollup.
+#[derive(Accounts)]
+#[instruction(round_id: u64, player: Pubkey, symbol: u8)]
+pub struct UndelegateBet<'info> {
+    #[account(mut)]
+    pub payer: Signer<'info>,
+
+    #[account(seeds = [CONFIG_SEED], bump)]
+    pub config: Account<'info, ProgramConfig>,
+
+    /// CHECK: the slip's rollup copy. Owned by this program on the rollup; checked in the handler.
+    #[account(mut, seeds = [BET_SEED, round_id.to_le_bytes().as_ref(), player.as_ref(), &[symbol]], bump)]
+    pub bet: UncheckedAccount<'info>,
+
+    /// CHECK: the magic context account, pinned to the SDK's id.
+    #[account(mut, address = MAGIC_CONTEXT_ID)]
+    pub magic_context: UncheckedAccount<'info>,
+
+    /// CHECK: the magic program, pinned to the SDK's id.
+    #[account(address = MAGIC_PROGRAM_ID)]
+    pub magic_program: UncheckedAccount<'info>,
+}
+
+pub fn handle_undelegate_bet<'info>(
+    ctx: Context<'info, UndelegateBet<'info>>,
+    round_id: u64,
+    player: Pubkey,
+    symbol: u8,
+) -> Result<()> {
+    let payer = ctx.accounts.payer.key();
+    require!(
+        payer == player || payer == ctx.accounts.config.admin,
+        ErrorCode::NotBetOwner
+    );
+    let bet_info = ctx.accounts.bet.to_account_info();
+    require_undelegatable(&bet_info, ErrorCode::BetAlreadyUndelegating)?;
+    {
+        let data = bet_info.try_borrow_data()?;
+        let bet = Bet::try_deserialize(&mut &data[..])?;
+        require!(bet.player == player && bet.round_id == round_id && bet.symbol == symbol, ErrorCode::BetAccountMismatch);
+    }
+    MagicIntentBundleBuilder::new(
+        ctx.accounts.payer.to_account_info(),
+        ctx.accounts.magic_context.to_account_info(),
+        ctx.accounts.magic_program.to_account_info(),
+    )
+    .commit_and_undelegate(&[bet_info])
+    .build_and_invoke()?;
+    msg!("Bet slip committed and undelegated back to Solana");
     Ok(())
 }

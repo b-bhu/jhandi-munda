@@ -164,13 +164,13 @@ pub struct PlaceBetChips<'info> {
     #[account(mut, seeds = [ROUND_SEED], bump)]
     pub round: Account<'info, Round>,
 
-    /// The bettor's bet on this face in this round, created here.
+    /// The bettor's bet slip for this round and face, opened on Solana by `open_chip_bet`
+    /// (D42). This instruction only fills it in; it never creates an account, because the
+    /// rollup refuses to change a non-delegated fee payer's balance (InvalidAccountForFee).
     #[account(
-        init,
-        payer = bettor,
-        space = 8 + Bet::INIT_SPACE,
+        mut,
         seeds = [BET_SEED, round.round_id.to_le_bytes().as_ref(), bettor.key().as_ref(), &[symbol]],
-        bump
+        bump = bet.bump
     )]
     pub bet: Account<'info, Bet>,
 
@@ -186,17 +186,23 @@ pub struct PlaceBetChips<'info> {
 
 pub fn handle_place_bet_chips(ctx: Context<PlaceBetChips>, symbol: u8, amount: u64) -> Result<()> {
     let bettor = ctx.accounts.bettor.key();
+    // The slip is opened empty (amount 0). A filled slip cannot be filled again (D42).
+    require!(
+        ctx.accounts.bet.amount == 0 && !ctx.accounts.bet.settled,
+        ErrorCode::BetSlipAlreadyFilled
+    );
     let now = Clock::get()?.unix_timestamp;
     let is_new_player = check_bet(&ctx.accounts.round, &ctx.accounts.table, &bettor, symbol, amount, now)?;
     require!(ctx.accounts.chips.balance >= amount, ErrorCode::InsufficientChips);
     ctx.accounts.chips.balance -= amount;
+    let bump = ctx.accounts.bet.bump;
     record_bet(
         &mut ctx.accounts.round,
         &mut ctx.accounts.bet,
         bettor,
         symbol,
         amount,
-        ctx.bumps.bet,
+        bump,
         is_new_player,
         now,
     );
@@ -343,5 +349,145 @@ pub fn handle_init_cage(ctx: Context<InitCage>) -> Result<()> {
         &[ctx.accounts.cage_vault.to_account_info(), ctx.accounts.musd_mint.to_account_info()],
     )?;
     msg!("Cage vault initialized");
+    Ok(())
+}
+
+// --- open_chip_bet and delegate_bet (D42): the slip is opened and delegated on Solana ---
+
+/// The bettor opens an empty bet slip for `round_id` and `symbol` on Solana. The bettor
+/// pays the rent here (Solana, not the rollup). `place_bet_chips` fills it on the rollup.
+#[derive(Accounts)]
+#[instruction(round_id: u64, symbol: u8)]
+pub struct OpenChipBet<'info> {
+    /// CHECK: the round account, pinned by its seeds. Its owner is this program or, while
+    /// it is delegated, the delegation program (the Solana copy). The handler reads round_id
+    /// from it, so a typed `Account<Round>` (which needs owner = this program) cannot be used.
+    #[account(seeds = [ROUND_SEED], bump)]
+    pub round: UncheckedAccount<'info>,
+
+    /// The empty slip. Its seeds include the round id, the bettor and the face (D42).
+    #[account(
+        init,
+        payer = bettor,
+        space = 8 + Bet::INIT_SPACE,
+        seeds = [BET_SEED, round_id.to_le_bytes().as_ref(), bettor.key().as_ref(), &[symbol]],
+        bump
+    )]
+    pub bet: Account<'info, Bet>,
+
+    /// The bettor: signs, and pays the slip's rent on Solana.
+    #[account(mut)]
+    pub bettor: Signer<'info>,
+
+    pub system_program: Program<'info, System>,
+}
+
+pub fn handle_open_chip_bet(ctx: Context<OpenChipBet>, round_id: u64, symbol: u8) -> Result<()> {
+    require!((1..=6).contains(&symbol), ErrorCode::InvalidSymbol);
+    let round_info = ctx.accounts.round.to_account_info();
+    require!(
+        *round_info.owner == crate::ID || *round_info.owner == crate::undelegate::delegation_program_id(),
+        ErrorCode::AccountNotProgramOwned
+    );
+    let current = {
+        let data = round_info.try_borrow_data()?;
+        Round::try_deserialize(&mut &data[..])?.round_id
+    };
+    require!(current == round_id, ErrorCode::RoundIdMismatch);
+
+    let bet = &mut ctx.accounts.bet;
+    bet.player = ctx.accounts.bettor.key();
+    bet.amount = 0; // empty until place_bet_chips fills it
+    bet.symbol = symbol;
+    bet.round_id = round_id;
+    bet.owed = 0;
+    bet.settled = false;
+    bet.settled_at = 0;
+    bet.paid_with_chips = true; // a chip slip: its stake is in the cage (D39)
+    bet.bump = ctx.bumps.bet;
+    msg!("Bet slip opened for round {} on face {}", round_id, symbol);
+    Ok(())
+}
+
+/// Delegates the bettor's own slip to the Asia rollup, with the round. Only the slip's owner.
+#[derive(Accounts)]
+#[instruction(round_id: u64, symbol: u8)]
+pub struct DelegateBet<'info> {
+    /// The bettor: must own the slip; pays the delegation rent.
+    #[account(mut)]
+    pub owner: Signer<'info>,
+
+    /// CHECK: the slip to delegate. Validated as this bettor's Bet in the handler.
+    #[account(mut, seeds = [BET_SEED, round_id.to_le_bytes().as_ref(), owner.key().as_ref(), &[symbol]], bump)]
+    pub bet: UncheckedAccount<'info>,
+
+    /// CHECK: the delegation buffer, created by the SDK. Seeds pin its address.
+    #[account(
+        mut,
+        seeds = [DELEGATE_BUFFER_TAG, bet.key().as_ref()],
+        bump,
+        seeds::program = crate::ID
+    )]
+    pub buffer_bet: UncheckedAccount<'info>,
+
+    /// CHECK: the delegation record, written by the delegation program.
+    #[account(
+        mut,
+        seeds = [DELEGATION_RECORD_TAG, bet.key().as_ref()],
+        bump,
+        seeds::program = delegation_program.key()
+    )]
+    pub delegation_record_bet: UncheckedAccount<'info>,
+
+    /// CHECK: the delegation metadata, written by the delegation program.
+    #[account(
+        mut,
+        seeds = [DELEGATION_METADATA_TAG, bet.key().as_ref()],
+        bump,
+        seeds::program = delegation_program.key()
+    )]
+    pub delegation_metadata_bet: UncheckedAccount<'info>,
+
+    /// CHECK: this program, the slip's owner before delegation.
+    #[account(address = crate::ID)]
+    pub owner_program: UncheckedAccount<'info>,
+
+    /// CHECK: the delegation program, pinned to the SDK's id.
+    #[account(address = ephemeral_rollups_sdk::id())]
+    pub delegation_program: UncheckedAccount<'info>,
+
+    pub system_program: Program<'info, System>,
+}
+
+pub fn handle_delegate_bet<'info>(ctx: Context<'info, DelegateBet<'info>>, round_id: u64, symbol: u8) -> Result<()> {
+    let owner = ctx.accounts.owner.key();
+    {
+        let bet_info = ctx.accounts.bet.to_account_info();
+        let data = bet_info.try_borrow_data()?;
+        let bet = Bet::try_deserialize(&mut &data[..])?;
+        require_keys_eq!(bet.player, owner, ErrorCode::NotBetOwner);
+        require!(bet.round_id == round_id && bet.symbol == symbol, ErrorCode::BetAccountMismatch);
+        require!(!bet.settled, ErrorCode::BetAlreadySettled);
+    }
+    let config = DelegateConfig {
+        validator: Some(ER_VALIDATOR_ASIA),
+        ..Default::default()
+    };
+    // The SDK appends the bump itself, so pass the seeds without it.
+    let round_bytes = round_id.to_le_bytes();
+    let symbol_bytes = [symbol];
+    let seeds: &[&[u8]] = &[BET_SEED, &round_bytes, owner.as_ref(), &symbol_bytes];
+    let accounts = DelegateAccounts {
+        payer: &ctx.accounts.owner.to_account_info(),
+        pda: &ctx.accounts.bet.to_account_info(),
+        owner_program: &ctx.accounts.owner_program.to_account_info(),
+        buffer: &ctx.accounts.buffer_bet.to_account_info(),
+        delegation_record: &ctx.accounts.delegation_record_bet.to_account_info(),
+        delegation_metadata: &ctx.accounts.delegation_metadata_bet.to_account_info(),
+        delegation_program: &ctx.accounts.delegation_program.to_account_info(),
+        system_program: &ctx.accounts.system_program.to_account_info(),
+    };
+    delegate_account(accounts, seeds, config)?;
+    msg!("Bet slip delegated to the Asia Ephemeral Rollup");
     Ok(())
 }
