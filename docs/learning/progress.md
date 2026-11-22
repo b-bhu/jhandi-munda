@@ -37,3 +37,6 @@ Still to do on devnet: upgrade with PR #115 and prove the 0-payout burn clears t
 
 ## 21 Nov 2026, 6:30 PM IST
 The walkthrough has started (plan in walkthrough.md). Bibhu wants explanations and references first, a quiz later, and speed. Module 1 (accounts and PDAs) has been taught. Open question: why do the bet seeds include round_id, the wallet AND the symbol, and what would break if symbol were dropped?
+
+## 22 Nov 2026, 6:00 PM IST
+Bibhu asked for a journey from walking in to walking out, as dark-mode picture cards (in docs/learning/cards/). Open question: why must the boxes be undelegated (step 8) before settle pays out (step 9)?

@@ -1,0 +1,48 @@
+<html><head><style>
+body{margin:0;background:#0f1117;font-family:Inter,Helvetica,Arial,sans-serif;color:#e6e6e6;width:1200px}
+.wrap{padding:40px 48px}
+h1{margin:0;font-size:34px;color:#fff}
+.sub{color:#9aa3b2;font-size:18px;margin:6px 0 28px}
+.row{display:flex;gap:20px;margin-bottom:22px}
+.card{flex:1;background:#171b24;border:1px solid #262c3a;border-radius:16px;padding:18px 20px}
+.card h3{margin:0 0 6px;font-size:20px}
+.card p{margin:0;color:#b8c0cc;font-size:16px;line-height:1.4}
+.code{font-family:Menlo,monospace;font-size:14px;color:#7dd3fc;margin-top:8px}
+.big{background:linear-gradient(135deg,#1e1b4b,#172033);border:1px solid #3b3f74}
+.tag{display:inline-block;font-size:13px;padding:3px 10px;border-radius:999px;background:#262c3a;color:#c4b5fd;margin-bottom:10px}
+.seed{display:flex;gap:10px;align-items:center;margin-top:12px;flex-wrap:wrap}
+.chip{padding:10px 14px;border-radius:10px;font-weight:600;font-size:16px}
+.c1{background:#3f2d5c;color:#e9d5ff}.c2{background:#14425a;color:#bae6fd}.c3{background:#14532d;color:#bbf7d0}.c4{background:#5c3a14;color:#fed7aa}
+.arrow{color:#6b7280;font-size:22px}
+.foot{background:#13261c;border:1px solid #1f4d33;border-radius:16px;padding:18px 22px;font-size:18px;color:#d1fae5}
+.e{font-size:26px;margin-right:6px}
+</style></head><body><div class="wrap">
+<span class="tag">Module 1 of 6</span>
+<h1>🎲 The casino floor plan</h1>
+<div class="sub">The program is the rulebook. All the data lives in boxes called accounts.</div>
+
+<div class="row">
+ <div class="card"><h3><span class="e">🏢</span>Manager's office</h3><p>Who the admin is, which MUSD we use</p><div class="code">ProgramConfig</div></div>
+ <div class="card"><h3><span class="e">🏦</span>Bank vault</h3><p>Investors' money for paying winners</p><div class="code">PoolState</div></div>
+ <div class="card"><h3><span class="e">🪧</span>Table sign</h3><p>90 s rounds, $1 minimum, fee pots</p><div class="code">TableConfig</div></div>
+</div>
+<div class="row">
+ <div class="card"><h3><span class="e">🎯</span>The table</h3><p>Status, players, the six dice faces</p><div class="code">Round</div></div>
+ <div class="card"><h3><span class="e">🧾</span>Betting slip</h3><p>Who, how much, which symbol, what we owe</p><div class="code">Bet</div></div>
+ <div class="card"><h3><span class="e">🎟️</span>Winner's ticket + IOU line</h3><p>Wins waiting to be paid</p><div class="code">Claim · PayoutQueue</div></div>
+</div>
+
+<div class="card big" style="margin-bottom:22px">
+ <h3>🧥 How do we find a box? The coat-check trick (PDA)</h3>
+ <p>Your ticket number isn't random. It's built from fixed things, so anyone can work it out again, but only the casino can open the drawer.</p>
+ <div class="seed">
+  <span class="chip c1">"bet"</span><span class="arrow">+</span>
+  <span class="chip c2">round #</span><span class="arrow">+</span>
+  <span class="chip c3">your wallet</span><span class="arrow">+</span>
+  <span class="chip c4">symbol ♥</span><span class="arrow">→</span>
+  <span class="chip" style="background:#262c3a">one slip address</span>
+ </div>
+</div>
+
+<div class="foot">🤔 <b>Your question:</b> you bet on ♥ and ♠ in the same round. Why does the slip need <b>symbol</b> in it? What breaks if we drop it?</div>
+</div></body></html>

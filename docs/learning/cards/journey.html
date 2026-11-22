@@ -1,0 +1,44 @@
+<html><head><style>
+body{margin:0;background:#0f1117;font-family:Inter,Helvetica,Arial,sans-serif;color:#e6e6e6;width:1200px}
+.wrap{padding:36px 44px}
+h1{margin:0;font-size:32px;color:#fff}.sub{color:#9aa3b2;font-size:17px;margin:6px 0 22px}
+.tag{display:inline-block;font-size:13px;padding:3px 10px;border-radius:999px;background:#262c3a;color:#c4b5fd;margin-bottom:10px}
+.zone{border-radius:18px;padding:16px 18px 6px;margin-bottom:14px}
+.sol{background:#121a2b;border:1px solid #233457}.er{background:#1f1630;border:1px solid #4a2f73}
+.zh{font-size:15px;font-weight:700;letter-spacing:.5px;margin-bottom:10px}
+.sol .zh{color:#7dd3fc}.er .zh{color:#d8b4fe}
+.steps{display:flex;gap:12px;flex-wrap:wrap}
+.s{flex:1;min-width:200px;background:#171b24;border:1px solid #262c3a;border-radius:14px;padding:12px 14px;margin-bottom:10px}
+.n{display:inline-block;width:26px;height:26px;border-radius:50%;background:#334155;color:#fff;text-align:center;line-height:26px;font-weight:700;font-size:14px;margin-right:6px}
+.s h3{margin:0 0 4px;font-size:17px;display:flex;align-items:center}
+.s p{margin:0;color:#b8c0cc;font-size:14px;line-height:1.35}
+.c{font-family:Menlo,monospace;font-size:12.5px;color:#7dd3fc;margin-top:6px}
+.er .c{color:#d8b4fe}
+.mid{text-align:center;color:#6b7280;font-size:15px;margin:2px 0 12px}
+.foot{background:#13261c;border:1px solid #1f4d33;border-radius:16px;padding:16px 20px;font-size:17px;color:#d1fae5}
+</style></head><body><div class="wrap">
+<span class="tag">The big picture</span>
+<h1>🚶 One player's night: walk in → walk out</h1>
+<div class="sub">Blue = the main hall (Solana, slow but final). Purple = the fast side table (MagicBlock rollup).</div>
+
+<div class="zone sol"><div class="zh">🏛️ MAIN HALL · SOLANA</div><div class="steps">
+ <div class="s"><h3><span class="n">1</span>💵 Get test cash</h3><p>Free play money (devnet only)</p><div class="c">musd_faucet</div></div>
+ <div class="s"><h3><span class="n">2</span>🪙 Buy chips</h3><p>MUSD goes into the cage, chips go up</p><div class="c">buy_chips</div></div>
+ <div class="s"><h3><span class="n">3</span>🧾 Grab a blank slip</h3><p>Empty bet slip, made here because the fast table can't create new boxes</p><div class="c">open_chip_bet (D42)</div></div>
+ <div class="s"><h3><span class="n">4</span>🚚 Send to fast table</h3><p>Table, slip and chips are lent to the rollup</p><div class="c">delegate_round · _bet · _chip_stack</div></div>
+</div></div>
+<div class="mid">⬇️ boxes move over ⬇️</div>
+<div class="zone er"><div class="zh">⚡ FAST SIDE TABLE · EPHEMERAL ROLLUP</div><div class="steps">
+ <div class="s"><h3><span class="n">5</span>🎯 Place the bet</h3><p>Chips down on ♥, round opens, 90 s clock starts. No wallet pop-up with a session key</p><div class="c">place_bet_chips</div></div>
+ <div class="s"><h3><span class="n">6</span>🎲 Roll the dice</h3><p>Ask VRF for fair random numbers</p><div class="c">request_roll</div></div>
+ <div class="s"><h3><span class="n">7</span>✨ Dice land</h3><p>VRF calls back, six faces written</p><div class="c">callback_roll_dice</div></div>
+</div></div>
+<div class="mid">⬇️ boxes come home ⬇️</div>
+<div class="zone sol"><div class="zh">🏛️ MAIN HALL · SOLANA</div><div class="steps">
+ <div class="s"><h3><span class="n">8</span>🏠 Bring boxes home</h3><p>Rollup hands the final state back</p><div class="c">undelegate_round · _bet · _chips</div></div>
+ <div class="s"><h3><span class="n">9</span>💰 Pay out</h3><p>Stake → pool. Win → chips, or IOU line if pool is short. 2% fee</p><div class="c">settle_chip_bets</div></div>
+ <div class="s"><h3><span class="n">10</span>🧹 Reset table</h3><p>Back to Idle, round number +1</p><div class="c">finish_round</div></div>
+ <div class="s"><h3><span class="n">11</span>🚪 Cash out</h3><p>Chips → MUSD back to the wallet</p><div class="c">cash_out</div></div>
+</div></div>
+<div class="foot">🤔 <b>Your question:</b> why do the boxes have to come home (step 8) <i>before</i> we pay out (step 9)?</div>
+</div></body></html>
