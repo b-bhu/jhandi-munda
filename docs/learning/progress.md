@@ -40,3 +40,4 @@ The walkthrough has started (plan in walkthrough.md). Bibhu wants explanations a
 
 ## 22 Nov 2026, 6:00 PM IST
 Bibhu asked for a journey from walking in to walking out, as dark-mode picture cards (in docs/learning/cards/). Open question: why must the boxes be undelegated (step 8) before settle pays out (step 9)?
+- Open design question (22 Nov): chip bets get no MUNDA on a loss. claim_open.rs:45 refuses chip bets (ChipBetSettledToChips), so the loser-token idea only works on the wallet road. Decide before the UI/pitch.
