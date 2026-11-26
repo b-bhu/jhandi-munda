@@ -11,6 +11,8 @@
 //! - **Wait**: after 24 hours, mint the full amount (1 MUNDA per 1 MUSD lost).
 //! - **Take now**: mint 90% at once. The 10% tax is never minted, so it stays
 //!   out of supply (a burn in effect).
+//! - Either way the MUNDA is minted straight into the player's stake, not their
+//!   wallet (D47). The stake lot's clock starts at the loss's settle time (D29).
 //!
 //! MUNDA is minted only on redeem, never at settle (D26). No FIFO queue here:
 //! if the pool cannot pay a win, the redeem is rejected (Step 8). Token moves are
@@ -21,15 +23,17 @@ use anchor_lang::solana_program::{
     instruction::{AccountMeta, Instruction},
     program::{invoke, invoke_signed},
 };
+use anchor_lang::system_program::{create_account, CreateAccount};
 
 use crate::{
     error::ErrorCode,
-    payout::take_now_payout,
     instructions::payout_queue::enqueue,
-    state::{Claim, ClaimAsset, PayoutQueue, PoolState, ProgramConfig},
-    ATA_PROGRAM_ID, CLAIM_SEED, CONFIG_SEED, INSURANCE_SEED, INSURANCE_VAULT_SEED, MUNDA_DECIMALS, QUEUE_SEED,
+    instructions::settle::save_account,
+    payout::take_now_payout,
+    state::{Claim, ClaimAsset, PayoutQueue, PoolState, ProgramConfig, Stake, StakeLot, StakePool},
+    CLAIM_SEED, CONFIG_SEED, INSURANCE_SEED, INSURANCE_VAULT_SEED, LOSS_UNLOCK_SECS, MUNDA_DECIMALS, QUEUE_SEED,
     MUNDA_MINT_AUTHORITY_SEED, MUNDA_MINT_SEED, MUSD_MINT_SEED, MUSD_MINT_SPACE, POOL_SEED,
-    POOL_VAULT_SEED, SPL_TOKEN_PROGRAM_ID, TOKEN_ACCOUNT_SPACE,
+    POOL_VAULT_SEED, SPL_TOKEN_PROGRAM_ID, STAKE_POOL_SEED, STAKE_SEED, STAKE_VAULT_SEED, TOKEN_ACCOUNT_SPACE,
 };
 
 /// SPL token `Transfer` (opcode 3): data [3][amount u64 LE].
@@ -40,8 +44,6 @@ const TOKEN_IX_MINT_TO: u8 = 7;
 const TOKEN_IX_INITIALIZE_ACCOUNT3: u8 = 18;
 /// SPL token `InitializeMint2` (opcode 20): data [20][decimals][authority][0].
 const TOKEN_IX_INITIALIZE_MINT2: u8 = 20;
-/// ATA program `CreateIdempotent`: data [1].
-const ATA_IX_CREATE_IDEMPOTENT: u8 = 1;
 /// A token account keeps its balance at bytes 64..72.
 const TOKEN_AMOUNT_OFFSET: usize = 64;
 
@@ -243,15 +245,21 @@ pub struct RedeemClaim<'info> {
     #[account(seeds = [MUNDA_MINT_AUTHORITY_SEED], bump)]
     pub munda_mint_authority: UncheckedAccount<'info>,
 
-    /// CHECK: the player's MUNDA ATA (loss payouts), checked and created here if missing.
+    /// CHECK: the stake pool (loss payouts only), seeds checked in the handler (D47).
     #[account(mut)]
-    pub player_munda_ata: UncheckedAccount<'info>,
+    pub stake_pool: UncheckedAccount<'info>,
+
+    /// CHECK: the player's stake (loss payouts only), seeds checked in the handler. Created on
+    /// the player's first loss, so the minted MUNDA lands in it, not in their wallet (D47).
+    #[account(mut)]
+    pub stake: UncheckedAccount<'info>,
+
+    /// CHECK: the staked MUNDA vault (loss payouts only), seeds checked in the handler.
+    #[account(mut)]
+    pub stake_vault: UncheckedAccount<'info>,
 
     /// CHECK: verified against SPL_TOKEN_PROGRAM_ID in the handler.
     pub token_program: UncheckedAccount<'info>,
-
-    /// CHECK: the ATA program, invoked to create the MUNDA ATA when missing.
-    pub associated_token_program: UncheckedAccount<'info>,
 
     pub system_program: Program<'info, System>,
 }
@@ -275,44 +283,78 @@ fn check_player_musd_ata(ctx: &Context<RedeemClaim>) -> Result<()> {
     Ok(())
 }
 
-/// Creates the player's MUNDA ATA if missing (create-idempotent, like the
-/// faucet), then checks it is the canonical address. Loss payouts only.
-fn ensure_player_munda_ata(ctx: &Context<RedeemClaim>) -> Result<()> {
-    let player = ctx.accounts.player.to_account_info();
-    let ata = ctx.accounts.player_munda_ata.to_account_info();
-    let mint = ctx.accounts.munda_mint.to_account_info();
+/// Loss MUNDA goes straight into the player's stake, not their wallet (D47). The
+/// stake is created on the player's first loss. The MUNDA is minted to the stake vault
+/// and added to a lot whose clock starts at `settled_at` (the loss's settle time), so a Wait
+/// claim counts at once and a Take now claim after 24 hours (D29). When all lots are in use,
+/// the MUNDA is folded into the newest lot, which keeps its own clock.
+fn credit_loss_munda(ctx: &Context<RedeemClaim>, amount: u64, settled_at: i64) -> Result<()> {
+    let player = ctx.accounts.player.key();
+    let pool_info = ctx.accounts.stake_pool.to_account_info();
+    let stake_info = ctx.accounts.stake.to_account_info();
+    let vault_info = ctx.accounts.stake_vault.to_account_info();
     require_keys_eq!(
-        ata.key(),
-        crate::musd_ata(&player.key(), &mint.key()),
-        ErrorCode::InvalidAtaAddress
+        pool_info.key(),
+        Pubkey::find_program_address(&[STAKE_POOL_SEED], &crate::ID).0,
+        ErrorCode::InvalidStakeAccount
     );
-    let ix = Instruction {
-        program_id: ATA_PROGRAM_ID,
-        accounts: vec![
-            AccountMeta::new(player.key(), true),
-            AccountMeta::new(ata.key(), false),
-            AccountMeta::new_readonly(player.key(), false),
-            AccountMeta::new_readonly(mint.key(), false),
-            AccountMeta::new_readonly(ctx.accounts.system_program.key(), false),
-            AccountMeta::new_readonly(SPL_TOKEN_PROGRAM_ID, false),
-        ],
-        data: vec![ATA_IX_CREATE_IDEMPOTENT],
+    require_keys_eq!(
+        vault_info.key(),
+        Pubkey::find_program_address(&[STAKE_VAULT_SEED], &crate::ID).0,
+        ErrorCode::InvalidStakeAccount
+    );
+    require_keys_eq!(*pool_info.owner, crate::ID, ErrorCode::InvalidStakeAccount);
+    let mut pool = {
+        let data = pool_info.try_borrow_data()?;
+        StakePool::try_deserialize(&mut &data[..])?
     };
-    invoke(
-        &ix,
-        &[
-            player.clone(),
-            ata,
-            player.clone(),
-            mint,
-            ctx.accounts.system_program.to_account_info(),
-            ctx.accounts.token_program.to_account_info(),
-        ],
-    )?;
-    Ok(())
+
+    let (stake_key, stake_bump) = Pubkey::find_program_address(&[STAKE_SEED, player.as_ref()], &crate::ID);
+    require_keys_eq!(stake_info.key(), stake_key, ErrorCode::InvalidStakeAccount);
+    let mut stake = if stake_info.data_is_empty() {
+        // The first loss for this wallet: create its stake account, paid by the player.
+        let space = 8 + Stake::INIT_SPACE;
+        let lamports = Rent::get()?.minimum_balance(space);
+        let seeds: &[&[u8]] = &[STAKE_SEED, player.as_ref(), &[stake_bump]];
+        create_account(
+            CpiContext::new_with_signer(
+                ctx.accounts.system_program.key(),
+                CreateAccount { from: ctx.accounts.player.to_account_info(), to: stake_info.clone() },
+                &[seeds],
+            ),
+            lamports,
+            space as u64,
+            &crate::ID,
+        )?;
+        pool.stakers = pool.stakers.checked_add(1).ok_or(ErrorCode::MathOverflow)?;
+        Stake { owner: player, amount: 0, lots: Default::default(), pending: 0, bump: stake_bump }
+    } else {
+        require_keys_eq!(*stake_info.owner, crate::ID, ErrorCode::InvalidStakeAccount);
+        let data = stake_info.try_borrow_data()?;
+        Stake::try_deserialize(&mut &data[..])?
+    };
+
+    match stake.lots.iter().position(|lot| lot.amount == 0) {
+        Some(slot) => stake.lots[slot] = StakeLot { amount, staked_at: settled_at },
+        None => {
+            let newest = stake
+                .lots
+                .iter_mut()
+                .filter(|lot| lot.amount > 0)
+                .max_by_key(|lot| lot.staked_at)
+                .ok_or(ErrorCode::TooManyLots)?;
+            newest.amount = newest.amount.checked_add(amount).ok_or(ErrorCode::MathOverflow)?;
+        }
+    }
+    stake.amount = stake.amount.checked_add(amount).ok_or(ErrorCode::MathOverflow)?;
+    pool.total_staked = pool.total_staked.checked_add(amount).ok_or(ErrorCode::MathOverflow)?;
+    save_account(&stake_info, &stake)?;
+    save_account(&pool_info, &pool)?;
+
+    mint_munda(ctx, amount)
 }
 
-/// Mints `amount` MUNDA to the player's ATA, signed by the MUNDA mint authority.
+/// Mints `amount` MUNDA to the staked MUNDA vault, signed by the MUNDA mint authority (D47).
 fn mint_munda(ctx: &Context<RedeemClaim>, amount: u64) -> Result<()> {
     let mut data = Vec::with_capacity(9);
     data.push(TOKEN_IX_MINT_TO);
@@ -321,7 +363,7 @@ fn mint_munda(ctx: &Context<RedeemClaim>, amount: u64) -> Result<()> {
         program_id: SPL_TOKEN_PROGRAM_ID,
         accounts: vec![
             AccountMeta::new(ctx.accounts.munda_mint.key(), false),
-            AccountMeta::new(ctx.accounts.player_munda_ata.key(), false),
+            AccountMeta::new(ctx.accounts.stake_vault.key(), false),
             AccountMeta::new_readonly(ctx.accounts.munda_mint_authority.key(), true),
         ],
         data,
@@ -331,7 +373,7 @@ fn mint_munda(ctx: &Context<RedeemClaim>, amount: u64) -> Result<()> {
         &ix,
         &[
             ctx.accounts.munda_mint.to_account_info(),
-            ctx.accounts.player_munda_ata.to_account_info(),
+            ctx.accounts.stake_vault.to_account_info(),
             ctx.accounts.munda_mint_authority.to_account_info(),
         ],
         &[seeds],
@@ -348,6 +390,8 @@ pub fn handle_redeem_wait(ctx: Context<RedeemClaim>) -> Result<()> {
     require!(!claim.queued, ErrorCode::ClaimAlreadyQueued);
     require!(Clock::get()?.unix_timestamp >= claim.unlock_at, ErrorCode::ClaimLocked);
     let amount = claim.amount;
+    // A loss's stake lot starts its clock at the settle time (D29): unlock_at less the 24 hours.
+    let settled_at = claim.unlock_at - LOSS_UNLOCK_SECS;
     match claim.asset {
         ClaimAsset::Musd => {
             check_player_musd_ata(&ctx)?;
@@ -374,10 +418,9 @@ pub fn handle_redeem_wait(ctx: Context<RedeemClaim>) -> Result<()> {
             msg!("Wait: paid {} base MUSD from the pool", amount);
         }
         ClaimAsset::Munda => {
-            ensure_player_munda_ata(&ctx)?;
             ctx.accounts.claim.redeemed = true;
-            mint_munda(&ctx, amount)?;
-            msg!("Wait: minted {} base MUNDA", amount);
+            credit_loss_munda(&ctx, amount, settled_at)?;
+            msg!("Wait: {} base MUNDA staked", amount);
         }
     }
     Ok(())
@@ -391,6 +434,7 @@ pub fn handle_redeem_take_now(ctx: Context<RedeemClaim>) -> Result<()> {
     require!(!claim.redeemed, ErrorCode::ClaimAlreadyRedeemed);
     require!(!claim.queued, ErrorCode::ClaimAlreadyQueued);
     let amount = claim.amount;
+    let settled_at = claim.unlock_at - LOSS_UNLOCK_SECS;
     let payout = take_now_payout(amount, claim.early_exit_bps);
     match claim.asset {
         ClaimAsset::Musd => {
@@ -412,10 +456,9 @@ pub fn handle_redeem_take_now(ctx: Context<RedeemClaim>) -> Result<()> {
             msg!("Take now: paid {} base MUSD, insurance is owed {}", payout, amount);
         }
         ClaimAsset::Munda => {
-            ensure_player_munda_ata(&ctx)?;
             ctx.accounts.claim.redeemed = true;
-            mint_munda(&ctx, payout)?;
-            msg!("Take now: minted {} base MUNDA; the 10% tax is never minted", payout);
+            credit_loss_munda(&ctx, payout, settled_at)?;
+            msg!("Take now: {} base MUNDA staked; the 10% tax is never minted", payout);
         }
     }
     Ok(())

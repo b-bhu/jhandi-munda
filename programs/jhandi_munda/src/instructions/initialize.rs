@@ -5,7 +5,7 @@ use anchor_lang::solana_program::{
 };
 
 use crate::{
-    error::ErrorCode, state::ProgramConfig, CONFIG_SEED, MUSD_DECIMALS, MUSD_MINT_AUTHORITY_SEED,
+    error::ErrorCode, state::ProgramConfig, CONFIG_SEED, MUSD_DECIMALS, MUSD_MINT_AUTHORITY_SEED, OVERFLOW_TARGET,
     MUSD_MINT_SEED, MUSD_MINT_SPACE, SPL_TOKEN_PROGRAM_ID,
 };
 
@@ -81,6 +81,9 @@ pub fn handler(ctx: Context<Initialize>) -> Result<()> {
     config.musd_mint = ctx.accounts.musd_mint.key();
     config.bump = ctx.bumps.config;
     config.musd_bump = ctx.bumps.musd_mint_authority;
+    config.transfers_enabled = false;
+    config.overflow_target = OVERFLOW_TARGET;
+    config.overflow_mark = 0;
 
     msg!("Program config and MUSD mint initialized");
     Ok(())

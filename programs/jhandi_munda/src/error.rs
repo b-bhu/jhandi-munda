@@ -128,4 +128,8 @@ pub enum ErrorCode {
     SnapshotNotToday,
     #[msg("The pool has LP shares but no MUSD behind them: deposits are closed until the shares are burned (#114)")]
     PoolInsolvent,
+    #[msg("A stake account or the stake pool does not match its seeds or owner")]
+    InvalidStakeAccount,
+    #[msg("MUNDA transfers are off: unstake stays locked until the admin turns them on (D46)")]
+    TransfersDisabled,
 }

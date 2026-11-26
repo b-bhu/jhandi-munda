@@ -10,8 +10,8 @@ use anchor_lang::solana_program::{
 
 use crate::{
     error::ErrorCode,
-    state::{Stake, StakeLot, StakePool},
-    MUNDA_MINT_SEED, SPL_TOKEN_PROGRAM_ID, STAKE_AUTHORITY_SEED, STAKE_POOL_SEED, STAKE_SEED,
+    state::{ProgramConfig, Stake, StakeLot, StakePool},
+    CONFIG_SEED, MUNDA_MINT_SEED, SPL_TOKEN_PROGRAM_ID, STAKE_AUTHORITY_SEED, STAKE_POOL_SEED, STAKE_SEED,
     STAKE_VAULT_SEED, TOKEN_ACCOUNT_SPACE,
 };
 
@@ -189,6 +189,10 @@ pub fn handle_stake(ctx: Context<StakeMunda>, amount: u64) -> Result<()> {
 
 #[derive(Accounts)]
 pub struct UnstakeMunda<'info> {
+    /// The program config: its `transfers_enabled` flag gates unstake (D46).
+    #[account(seeds = [CONFIG_SEED], bump)]
+    pub config: Account<'info, ProgramConfig>,
+
     #[account(mut, seeds = [STAKE_POOL_SEED], bump = stake_pool.bump)]
     pub stake_pool: Account<'info, StakePool>,
 
@@ -224,6 +228,8 @@ pub fn handle_unstake(ctx: Context<UnstakeMunda>, amount: u64) -> Result<()> {
         SPL_TOKEN_PROGRAM_ID,
         ErrorCode::InvalidTokenProgram
     );
+    // Launch phase: MUNDA stays staked until the admin turns transfers on (D46).
+    require!(ctx.accounts.config.transfers_enabled, ErrorCode::TransfersDisabled);
     require!(amount > 0, ErrorCode::ZeroStake);
     let owner = ctx.accounts.owner.key();
     require_keys_eq!(
@@ -272,6 +278,21 @@ pub fn handle_unstake(ctx: Context<UnstakeMunda>, amount: u64) -> Result<()> {
         &[seeds],
     )?;
     msg!("Unstaked {} base MUNDA", amount);
+    Ok(())
+}
+
+#[derive(Accounts)]
+pub struct SetTransfersEnabled<'info> {
+    #[account(mut, seeds = [CONFIG_SEED], bump, has_one = admin)]
+    pub config: Account<'info, ProgramConfig>,
+
+    /// The config admin: the only key that can turn MUNDA transfers on or off (D46).
+    pub admin: Signer<'info>,
+}
+
+pub fn handle_set_transfers_enabled(ctx: Context<SetTransfersEnabled>, enabled: bool) -> Result<()> {
+    ctx.accounts.config.transfers_enabled = enabled;
+    msg!("MUNDA transfers enabled: {}", enabled);
     Ok(())
 }
 

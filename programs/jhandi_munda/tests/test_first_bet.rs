@@ -510,20 +510,20 @@ fn test_settle_known_dice() {
 
     // Alice $10 on face 2 (two matches, 3x): owed $29.60, fee $0.40.
     // Carol $1 on face 2 (two matches, 3x): owed $2.96, fee $0.04.
-    // Bob $1 on face 4 (no matches): loses, owed $0, no fee.
+    // Bob $1 on face 4 (no matches): loses, owed $0, and takes the 2% loss fee (D45).
     assert_eq!(bet(&t, &alice, 2).owed, 29_600_000);
     assert_eq!(bet(&t, &bob, 4).owed, 0);
     assert_eq!(bet(&t, &carol, 2).owed, 2_960_000);
     assert!(bet(&t, &alice, 2).settled && bet(&t, &bob, 4).settled && bet(&t, &carol, 2).settled);
 
-    // Fees: 0.44 in total, split 20/10/70 per win (D15).
+    // Fees: 0.44 from the two wins plus 0.02 from Bob's loss, split 20/10/70 (D15, D45).
     let table = TableConfig::try_deserialize(
         &mut t.svm.get_account(&t.table).unwrap().data.as_slice(),
     )
     .unwrap();
-    assert_eq!(table.fee_treasury, 88_000, "20% pot: 80,000 + 8,000");
-    assert_eq!(table.fee_devs, 44_000, "10% pot: 40,000 + 4,000");
-    assert_eq!(table.fee_stakers, 308_000, "70% pot: 280,000 + 28,000");
+    assert_eq!(table.fee_treasury, 92_000, "20% pot: 80,000 + 8,000 + 4,000 (loss)");
+    assert_eq!(table.fee_devs, 46_000, "10% pot: 40,000 + 4,000 + 2,000 (loss)");
+    assert_eq!(table.fee_stakers, 322_000, "70% pot: 280,000 + 28,000 + 14,000 (loss)");
 
     // Nothing moved: all $12 of stakes, winners and losers alike, stay in the pool vault.
     assert_eq!(token_amount(&t.svm, &t.vault), 12_000_000);
@@ -537,6 +537,56 @@ fn test_settle_known_dice() {
     // The round is closed: settling or finishing it again is rejected.
     assert!(settle_bets(&mut t, &bob, &bets).is_err(), "a second settle must be rejected");
     assert!(finish_round(&mut t, &bob).is_err(), "a second finish must be rejected");
+}
+
+// D45: a known win and a known loss settle together. The win fee is unchanged, the
+// loss takes 2% of its stake from the pool side, the player's loss is exactly the
+// stake, and distribute_fees splits both pots 20 / 10 / 70.
+#[test]
+fn test_loss_fee_two_percent_and_split() {
+    let mut t = setup();
+    stub_vrf(&mut t);
+    let admin = new_player(&mut t);
+    init_insurance(&mut t, &admin);
+    init_fee_vaults(&mut t, &admin);
+    init_munda(&mut t, &admin);
+    init_staking(&mut t, &admin);
+    let alice = new_player(&mut t);
+    let bob = new_player(&mut t);
+
+    // Alice: $10 on face 2 wins (two matches, 3x). Bob: $1 on face 4 loses.
+    assert!(place(&mut t, &alice, 2, 10_000_000).is_ok());
+    assert!(place(&mut t, &bob, 4, 1_000_000).is_ok());
+    set_time(&mut t, BASE_TIME + 90);
+    assert!(request_roll(&mut t, &bob).is_ok());
+    let mut randomness = [0u8; 32];
+    randomness[..6].copy_from_slice(&[1, 1, 4, 5, 0, 2]);
+    let request_id = round(&t).request_id;
+    assert!(send_callback(&mut t, &bob, randomness, request_id).is_ok());
+    let (alice_bet, bob_bet) = (bet_pda(&alice, 2), bet_pda(&bob, 4));
+    set_time(&mut t, BASE_TIME + 100);
+    assert!(settle_bets(&mut t, &bob, &[alice_bet, bob_bet]).is_ok());
+    assert!(finish_round(&mut t, &bob).is_ok());
+
+    // The win fee is unchanged: owed $29.60, 2% of its $2 profit is $0.40 (D17).
+    assert_eq!(bet(&t, &alice, 2).owed, 29_600_000);
+    // The loss owes nothing, and the player's loss is exactly the $1 stake.
+    assert_eq!(bet(&t, &bob, 4).owed, 0);
+    assert_eq!(bet(&t, &bob, 4).amount, 1_000_000);
+    assert_eq!(token_amount(&t.svm, &jhandi_munda::musd_ata(&bob.pubkey(), &t.musd_mint)), 99_000_000);
+
+    // Pots: the win's $0.40 (80,000 / 40,000 / 280,000) plus the loss's $0.02
+    // (4,000 / 2,000 / 14,000). Nothing moved yet: both stakes are still in the pool vault.
+    let table = TableConfig::try_deserialize(&mut t.svm.get_account(&t.table).unwrap().data.as_slice()).unwrap();
+    assert_eq!((table.fee_treasury, table.fee_devs, table.fee_stakers), (84_000, 42_000, 294_000));
+    assert_eq!(token_amount(&t.svm, &t.vault), 11_000_000);
+
+    // distribute_fees: 10% to dev, 20% to insurance (not yet full), 70% to the rewards vault.
+    assert!(distribute(&mut t, &admin, &[]).is_ok());
+    assert_eq!(token_amount(&t.svm, &pda(&[jhandi_munda::DEV_VAULT_SEED])), 42_000);
+    assert_eq!(token_amount(&t.svm, &pda(&[INSURANCE_VAULT_SEED])), 84_000);
+    assert_eq!(token_amount(&t.svm, &pda(&[jhandi_munda::REWARDS_VAULT_SEED])), 294_000);
+    assert_eq!(token_amount(&t.svm, &t.vault), 11_000_000 - 42_000 - 84_000 - 294_000);
 }
 
 #[test]
@@ -600,6 +650,7 @@ fn open_claim(t: &mut Table, payer: &Keypair, bet: &Pubkey) -> TransactionResult
             jhandi_munda::accounts::OpenClaim {
                 bet: *bet,
                 claim: pda(&[CLAIM_SEED, bet.as_ref()]),
+                loss_tally: pda(&[jhandi_munda::LOSS_TALLY_SEED]),
                 payer: payer.pubkey(),
                 system_program: SYS,
             },
@@ -641,11 +692,12 @@ fn test_open_claim_from_settled_bet() {
 
     // A second claim for the same bet is rejected.
     assert!(open_claim(&mut t, &bob, &alice_bet).is_err(), "one claim per bet");
-    // Bob's loss opens a MUNDA claim: 1 MUNDA per 1 MUSD lost, unlock 24 h after settle.
+    // Bob's loss opens a MUNDA claim, unlock 24 h after settle. It is inside the first
+    // $1,000 of losses, so it mints 5 MUNDA per 1 MUSD lost (D49).
     assert!(open_claim(&mut t, &bob, &bob_bet).is_ok());
     let l = claim(&t, &bob_bet);
     assert_eq!(l.asset, ClaimAsset::Munda);
-    assert_eq!(l.amount, 1_000_000);
+    assert_eq!(l.amount, 5_000_000);
     assert_eq!(l.unlock_at, BASE_TIME + 100 + 86_400);
     assert_eq!(l.early_exit_bps, 1000);
 }
@@ -761,9 +813,10 @@ fn redeem_accounts(t: &Table, player: &Keypair, bet: &Pubkey) -> jhandi_munda::a
         queue: pda(&[QUEUE_SEED]),
         munda_mint,
         munda_mint_authority: pda(&[MUNDA_MINT_AUTHORITY_SEED]),
-        player_munda_ata: jhandi_munda::musd_ata(&player.pubkey(), &munda_mint),
+        stake_pool: pda(&[jhandi_munda::STAKE_POOL_SEED]),
+        stake: pda(&[jhandi_munda::STAKE_SEED, player.pubkey().as_ref()]),
+        stake_vault: pda(&[jhandi_munda::STAKE_VAULT_SEED]),
         token_program: SPL_TOKEN_PROGRAM_ID,
-        associated_token_program: jhandi_munda::ATA_PROGRAM_ID,
         system_program: SYS,
     }
 }
@@ -877,6 +930,7 @@ fn munda_supply(t: &Table) -> u64 {
 fn losing_claim(t: &mut Table) -> (Keypair, Pubkey) {
     let deployer = new_player(t);
     init_munda(t, &deployer);
+    init_staking(t, &deployer);
     let bob = new_player(t);
     assert!(place(t, &bob, 4, 1_000_000).is_ok());
     set_time(t, BASE_TIME + 90);
@@ -899,18 +953,21 @@ fn test_loss_redeem_full_after_24h() {
     let mut t = setup();
     stub_vrf(&mut t);
     let (bob, bet) = losing_claim(&mut t);
-    let bob_munda_ata = jhandi_munda::musd_ata(&bob.pubkey(), &pda(&[MUNDA_MINT_SEED]));
 
     // Wait is locked for 24 hours after the settle at +100 s.
     assert!(wait(&mut t, &bob, &bet).is_err(), "Wait before 24 h must be rejected");
     set_time(&mut t, BASE_TIME + 100 + 86_399);
     assert!(wait(&mut t, &bob, &bet).is_err(), "one second early is still locked");
 
-    // At 24 h, Wait mints the full 1 MUNDA for the 1 MUSD lost.
+    // At 24 h, Wait mints the loss's MUNDA (5 per 1 MUSD lost inside the first $1,000, D49)
+    // straight into the stake (D47).
     set_time(&mut t, BASE_TIME + 100 + 86_400);
     assert!(wait(&mut t, &bob, &bet).is_ok());
-    assert_eq!(token_amount(&t.svm, &bob_munda_ata), 1_000_000);
-    assert_eq!(munda_supply(&t), 1_000_000, "supply rises on redeem only");
+    assert_eq!(stake_account(&t, &bob).amount, 5_000_000);
+    assert_eq!(token_amount(&t.svm, &pda(&[jhandi_munda::STAKE_VAULT_SEED])), 5_000_000);
+    // The Wait lot's clock started at the loss, so it counts for rewards at once.
+    assert_eq!(stake_account(&t, &bob).eligible(BASE_TIME + 100 + 86_400), 5_000_000);
+    assert_eq!(munda_supply(&t), 5_000_000, "supply rises on redeem only");
     assert!(claim(&t, &bet).redeemed);
     assert!(wait(&mut t, &bob, &bet).is_err(), "a claim redeems once");
 }
@@ -920,14 +977,136 @@ fn test_loss_redeem_now_10_percent_tax() {
     let mut t = setup();
     stub_vrf(&mut t);
     let (bob, bet) = losing_claim(&mut t);
-    let bob_munda_ata = jhandi_munda::musd_ata(&bob.pubkey(), &pda(&[MUNDA_MINT_SEED]));
 
-    // Take now mints 90% of the 1 MUNDA at once; the 10% tax is never minted.
+    // Take now mints 90% of the 1 MUNDA at once into the stake; the 10% tax is never minted.
     assert!(take_now(&mut t, &bob, &bet).is_ok());
-    assert_eq!(token_amount(&t.svm, &bob_munda_ata), 900_000);
-    assert_eq!(munda_supply(&t), 900_000, "only the 90% is ever minted");
+    // Take now mints 90% of the 5 MUNDA (D49) into the stake; the 10% tax is never minted.
+    assert_eq!(stake_account(&t, &bob).amount, 4_500_000);
+    assert_eq!(munda_supply(&t), 4_500_000, "only the 90% is ever minted");
     assert!(claim(&t, &bet).redeemed);
     assert!(take_now(&mut t, &bob, &bet).is_err(), "a claim redeems once");
+}
+
+// D47: loss MUNDA never lands in the wallet, and the stake lot starts its clock at the
+// settle time. Wait (after 24 h) is eligible at once; Take now waits 24 h from the loss.
+#[test]
+fn test_loss_munda_staked_with_loss_clock() {
+    let mut t = setup();
+    stub_vrf(&mut t);
+    let (bob, bet) = losing_claim(&mut t);
+    assert!(munda_ata_absent(&t, &bob), "no MUNDA reaches the wallet");
+
+    assert!(take_now(&mut t, &bob, &bet).is_ok());
+    assert!(munda_ata_absent(&t, &bob), "Take now also stakes, not wallet");
+    let s = stake_account(&t, &bob);
+    assert_eq!(s.lots[0], jhandi_munda::state::StakeLot { amount: 4_500_000, staked_at: BASE_TIME + 100 });
+    assert_eq!(s.eligible(BASE_TIME + 100 + 86_399), 0, "Take now lot waits 24 h from the loss");
+    assert_eq!(s.eligible(BASE_TIME + 100 + 86_400), 4_500_000);
+}
+
+fn munda_ata_absent(t: &Table, wallet: &Keypair) -> bool {
+    t.svm.get_account(&munda_ata(wallet)).is_none()
+}
+
+// Six losses in six rounds, all redeemed: each one stakes, and no redeem hits TooManyLots.
+#[test]
+fn test_many_loss_redeems_never_too_many_lots() {
+    let mut t = setup();
+    stub_vrf(&mut t);
+    let deployer = new_player(&mut t);
+    init_munda(&mut t, &deployer);
+    init_staking(&mut t, &deployer);
+    let bob = new_player(&mut t);
+    let mut randomness = [0u8; 32];
+    randomness[..6].copy_from_slice(&[1, 1, 4, 5, 0, 2]);
+
+    let mut bets = Vec::new();
+    for i in 0..6i64 {
+        let start = BASE_TIME + i * 200;
+        set_time(&mut t, start);
+        let rid = round(&t).round_id;
+        assert!(place(&mut t, &bob, 4, 1_000_000).is_ok());
+        set_time(&mut t, start + 90);
+        assert!(request_roll(&mut t, &bob).is_ok());
+        let request_id = round(&t).request_id;
+        assert!(send_callback(&mut t, &bob, randomness, request_id).is_ok());
+        set_time(&mut t, start + 100);
+        let bet = bet_pda_r(rid, &bob, 4);
+        assert!(settle_bets(&mut t, &bob, &[bet]).is_ok());
+        assert!(finish_round(&mut t, &bob).is_ok());
+        assert!(open_claim(&mut t, &bob, &bet).is_ok());
+        bets.push(bet);
+    }
+
+    // Every claim has unlocked by the last one's 24 h mark.
+    set_time(&mut t, BASE_TIME + 5 * 200 + 100 + 86_400);
+    for bet in &bets {
+        assert!(wait(&mut t, &bob, bet).is_ok(), "no redeem may hit TooManyLots");
+    }
+    // Six losses of $1, all inside the first $1,000, so 5 MUNDA each (D49).
+    assert_eq!(stake_account(&t, &bob).amount, 30_000_000);
+    assert_eq!(token_amount(&t.svm, &pda(&[jhandi_munda::STAKE_VAULT_SEED])), 30_000_000);
+    assert_eq!(stake_pool(&t).total_staked, 30_000_000);
+    assert_eq!(munda_supply(&t), 30_000_000);
+}
+
+// A wallet holding its faucet 100 MUSD plus 100 from each of `feeders` other wallets.
+fn rich_player(t: &mut Table, feeders: usize) -> Keypair {
+    let player = new_player(t);
+    let to = jhandi_munda::musd_ata(&player.pubkey(), &t.musd_mint);
+    for _ in 0..feeders {
+        let feeder = new_player(t);
+        transfer_musd(t, &feeder, &to, 100_000_000);
+    }
+    player
+}
+
+// D49: losses inside the first $1,000 mint 5 MUNDA per MUSD, and losses after it mint 1:1.
+// A loss that straddles the line is split. Each claim is priced when it opens, so redeem
+// order cannot change it, and the bonus adds exactly 4,000 MUNDA.
+#[test]
+fn test_early_loser_bonus_straddle_and_cap() {
+    let mut t = setup();
+    stub_vrf(&mut t);
+    let deployer = new_player(&mut t);
+    init_munda(&mut t, &deployer);
+    init_staking(&mut t, &deployer);
+    let big = rich_player(&mut t, 12); // 1,300 MUSD
+
+    // $600 fully inside the line: 3,000 MUNDA. The next $600 straddles it: $400 at 5x plus
+    // $200 at 1x = 2,200 MUNDA.
+    let first = lose_and_claim(&mut t, &big, 600_000_000);
+    let second = lose_and_claim(&mut t, &big, 600_000_000);
+    assert_eq!(claim(&t, &first).amount, 3_000_000_000);
+    assert_eq!(claim(&t, &second).amount, 2_200_000_000, "5x on the $400 inside, 1x on the $200 after");
+
+    // Redeem the later claim first: each claim still pays what it was priced at.
+    let now = clock_now(&t);
+    set_time(&mut t, now + 86_400);
+    assert!(wait(&mut t, &big, &second).is_ok());
+    assert!(wait(&mut t, &big, &first).is_ok());
+    assert_eq!(claim(&t, &first).amount, 3_000_000_000);
+    assert_eq!(claim(&t, &second).amount, 2_200_000_000);
+    assert_eq!(stake_account(&t, &big).amount, 5_200_000_000);
+    // $1,200 of losses mint 5,200 MUNDA: the 4,000 MUNDA bonus is the cap on the first $1,000.
+    assert_eq!(munda_supply(&t), 5_200_000_000);
+    assert_eq!(munda_supply(&t) - 1_200_000_000, 4_000_000_000);
+}
+
+// D49: after the first $1,000 of losses, a loss mints 1 MUNDA per MUSD.
+#[test]
+fn test_loss_after_the_cap_mints_one_to_one() {
+    let mut t = setup();
+    stub_vrf(&mut t);
+    let deployer = new_player(&mut t);
+    init_munda(&mut t, &deployer);
+    init_staking(&mut t, &deployer);
+    let big = rich_player(&mut t, 10);
+
+    let early = lose_and_claim(&mut t, &big, 1_000_000_000);
+    let late = lose_and_claim(&mut t, &big, 100_000_000);
+    assert_eq!(claim(&t, &early).amount, 5_000_000_000, "the first $1,000 mints 5x");
+    assert_eq!(claim(&t, &late).amount, 100_000_000, "after the line it is 1x");
 }
 
 #[test]
@@ -1231,6 +1410,7 @@ fn stake_pool(t: &Table) -> jhandi_munda::state::StakePool {
 // redeems with Wait, which mints 1 MUNDA per 1 MUSD lost (D26).
 fn mint_munda(t: &mut Table, holders: &[(&Keypair, u64)]) {
     init_munda(t, holders[0].0);
+    ensure_staking(t, holders[0].0);
     let start = clock_now(t);
     for (h, amount) in holders {
         assert!(place(t, h, 4, *amount).is_ok());
@@ -1254,26 +1434,149 @@ fn mint_munda(t: &mut Table, holders: &[(&Keypair, u64)]) {
     }
 }
 
+// Sets up staking if no earlier call did (the loss redeem stakes its MUNDA, D47).
+fn ensure_staking(t: &mut Table, payer: &Keypair) {
+    if t.svm.get_account(&pda(&[jhandi_munda::STAKE_POOL_SEED])).is_none() {
+        init_staking(t, payer);
+    }
+}
+
+// Creates the wallet's MUNDA token account (create-idempotent), as a wallet does before its
+// first unstake back to the wallet.
+fn create_munda_ata(t: &mut Table, wallet: &Keypair) {
+    let instruction = Instruction::new_with_bytes(
+        jhandi_munda::ATA_PROGRAM_ID,
+        &[1u8],
+        vec![
+            AccountMeta::new(wallet.pubkey(), true),
+            AccountMeta::new(munda_ata(wallet), false),
+            AccountMeta::new_readonly(wallet.pubkey(), false),
+            AccountMeta::new_readonly(pda(&[MUNDA_MINT_SEED]), false),
+            AccountMeta::new_readonly(SYS, false),
+            AccountMeta::new_readonly(SPL_TOKEN_PROGRAM_ID, false),
+        ],
+    );
+    let res = send(&mut t.svm, wallet, instruction);
+    assert!(res.is_ok(), "create MUNDA ATA failed: {:?}", res.err());
+}
+
+// One $n bet on face 4 (a loss) by `wallet` in the current round, settled and claimed.
+// Returns the bet. Leaves the clock at the settle time.
+fn lose_and_claim(t: &mut Table, wallet: &Keypair, amount: u64) -> Pubkey {
+    let start = clock_now(t);
+    let rid = round(t).round_id;
+    assert!(place(t, wallet, 4, amount).is_ok());
+    set_time(t, start + 90);
+    assert!(request_roll(t, wallet).is_ok());
+    let mut randomness = [0u8; 32];
+    randomness[..6].copy_from_slice(&[1, 1, 4, 5, 0, 2]);
+    let request_id = round(t).request_id;
+    assert!(send_callback(t, wallet, randomness, request_id).is_ok());
+    set_time(t, start + 100);
+    let bet = bet_pda_r(rid, wallet, 4);
+    assert!(settle_bets(t, wallet, &[bet]).is_ok());
+    assert!(finish_round(t, wallet).is_ok());
+    assert!(open_claim(t, wallet, &bet).is_ok());
+    bet
+}
+
+// Like `mint_munda`, but each holder takes its MUNDA now (Take now, 90%) at the settle time.
+// The lots start their clock at the loss, so they earn nothing for 24 h (D29).
+fn mint_munda_now(t: &mut Table, holders: &[(&Keypair, u64)]) {
+    init_munda(t, holders[0].0);
+    ensure_staking(t, holders[0].0);
+    let start = clock_now(t);
+    for (h, amount) in holders {
+        assert!(place(t, h, 4, *amount).is_ok());
+    }
+    set_time(t, start + 90);
+    assert!(request_roll(t, holders[0].0).is_ok());
+    let mut randomness = [0u8; 32];
+    randomness[..6].copy_from_slice(&[1, 1, 4, 5, 0, 2]);
+    let request_id = round(t).request_id;
+    assert!(send_callback(t, holders[0].0, randomness, request_id).is_ok());
+    set_time(t, start + 100);
+    let bets: Vec<Pubkey> = holders.iter().map(|(h, _)| bet_pda(h, 4)).collect();
+    assert!(settle_bets(t, holders[0].0, &bets).is_ok());
+    assert!(finish_round(t, holders[0].0).is_ok());
+    for (h, _) in holders {
+        assert!(open_claim(t, h, &bet_pda(h, 4)).is_ok());
+        assert!(take_now(t, h, &bet_pda(h, 4)).is_ok());
+    }
+}
+
 #[test]
 fn test_stake_munda() {
     let mut t = setup();
     stub_vrf(&mut t);
     let a = new_player(&mut t);
     mint_munda(&mut t, &[(&a, 70_000_000)]);
-    assert_eq!(token_amount(&t.svm, &munda_ata(&a)), 70_000_000, "70 MUNDA from the loss");
-    init_staking(&mut t, &a);
 
-    // A zero stake is rejected.
-    assert!(stake(&mut t, &a, 0).is_err(), "a zero stake is rejected");
-
-    // Staking 40 MUNDA: the wallet's free MUNDA falls by what the vault gains.
-    assert!(stake(&mut t, &a, 40_000_000).is_ok());
-    assert_eq!(token_amount(&t.svm, &munda_ata(&a)), 30_000_000);
-    assert_eq!(token_amount(&t.svm, &pda(&[jhandi_munda::STAKE_VAULT_SEED])), 40_000_000);
+    // D47: the loss MUNDA is staked when it is minted, so the wallet holds none.
+    assert!(munda_ata_absent(&t, &a), "no MUNDA in the wallet");
     let s = stake_account(&t, &a);
-    assert_eq!((s.owner, s.amount), (a.pubkey(), 40_000_000));
+    assert_eq!((s.owner, s.amount), (a.pubkey(), 350_000_000));
+    assert_eq!(token_amount(&t.svm, &pda(&[jhandi_munda::STAKE_VAULT_SEED])), 350_000_000);
     let p = stake_pool(&t);
-    assert_eq!((p.total_staked, p.stakers), (40_000_000, 1));
+    assert_eq!((p.total_staked, p.stakers), (350_000_000, 1));
+
+    // A zero stake is rejected, and a stake pulls from the wallet, which is empty here.
+    assert!(stake(&mut t, &a, 0).is_err(), "a zero stake is rejected");
+    assert!(stake(&mut t, &a, 1_000_000).is_err(), "nothing in the wallet to stake");
+    assert_eq!(stake_account(&t, &a).amount, 350_000_000);
+}
+
+// The config admin turns MUNDA transfers on or off (D46). The launch default is off.
+fn set_transfers(t: &mut Table, enabled: bool) -> TransactionResult {
+    send(
+        &mut t.svm,
+        &t.admin,
+        ix(
+            jhandi_munda::accounts::SetTransfersEnabled { config: t.config, admin: t.admin.pubkey() },
+            jhandi_munda::instruction::SetTransfersEnabled { enabled },
+        ),
+    )
+}
+
+fn transfers_enabled(t: &Table) -> bool {
+    let data = t.svm.get_account(&t.config).unwrap().data;
+    jhandi_munda::state::ProgramConfig::try_deserialize(&mut data.as_slice()).unwrap().transfers_enabled
+}
+
+// D46: while transfers are off, unstake is refused and nothing moves. Only the config admin
+// can flip the flag, and once it is on, unstake returns the principal.
+#[test]
+fn test_unstake_locked_until_admin_enables_transfers() {
+    let mut t = setup();
+    stub_vrf(&mut t);
+    let a = new_player(&mut t);
+    mint_munda(&mut t, &[(&a, 70_000_000)]);
+    create_munda_ata(&mut t, &a);
+    assert!(!transfers_enabled(&t), "transfers are off at launch");
+
+    assert!(unstake(&mut t, &a, 40_000_000).is_err(), "unstake is locked while transfers are off");
+    assert_eq!(stake_account(&t, &a).amount, 350_000_000);
+    assert_eq!(token_amount(&t.svm, &pda(&[jhandi_munda::STAKE_VAULT_SEED])), 350_000_000);
+    assert_eq!(token_amount(&t.svm, &munda_ata(&a)), 0);
+
+    // A wallet that is not the config admin cannot flip the flag.
+    let res = send(
+        &mut t.svm,
+        &a,
+        ix(
+            jhandi_munda::accounts::SetTransfersEnabled { config: t.config, admin: a.pubkey() },
+            jhandi_munda::instruction::SetTransfersEnabled { enabled: true },
+        ),
+    );
+    assert!(res.is_err(), "a non-admin cannot turn transfers on");
+    assert!(!transfers_enabled(&t));
+
+    // The admin turns them on, and unstake now returns the principal.
+    assert!(set_transfers(&mut t, true).is_ok());
+    assert!(transfers_enabled(&t));
+    assert!(unstake(&mut t, &a, 40_000_000).is_ok());
+    assert_eq!(token_amount(&t.svm, &munda_ata(&a)), 40_000_000);
+    assert_eq!(stake_account(&t, &a).amount, 310_000_000);
 }
 
 fn unstake(t: &mut Table, owner: &Keypair, amount: u64) -> TransactionResult {
@@ -1282,6 +1585,7 @@ fn unstake(t: &mut Table, owner: &Keypair, amount: u64) -> TransactionResult {
         owner,
         ix(
             jhandi_munda::accounts::UnstakeMunda {
+                config: t.config,
                 stake_pool: pda(&[jhandi_munda::STAKE_POOL_SEED]),
                 stake: pda(&[jhandi_munda::STAKE_SEED, owner.pubkey().as_ref()]),
                 stake_vault: pda(&[jhandi_munda::STAKE_VAULT_SEED]),
@@ -1301,22 +1605,21 @@ fn test_unstake_munda_principal() {
     stub_vrf(&mut t);
     let a = new_player(&mut t);
     mint_munda(&mut t, &[(&a, 70_000_000)]);
-    init_staking(&mut t, &a);
-    assert!(stake(&mut t, &a, 40_000_000).is_ok());
+    create_munda_ata(&mut t, &a);
+    assert!(set_transfers(&mut t, true).is_ok(), "the admin turns transfers on (D46)");
 
-    // Stake and unstake straight away: the principal comes back in full.
-    assert!(unstake(&mut t, &a, 40_000_000).is_ok());
-    assert_eq!(token_amount(&t.svm, &munda_ata(&a)), 70_000_000, "principal back");
-    assert_eq!(token_amount(&t.svm, &pda(&[jhandi_munda::STAKE_VAULT_SEED])), 0);
-    assert_eq!(stake_account(&t, &a).amount, 0);
-    assert_eq!(stake_pool(&t).total_staked, 0);
+    // Unstake 200 MUNDA: the principal comes back to the wallet in full.
+    assert!(unstake(&mut t, &a, 200_000_000).is_ok());
+    assert_eq!(token_amount(&t.svm, &munda_ata(&a)), 200_000_000, "principal back");
+    assert_eq!(token_amount(&t.svm, &pda(&[jhandi_munda::STAKE_VAULT_SEED])), 150_000_000);
+    assert_eq!(stake_account(&t, &a).amount, 150_000_000);
+    assert_eq!(stake_pool(&t).total_staked, 150_000_000);
 
     // Unstaking more than is staked is rejected and moves nothing.
-    assert!(stake(&mut t, &a, 10_000_000).is_ok());
-    assert!(unstake(&mut t, &a, 11_000_000).is_err(), "over-unstake is rejected");
-    assert_eq!(stake_account(&t, &a).amount, 10_000_000);
-    assert!(unstake(&mut t, &a, 10_000_000).is_ok());
-    assert_eq!(token_amount(&t.svm, &munda_ata(&a)), 70_000_000);
+    assert!(unstake(&mut t, &a, 151_000_000).is_err(), "over-unstake is rejected");
+    assert_eq!(stake_account(&t, &a).amount, 150_000_000);
+    assert!(unstake(&mut t, &a, 150_000_000).is_ok());
+    assert_eq!(token_amount(&t.svm, &munda_ata(&a)), 350_000_000);
 }
 
 // --- Fee distribution helpers (Step 9.3) ---
@@ -1411,35 +1714,39 @@ fn test_fee_split_two_stakers() {
     let b = new_player(&mut t);
     let c = new_player(&mut t);
     mint_munda(&mut t, &[(&a, 70_000_000), (&b, 30_000_000), (&c, 5_000_000)]);
-    init_staking(&mut t, &a);
     init_fee_vaults(&mut t, &a);
     init_insurance(&mut t, &a);
-    assert!(stake(&mut t, &a, 70_000_000).is_ok());
-    assert!(stake(&mut t, &b, 30_000_000).is_ok());
-    // C holds 5 MUNDA but never stakes it.
+    // C takes all its MUNDA (25, from a 5 MUSD loss) out of the stake: unstaked MUNDA earns nothing.
+    assert!(set_transfers(&mut t, true).is_ok());
+    create_munda_ata(&mut t, &c);
+    assert!(unstake(&mut t, &c, 25_000_000).is_ok());
     // Rewards count only after the 24-hour stake lock (D29).
     let now = clock_now(&t);
     set_time(&mut t, now + 86_400);
 
+    // mint_munda's three losses (105 MUSD) also accrue the 2% loss fee (D45): 2,100,000,
+    // so the pots hold 420,000 / 210,000 / 1,470,000 before the win.
     earn_win_fee(&mut t);
     // The crank must be given every staker: leaving B out is refused.
     assert!(distribute(&mut t, &a, &[&a]).is_err(), "an incomplete staker set is refused");
 
-    assert!(distribute(&mut t, &a, &[&a, &b]).is_ok());
+    // C's stake account still exists (now empty), so the crank must pass it too.
+    assert!(distribute(&mut t, &a, &[&a, &b]).is_err(), "C's empty stake must be passed too");
+    assert!(distribute(&mut t, &a, &[&a, &b, &c]).is_ok());
     // 10% of the win fee goes to the dev vault; 20% goes to insurance (not yet full).
-    assert_eq!(token_amount(&t.svm, &pda(&[jhandi_munda::DEV_VAULT_SEED])), 40_000);
-    assert_eq!(token_amount(&t.svm, &pda(&[INSURANCE_VAULT_SEED])), 80_000);
-    // The 70% slice, 280,000, splits 70 : 30 by stake.
-    assert_eq!(stake_account(&t, &a).pending, 196_000);
-    assert_eq!(stake_account(&t, &b).pending, 84_000);
+    assert_eq!(token_amount(&t.svm, &pda(&[jhandi_munda::DEV_VAULT_SEED])), 250_000);
+    assert_eq!(token_amount(&t.svm, &pda(&[INSURANCE_VAULT_SEED])), 500_000);
+    // The 70% slice, 1,750,000 (loss fees 1,470,000 plus the win's 280,000), splits 70 : 30 by stake.
+    assert_eq!(stake_account(&t, &a).pending, 1_225_000);
+    assert_eq!(stake_account(&t, &b).pending, 525_000);
 
     // Claims pay each staker's slice.
     let a_ata = jhandi_munda::musd_ata(&a.pubkey(), &t.musd_mint);
     let b_ata = jhandi_munda::musd_ata(&b.pubkey(), &t.musd_mint);
     assert!(claim_rewards(&mut t, &a).is_ok());
     assert!(claim_rewards(&mut t, &b).is_ok());
-    assert_eq!(token_amount(&t.svm, &a_ata), 30_000_000 + 196_000, "A: 70 of the 100 staked");
-    assert_eq!(token_amount(&t.svm, &b_ata), 70_000_000 + 84_000, "B: 30 of the 100 staked");
+    assert_eq!(token_amount(&t.svm, &a_ata), 30_000_000 + 1_225_000, "A: 70 of the 100 staked");
+    assert_eq!(token_amount(&t.svm, &b_ata), 70_000_000 + 525_000, "B: 30 of the 100 staked");
 
     // The unstaked holder (C) has no stake, so no reward and no claim.
     assert!(claim_rewards(&mut t, &c).is_err(), "unstaked MUNDA earns nothing");
@@ -1495,20 +1802,19 @@ fn test_stake_and_immediate_unstake_earns_zero() {
     mint_munda(&mut t, &[(&a, 70_000_000), (&b, 30_000_000)]);
     init_fee_vaults(&mut t, &a);
     init_insurance(&mut t, &a);
-    init_staking(&mut t, &a);
+    assert!(set_transfers(&mut t, true).is_ok());
 
-    // B stakes and matures for a day. Then A stakes and unstakes straight away.
-    assert!(stake(&mut t, &b, 30_000_000).is_ok());
-    let now = clock_now(&t);
-    set_time(&mut t, now + 86_400);
-    assert!(stake(&mut t, &a, 70_000_000).is_ok());
-    assert!(unstake(&mut t, &a, 70_000_000).is_ok());
-    assert_eq!(token_amount(&t.svm, &munda_ata(&a)), 70_000_000, "principal back at once");
+    // A takes its whole stake out before any fee: principal back at once, and an
+    // unstaked wallet earns nothing. B stays staked.
+    create_munda_ata(&mut t, &a);
+    assert!(unstake(&mut t, &a, 350_000_000).is_ok());
+    assert_eq!(token_amount(&t.svm, &munda_ata(&a)), 350_000_000, "principal back at once");
 
     earn_win_fee(&mut t);
     assert!(distribute(&mut t, &a, &[&a, &b]).is_ok());
     assert_eq!(stake_account(&t, &a).pending, 0, "stake and unstake earns zero");
-    assert_eq!(stake_account(&t, &b).pending, 280_000, "the mature stake takes the whole slice");
+    // Stakers' pot: 1,400,000 from the two losses plus 280,000 from the win.
+    assert_eq!(stake_account(&t, &b).pending, 1_680_000, "the mature stake takes the whole slice");
 }
 
 #[test]
@@ -1517,26 +1823,24 @@ fn test_stake_24h_warp_earns() {
     stub_vrf(&mut t);
     let a = new_player(&mut t);
     let b = new_player(&mut t);
-    mint_munda(&mut t, &[(&a, 70_000_000), (&b, 30_000_000)]);
+    // Take now: the lots start their clock at the loss, so they mature 24 h after it.
+    mint_munda_now(&mut t, &[(&a, 70_000_000), (&b, 30_000_000)]);
     init_fee_vaults(&mut t, &a);
     init_insurance(&mut t, &a);
-    init_staking(&mut t, &a);
-    assert!(stake(&mut t, &a, 70_000_000).is_ok());
-    assert!(stake(&mut t, &b, 30_000_000).is_ok());
 
     // Inside the 24 hours, a fee earns nothing: the staker pot waits in the table.
     earn_win_fee(&mut t);
     assert!(distribute(&mut t, &a, &[&a, &b]).is_ok());
     assert_eq!(stake_account(&t, &a).pending, 0);
     assert_eq!(stake_account(&t, &b).pending, 0);
-    assert_eq!(staker_pot(&t), 280_000, "the pot waits for stakers who have matured");
+    assert_eq!(staker_pot(&t), 1_680_000, "the pot waits for stakers who have matured");
 
     // After a 24-hour clock warp, the same stakes earn their 70 : 30 share.
     let now = clock_now(&t);
     set_time(&mut t, now + 86_400);
     assert!(distribute(&mut t, &a, &[&a, &b]).is_ok());
-    assert_eq!(stake_account(&t, &a).pending, 196_000);
-    assert_eq!(stake_account(&t, &b).pending, 84_000);
+    assert_eq!(stake_account(&t, &a).pending, 1_176_000);
+    assert_eq!(stake_account(&t, &b).pending, 504_000);
     assert_eq!(staker_pot(&t), 0);
 }
 
@@ -1546,36 +1850,36 @@ fn test_new_stake_lot_has_own_clock() {
     stub_vrf(&mut t);
     let w = new_player(&mut t);
     let x = new_player(&mut t);
-    mint_munda(&mut t, &[(&w, 100_000_000), (&x, 30_000_000)]);
+    // Lot A: W's 70 MUNDA and X's 30 MUNDA, staked when their losses are redeemed (D47).
+    // W keeps 30 MUSD, enough for the next bet.
+    mint_munda(&mut t, &[(&w, 70_000_000), (&x, 30_000_000)]);
     init_fee_vaults(&mut t, &w);
     init_insurance(&mut t, &w);
-    init_staking(&mut t, &w);
 
-    // Lot A: W stakes 70 and X stakes 30 at T0.
-    assert!(stake(&mut t, &w, 70_000_000).is_ok());
-    assert!(stake(&mut t, &x, 30_000_000).is_ok());
-    let now = clock_now(&t);
-    set_time(&mut t, now + 86_400); // lot A matures
+    // Lot B: W loses 30 MUSD more and takes the MUNDA now (90%, so 27 MUNDA). The new
+    // lot's clock starts at that loss, so it earns nothing for 24 h (D29).
+    let bet = lose_and_claim(&mut t, &w, 30_000_000);
+    assert!(take_now(&mut t, &w, &bet).is_ok());
+    let s = stake_account(&t, &w);
+    assert_eq!(s.lots[0].amount, 350_000_000, "lot A keeps its clock");
+    assert_eq!(s.lots[1].amount, 135_000_000, "lot B is its own lot");
 
-    // Lot B: W tops up 30 now. It is fresh and earns nothing yet.
-    assert!(stake(&mut t, &w, 30_000_000).is_ok());
-    assert_eq!(stake_account(&t, &w).lots[0].amount, 70_000_000, "lot A keeps its clock");
-
-    // First fee: only lot A counts, so W has 70 of the 100 eligible; X has 30.
+    // First fee: the pot is 1,400,000 (mint_munda's losses, 70%) + 420,000 (this loss, 70%)
+    // + 280,000 (the win) = 2,100,000. Only lot A counts: W has 70 of the 100 eligible.
     earn_win_fee(&mut t);
     assert!(distribute(&mut t, &w, &[&w, &x]).is_ok());
-    assert_eq!(stake_account(&t, &w).pending, 196_000, "lot B earns zero; W gets 70 : 30");
-    assert_eq!(stake_account(&t, &x).pending, 84_000);
+    assert_eq!(stake_account(&t, &w).pending, 1_470_000, "lot B earns zero: W gets 70 of 100");
+    assert_eq!(stake_account(&t, &x).pending, 630_000);
+    assert_eq!(staker_pot(&t), 0);
 
-    // A further 24 hours: lot B matures too. Both lots now earn.
+    // A further 24 hours from lot B's loss: lot B matures. W has 97 of the 127 eligible.
     let now = clock_now(&t);
     set_time(&mut t, now + 86_400);
     earn_win_fee(&mut t);
     assert!(distribute(&mut t, &w, &[&w, &x]).is_ok());
-    // W has 100 of 130 eligible: 280,000 x 100 / 130 = 215,384; X gets 64,615.
-    // One base unit of rounding stays in the pot.
-    assert_eq!(stake_account(&t, &w).pending, 196_000 + 215_384, "B earns after its 24 hours");
-    assert_eq!(stake_account(&t, &x).pending, 84_000 + 64_615);
+    // The pot is 280,000 (the win): W 280,000 x 97 / 127 = 213,858; X 66,141. One base unit stays.
+    assert_eq!(stake_account(&t, &w).pending, 1_470_000 + 213_858, "lot B earns after its 24 hours");
+    assert_eq!(stake_account(&t, &x).pending, 630_000 + 66_141);
     assert_eq!(staker_pot(&t), 1, "rounding dust stays in the pot");
 }
 
@@ -1588,9 +1892,6 @@ fn test_distribute_rejects_duplicate_staker() {
     mint_munda(&mut t, &[(&a, 50_000_000), (&b, 50_000_000)]);
     init_fee_vaults(&mut t, &a);
     init_insurance(&mut t, &a);
-    init_staking(&mut t, &a);
-    assert!(stake(&mut t, &a, 50_000_000).is_ok());
-    assert!(stake(&mut t, &b, 50_000_000).is_ok());
     let now = clock_now(&t);
     set_time(&mut t, now + 86_400);
     earn_win_fee(&mut t);
@@ -1599,10 +1900,10 @@ fn test_distribute_rejects_duplicate_staker() {
     assert!(distribute(&mut t, &a, &[&a, &a]).is_err(), "a duplicate staker is refused");
     assert_eq!(stake_account(&t, &b).pending, 0, "the refused call changed nothing");
 
-    // The complete set works: 280,000 split 50 : 50.
+    // The complete set works: 1,680,000 (1,400,000 from the losses plus 280,000) split 50 : 50.
     assert!(distribute(&mut t, &a, &[&a, &b]).is_ok());
-    assert_eq!(stake_account(&t, &a).pending, 140_000);
-    assert_eq!(stake_account(&t, &b).pending, 140_000);
+    assert_eq!(stake_account(&t, &a).pending, 840_000);
+    assert_eq!(stake_account(&t, &b).pending, 840_000);
 }
 
 #[test]
@@ -1618,9 +1919,6 @@ fn test_stakers_slice_leaves_pool_nav() {
     mint_munda(&mut t, &[(&a, 50_000_000), (&b, 50_000_000)]);
     init_fee_vaults(&mut t, &a);
     init_insurance(&mut t, &a);
-    init_staking(&mut t, &a);
-    assert!(stake(&mut t, &a, 50_000_000).is_ok());
-    assert!(stake(&mut t, &b, 50_000_000).is_ok());
     let now = clock_now(&t);
     set_time(&mut t, now + 86_400);
     earn_win_fee(&mut t);
@@ -1632,11 +1930,11 @@ fn test_stakers_slice_leaves_pool_nav() {
     let supply = u64::from_le_bytes(t.svm.get_account(&share_mint).unwrap().data[36..44].try_into().unwrap());
     assert!(distribute(&mut t, &a, &[&a, &b]).is_ok());
 
-    // The pool vault gives up the dev (40,000), insurance (80,000) and staker
-    // (280,000) slices. The staker slice sits in the rewards vault, not the pool.
+    // The pool vault gives up the dev (240,000), insurance (480,000) and staker
+    // (1,680,000) slices, loss fees included (D45). The staker slice sits in the rewards vault, not the pool.
     let after = token_amount(&t.svm, &vault);
-    assert_eq!(before - after, 400_000);
-    assert_eq!(token_amount(&t.svm, &rewards), 280_000);
+    assert_eq!(before - after, 2_400_000);
+    assert_eq!(token_amount(&t.svm, &rewards), 1_680_000);
 
     // An LP withdraws at NAV = pool vault / supply. The rewards vault is not in NAV.
     let expected = (1_000_000u128 * after as u128 / supply as u128) as u64;
@@ -1650,9 +1948,9 @@ fn test_stakers_slice_leaves_pool_nav() {
     let b_ata = jhandi_munda::musd_ata(&b.pubkey(), &t.musd_mint);
     assert!(claim_rewards(&mut t, &a).is_ok());
     assert!(claim_rewards(&mut t, &b).is_ok());
-    // Each staker lost 50 MUSD in the mint round, so holds 50 MUSD before the 140,000 reward.
-    assert_eq!(token_amount(&t.svm, &a_ata), 50_000_000 + 140_000);
-    assert_eq!(token_amount(&t.svm, &b_ata), 50_000_000 + 140_000);
+    // Each staker lost 50 MUSD in the mint round, so holds 50 MUSD before the 840,000 reward.
+    assert_eq!(token_amount(&t.svm, &a_ata), 50_000_000 + 840_000);
+    assert_eq!(token_amount(&t.svm, &b_ata), 50_000_000 + 840_000);
     assert_eq!(token_amount(&t.svm, &rewards), 0, "the rewards vault pays out in full");
 }
 
@@ -2114,12 +2412,116 @@ fn test_migrate_config_then_delegate() {
     // The upgrade authority migrates; `admin` becomes the table authority.
     assert!(migrate(&mut t, &admin).is_ok(), "the upgrade authority migrates");
     let data = t.svm.get_account(&t.config).unwrap().data;
-    assert_eq!(data.len(), 74, "the config is in the current layout");
+    // 8 discriminator + admin + musd_mint + 2 bumps + transfers_enabled (D46) + overflow
+    // target and mark (D48) = 91.
+    assert_eq!(data.len(), 91, "the config is in the current layout");
     assert_eq!(&data[8..40], admin.pubkey().as_ref(), "admin is the upgrade authority");
     assert!(migrate(&mut t, &admin).is_err(), "a second migration is refused");
 
     // Now delegation works, for the admin only (D40).
     assert!(delegate_round_by(&mut t, &admin).is_ok(), "the admin delegates the round");
+}
+
+// --- Overflow rule (D48, #120) ---
+
+// The overflow crank: the stake accounts are the remaining accounts.
+fn overflow(t: &mut Table, signer: &Keypair, stakers: &[&Keypair]) -> TransactionResult {
+    let mut instruction = ix(
+        jhandi_munda::accounts::DistributeOverflow {
+            config: t.config,
+            table: t.table,
+            stake_pool: pda(&[jhandi_munda::STAKE_POOL_SEED]),
+            pool: t.pool,
+            pool_vault: t.vault,
+            queue: pda(&[QUEUE_SEED]),
+            rewards_vault: pda(&[jhandi_munda::REWARDS_VAULT_SEED]),
+            token_program: SPL_TOKEN_PROGRAM_ID,
+        },
+        jhandi_munda::instruction::DistributeOverflow {},
+    );
+    for s in stakers {
+        instruction.accounts.push(AccountMeta::new(pda(&[jhandi_munda::STAKE_SEED, s.pubkey().as_ref()]), false));
+    }
+    send(&mut t.svm, signer, instruction)
+}
+
+// D48: pool assets above the $10,000 target pay half the excess to eligible stakers. A staker
+// still inside the 24-hour lock gets nothing, and a second crank right after pays nothing.
+#[test]
+fn test_overflow_pays_half_excess_to_eligible_stakers() {
+    let mut t = setup();
+    stub_vrf(&mut t);
+    let deployer = new_player(&mut t);
+    init_insurance(&mut t, &deployer);
+    init_fee_vaults(&mut t, &deployer);
+
+    // The whale's deposit comes first: losses into a pool with no shares would be swept to
+    // insurance by the next deposit (D43). The deposit of 9,892.2 MUSD, with the losses below
+    // (100 + 10 MUSD) and the pending loss fees (2 + 0.2 MUSD, not pool money), puts assets at $10,000.
+    let whale = rich_player(&mut t, 150);
+    deposit(&mut t, &whale, 9_892_200_000);
+
+    // A and B lose 70 and 30 MUSD and stake 350 and 150 MUNDA, mature at once (Wait).
+    let a = new_player(&mut t);
+    let b = new_player(&mut t);
+    mint_munda(&mut t, &[(&a, 70_000_000), (&b, 30_000_000)]);
+    // C loses 10 MUSD and takes its 45 MUNDA now (Take now), so its lot is fresh: 24 h lock.
+    let c = new_player(&mut t);
+    let c_bet = lose_and_claim(&mut t, &c, 10_000_000);
+    assert!(take_now(&mut t, &c, &c_bet).is_ok());
+
+    assert!(overflow(&mut t, &deployer, &[&a, &b, &c]).is_ok());
+    assert_eq!(token_amount(&t.svm, &t.vault), 10_002_200_000, "at the target nothing moves");
+    assert_eq!(stake_account(&t, &a).pending, 0);
+
+    // $2,000 more: assets $12,000, excess $2,000, half of it ($1,000) to stakers.
+    deposit(&mut t, &whale, 2_000_000_000);
+    assert!(overflow(&mut t, &deployer, &[&a, &b, &c]).is_ok());
+    // A has 350 and B 150 eligible MUNDA; C has nothing eligible (24 h lock), so it gets 0.
+    assert_eq!(stake_account(&t, &a).pending, 700_000_000, "70% of the $1,000");
+    assert_eq!(stake_account(&t, &b).pending, 300_000_000, "30% of the $1,000");
+    assert_eq!(stake_account(&t, &c).pending, 0, "a stake inside the 24-hour lock earns nothing");
+    assert_eq!(token_amount(&t.svm, &pda(&[jhandi_munda::REWARDS_VAULT_SEED])), 1_000_000_000);
+    assert_eq!(token_amount(&t.svm, &t.vault), 11_002_200_000, "the other half stays in the pool");
+
+    // A second crank right after pays nothing more.
+    assert!(overflow(&mut t, &deployer, &[&a, &b, &c]).is_ok());
+    assert_eq!(stake_account(&t, &a).pending, 700_000_000);
+    assert_eq!(stake_account(&t, &b).pending, 300_000_000);
+    assert_eq!(token_amount(&t.svm, &t.vault), 11_002_200_000);
+}
+
+// D30: the overflow waits while a win is queued behind the pool.
+#[test]
+fn test_overflow_waits_for_an_empty_queue() {
+    let mut t = setup();
+    stub_vrf(&mut t);
+    let deployer = new_player(&mut t);
+    init_insurance(&mut t, &deployer);
+    init_fee_vaults(&mut t, &deployer);
+    let funder = new_player(&mut t);
+    deposit(&mut t, &funder, 5_000_000);
+    let alice = new_player(&mut t);
+    let bob = new_player(&mut t);
+    assert!(place(&mut t, &alice, 2, 10_000_000).is_ok());
+    assert!(place(&mut t, &bob, 2, 10_000_000).is_ok());
+    set_time(&mut t, BASE_TIME + 90);
+    assert!(request_roll(&mut t, &alice).is_ok());
+    let mut randomness = [0u8; 32];
+    randomness[..6].copy_from_slice(&[1, 1, 4, 5, 0, 2]);
+    let request_id = round(&t).request_id;
+    assert!(send_callback(&mut t, &alice, randomness, request_id).is_ok());
+    set_time(&mut t, BASE_TIME + 100);
+    let (ab, bb) = (bet_pda(&alice, 2), bet_pda(&bob, 2));
+    assert!(settle_bets(&mut t, &alice, &[ab, bb]).is_ok());
+    assert!(finish_round(&mut t, &alice).is_ok());
+    assert!(open_claim(&mut t, &alice, &ab).is_ok());
+    assert!(open_claim(&mut t, &bob, &bb).is_ok());
+    set_time(&mut t, BASE_TIME + 190);
+    assert!(wait(&mut t, &alice, &ab).is_ok());
+    assert!(claim(&t, &ab).queued, "Alice's $29.60 waits in the queue");
+
+    assert!(overflow(&mut t, &deployer, &[]).is_err(), "no overflow while a win is queued (D30)");
 }
 
 // --- migrate_table and migrate_round (Blitz verify, PR #109) ---

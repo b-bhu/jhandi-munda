@@ -18,7 +18,7 @@ use crate::{
     instructions::claim_redeem::{spl_transfer, token_balance},
     instructions::payout_queue::enqueue,
     state::PayoutQueue,
-    payout::{gross_return, matches, settle_win, split_fee, FeeSplit, Settled},
+    payout::{gross_return, loss_fee, matches, settle_win, split_fee, FeeSplit, Settled},
     state::{Bet, ChipStack, PoolState, Round, RoundStatus, TableConfig},
     BET_SEED, CAGE_VAULT_SEED, CHIPS_SEED, POOL_SEED, POOL_VAULT_SEED, QUEUE_SEED, ROUND_SEED,
     SPL_TOKEN_PROGRAM_ID, TABLE_SEED,
@@ -59,11 +59,15 @@ pub(crate) fn save_account<T: AccountSerialize>(info: &AccountInfo, value: &T) -
     Ok(())
 }
 
-/// Prices one bet on the round's faces (D9) and takes the 2% win fee (D17).
+/// Prices one bet on the round's faces (D9) and takes the 2% fee (D17 on a win,
+/// D45 on a loss: 2% of the lost stake, accrued from pool money).
 fn price(bet: &mut Bet, faces: &[u8; 6], now: i64) -> Result<(Settled, FeeSplit)> {
     let k = matches(bet.symbol, faces);
     let gross = gross_return(bet.amount, k).ok_or(ErrorCode::MathOverflow)?;
-    let settled = settle_win(bet.amount, gross);
+    let mut settled = settle_win(bet.amount, gross);
+    if settled.owed == 0 {
+        settled.fee = loss_fee(bet.amount);
+    }
     bet.owed = settled.owed;
     bet.settled = true;
     bet.settled_at = now;

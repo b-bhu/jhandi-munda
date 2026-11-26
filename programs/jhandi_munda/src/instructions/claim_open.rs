@@ -7,8 +7,9 @@ use anchor_lang::prelude::*;
 
 use crate::{
     error::ErrorCode,
-    state::{Bet, Claim, ClaimAsset},
-    BET_SEED, CLAIM_SEED, LOSS_EARLY_EXIT_BPS, LOSS_UNLOCK_SECS, ROUND_LENGTH_SECS,
+    payout::loss_munda,
+    state::{Bet, Claim, ClaimAsset, LossTally},
+    BET_SEED, CLAIM_SEED, LOSS_EARLY_EXIT_BPS, LOSS_TALLY_SEED, LOSS_UNLOCK_SECS, ROUND_LENGTH_SECS,
     WIN_EARLY_EXIT_BPS,
 };
 
@@ -31,6 +32,17 @@ pub struct OpenClaim<'info> {
     )]
     pub claim: Account<'info, Claim>,
 
+    /// The global loss tally (D49): read to price the early-loser bonus, then increased by
+    /// this loss. Created on the first claim opened.
+    #[account(
+        init_if_needed,
+        payer = payer,
+        space = 8 + LossTally::INIT_SPACE,
+        seeds = [LOSS_TALLY_SEED],
+        bump
+    )]
+    pub loss_tally: Account<'info, LossTally>,
+
     /// Anyone can open a claim; the opener pays its rent.
     #[account(mut)]
     pub payer: Signer<'info>,
@@ -44,12 +56,16 @@ pub fn handle_open_claim(ctx: Context<OpenClaim>) -> Result<()> {
     // A chip bet is paid into chips at settle (D39); it has no claim.
     require!(!bet.paid_with_chips, ErrorCode::ChipBetSettledToChips);
 
-    // A win pays its owed MUSD after one round (D7). A loss pays MUNDA at one
-    // base unit per base unit lost, after 24 hours (D23, D26).
+    // A win pays its owed MUSD after one round (D7). A loss pays MUNDA after 24 hours (D23).
+    // The loss's MUNDA is priced now, from the global tally, so redeem order cannot change it (D49).
     let (asset, amount, unlock_at, early_exit_bps) = if bet.owed > 0 {
         (ClaimAsset::Musd, bet.owed, bet.settled_at + ROUND_LENGTH_SECS, WIN_EARLY_EXIT_BPS)
     } else {
-        (ClaimAsset::Munda, bet.amount, bet.settled_at + LOSS_UNLOCK_SECS, LOSS_EARLY_EXIT_BPS)
+        let tally = &mut ctx.accounts.loss_tally;
+        let munda = loss_munda(tally.total_lost, bet.amount);
+        tally.total_lost = tally.total_lost.checked_add(bet.amount).ok_or(ErrorCode::MathOverflow)?;
+        tally.bump = ctx.bumps.loss_tally;
+        (ClaimAsset::Munda, munda, bet.settled_at + LOSS_UNLOCK_SECS, LOSS_EARLY_EXIT_BPS)
     };
 
     let claim = &mut ctx.accounts.claim;

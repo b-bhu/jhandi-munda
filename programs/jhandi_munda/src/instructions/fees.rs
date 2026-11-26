@@ -330,3 +330,121 @@ pub fn handle_claim_stake_rewards(ctx: Context<ClaimStakeRewards>) -> Result<()>
     msg!("Stake rewards claimed: {} base MUSD", amount);
     Ok(())
 }
+
+/// Overflow rule (D48, #120). Pool assets are the vault less the pending fee pots (not pool
+/// money yet). Above `overflow_target`, half the excess goes to eligible stakers, pro rata, and
+/// the other half stays in the pool. Nothing moves while the payout queue is not empty (D30).
+/// `overflow_mark` makes a second call right after pay nothing: only assets above the mark
+/// count, and the mark is the assets left after each payout.
+#[derive(Accounts)]
+pub struct DistributeOverflow<'info> {
+    /// Program config: holds the target and the mark.
+    #[account(mut, seeds = [CONFIG_SEED], bump)]
+    pub config: Account<'info, ProgramConfig>,
+
+    /// Table settings: the pending fee pots are not pool money, so they are not counted.
+    #[account(seeds = [TABLE_SEED], bump)]
+    pub table: Account<'info, TableConfig>,
+
+    /// Staking totals: checks the stake accounts given are the complete set.
+    #[account(seeds = [STAKE_POOL_SEED], bump = stake_pool.bump)]
+    pub stake_pool: Account<'info, StakePool>,
+
+    /// The house pool: its vault pays the overflow out.
+    #[account(seeds = [POOL_SEED], bump)]
+    pub pool: Account<'info, PoolState>,
+
+    /// CHECK: the pool MUSD vault, seeds pin it.
+    #[account(mut, seeds = [POOL_VAULT_SEED], bump)]
+    pub pool_vault: UncheckedAccount<'info>,
+
+    /// The payout queue: the overflow waits until every queued winner is paid (D30).
+    #[account(seeds = [QUEUE_SEED], bump)]
+    pub queue: AccountLoader<'info, PayoutQueue>,
+
+    /// CHECK: the rewards vault (stakers' slice), seeds pin it.
+    #[account(mut, seeds = [REWARDS_VAULT_SEED], bump)]
+    pub rewards_vault: UncheckedAccount<'info>,
+
+    /// CHECK: verified against SPL_TOKEN_PROGRAM_ID in the handler.
+    pub token_program: UncheckedAccount<'info>,
+    // Remaining accounts: every Stake account, once each, writable.
+}
+
+pub fn handle_distribute_overflow<'info>(ctx: Context<'info, DistributeOverflow<'info>>) -> Result<()> {
+    require_keys_eq!(
+        ctx.accounts.token_program.key(),
+        SPL_TOKEN_PROGRAM_ID,
+        ErrorCode::InvalidTokenProgram
+    );
+    {
+        let queue = ctx.accounts.queue.load()?;
+        require!(queue.head == queue.tail, ErrorCode::QueueNotEmpty);
+    }
+
+    let table = &ctx.accounts.table;
+    let pots = table
+        .fee_devs
+        .checked_add(table.fee_treasury)
+        .and_then(|x| x.checked_add(table.fee_stakers))
+        .ok_or(ErrorCode::MathOverflow)?;
+    let vault = ctx.accounts.pool_vault.to_account_info();
+    let assets = token_balance(&vault)?.saturating_sub(pots);
+
+    // Above the target, and above the mark (the assets after the last payout), counts as overflow.
+    let mark = ctx.accounts.config.overflow_mark.min(assets);
+    let baseline = ctx.accounts.config.overflow_target.max(mark);
+    ctx.accounts.config.overflow_mark = mark;
+    if assets <= baseline {
+        msg!("Overflow: pool assets {} are within the target; nothing to pay", assets);
+        return Ok(());
+    }
+    let share = (assets - baseline) / 2;
+
+    // Every stake, once each, to credit the eligible ones (the same checks as distribute_fees).
+    require!(
+        ctx.remaining_accounts.len() == ctx.accounts.stake_pool.stakers as usize,
+        ErrorCode::StakerSetMismatch
+    );
+    let mut stakes: Vec<Account<'info, Stake>> = Vec::with_capacity(ctx.remaining_accounts.len());
+    let mut seen: Vec<Pubkey> = Vec::with_capacity(ctx.remaining_accounts.len());
+    let mut staked_total = 0u64;
+    for info in ctx.remaining_accounts.iter() {
+        require!(info.is_writable, ErrorCode::StakerSetMismatch);
+        require!(!seen.contains(&info.key()), ErrorCode::StakerSetMismatch);
+        seen.push(info.key());
+        let stake: Account<Stake> = Account::try_from(info)?;
+        let expected = Pubkey::find_program_address(&[STAKE_SEED, stake.owner.as_ref()], &crate::ID).0;
+        require_keys_eq!(info.key(), expected, ErrorCode::StakerSetMismatch);
+        staked_total = staked_total.checked_add(stake.amount).ok_or(ErrorCode::MathOverflow)?;
+        stakes.push(stake);
+    }
+    require!(staked_total == ctx.accounts.stake_pool.total_staked, ErrorCode::StakerSetMismatch);
+
+    // Stakers still inside the 24-hour lock get nothing (D29). If nobody is eligible, the excess stays.
+    let now = Clock::get()?.unix_timestamp;
+    let eligible_total: u64 = stakes.iter().map(|s| eligible_amount(s, now)).sum();
+    if eligible_total == 0 || share == 0 {
+        msg!("Overflow: no eligible stake to pay {}", share);
+        return Ok(());
+    }
+    let mut paid = 0u64;
+    for stake in stakes.iter_mut() {
+        let credit = (share as u128 * eligible_amount(stake, now) as u128 / eligible_total as u128) as u64;
+        stake.pending = stake.pending.checked_add(credit).ok_or(ErrorCode::MathOverflow)?;
+        paid += credit;
+    }
+
+    // Move the credited total from the pool vault to the rewards vault. Rounding dust stays in the pool.
+    let pool_info = ctx.accounts.pool.to_account_info();
+    let seeds: &[&[u8]] = &[POOL_SEED, &[ctx.accounts.pool.bump]];
+    if paid > 0 {
+        spl_transfer(&vault, &ctx.accounts.rewards_vault.to_account_info(), &pool_info, paid, &[seeds])?;
+    }
+    ctx.accounts.config.overflow_mark = assets - paid;
+    for stake in stakes.iter() {
+        stake.exit(&crate::ID)?;
+    }
+    msg!("Overflow: {} base MUSD to stakers, {} stay in the pool", paid, assets - paid);
+    Ok(())
+}

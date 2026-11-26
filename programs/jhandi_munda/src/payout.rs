@@ -2,6 +2,8 @@
 //! math, no accounts. Amounts are MUSD base units (6 decimals, so $1 is
 //! 1_000_000). The 2% win fee is not here; it comes in Step 6.2.
 
+use crate::{EARLY_LOSS_CAP, EARLY_LOSS_MULTIPLIER};
+
 /// Six dice, so a roll has six faces.
 pub const DICE: usize = 6;
 
@@ -49,6 +51,23 @@ pub fn settle_win(stake: u64, gross: u64) -> Settled {
     let profit = gross - stake;
     let kept = (profit as u128 * (BPS - WIN_FEE_BPS) / BPS) as u64;
     Settled { owed: stake + kept, fee: profit - kept }
+}
+
+/// The MUNDA a loss mints (D49): `EARLY_LOSS_MULTIPLIER` per base unit of the part of the loss
+/// inside the first `EARLY_LOSS_CAP` of cumulative losses, and 1 per base unit after that.
+/// `total_before` is the global loss total before this loss. The cap bounds the extra supply.
+pub fn loss_munda(total_before: u64, stake: u64) -> u64 {
+    let room = EARLY_LOSS_CAP.saturating_sub(total_before);
+    let inside = stake.min(room);
+    let outside = stake - inside;
+    inside * EARLY_LOSS_MULTIPLIER + outside
+}
+
+/// The loss fee (D45): 2% of the lost stake, the same 200 BPS as the win fee. The
+/// stake already sits in the pool vault, so this is an accrual from pool money,
+/// and the player's loss stays exactly the stake. Rounds down.
+pub fn loss_fee(stake: u64) -> u64 {
+    (stake as u128 * WIN_FEE_BPS / BPS) as u64
 }
 
 /// One win fee split three ways (D15): 20% treasury (into the insurance fund
@@ -140,6 +159,27 @@ mod tests {
         // $29.60 owed at a 5% cut: the player gets $28.12 now.
         assert_eq!(take_now_payout(29_600_000, 500), 28_120_000);
         assert_eq!(take_now_payout(1_000_000, 0), 1_000_000);
+    }
+
+    #[test]
+    fn test_loss_munda_early_loser_bonus() {
+        // Fully inside the first $1,000: 5x.
+        assert_eq!(loss_munda(0, ONE_MUSD), 5 * ONE_MUSD);
+        // Straddles the line: 5x on the part inside, 1x on the rest.
+        assert_eq!(loss_munda(600 * ONE_MUSD, 600 * ONE_MUSD), 2_200 * ONE_MUSD);
+        // After the line: 1x.
+        assert_eq!(loss_munda(EARLY_LOSS_CAP, 100 * ONE_MUSD), 100 * ONE_MUSD);
+        // The extra supply from the bonus never exceeds 4,000 MUNDA.
+        let extra = loss_munda(0, 5_000 * ONE_MUSD) - 5_000 * ONE_MUSD;
+        assert_eq!(extra, 4 * EARLY_LOSS_CAP * EARLY_LOSS_MULTIPLIER / 5);
+        assert_eq!(extra, 4_000 * ONE_MUSD);
+    }
+
+    #[test]
+    fn test_loss_fee_is_two_percent_of_stake() {
+        assert_eq!(loss_fee(ONE_MUSD), 20_000);
+        assert_eq!(loss_fee(10 * ONE_MUSD), 200_000);
+        assert_eq!(loss_fee(1), 0, "rounds down");
     }
 
     #[test]

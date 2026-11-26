@@ -91,12 +91,20 @@ pub mod jhandi_munda {
         staking::handle_unstake(ctx, amount)
     }
 
+    pub fn set_transfers_enabled(ctx: Context<SetTransfersEnabled>, enabled: bool) -> Result<()> {
+        staking::handle_set_transfers_enabled(ctx, enabled)
+    }
+
     pub fn init_fee_vaults(ctx: Context<InitFeeVaults>) -> Result<()> {
         fees::handle_init_fee_vaults(ctx)
     }
 
     pub fn distribute_fees<'info>(ctx: Context<'info, DistributeFees<'info>>) -> Result<()> {
         fees::handle_distribute_fees(ctx)
+    }
+
+    pub fn distribute_overflow<'info>(ctx: Context<'info, DistributeOverflow<'info>>) -> Result<()> {
+        fees::handle_distribute_overflow(ctx)
     }
 
     pub fn claim_stake_rewards(ctx: Context<ClaimStakeRewards>) -> Result<()> {

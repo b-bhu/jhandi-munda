@@ -16,6 +16,14 @@ pub struct ProgramConfig {
     pub bump: u8,
     /// Bump seed for the MUSD mint authority PDA.
     pub musd_bump: u8,
+    /// Whether MUNDA can leave stake (D46, D47). Off at launch, so loss MUNDA stays staked:
+    /// `unstake` is refused until the config admin turns this on.
+    pub transfers_enabled: bool,
+    /// Pool assets above this (base units) are the overflow that feeds stakers (D48, #120).
+    pub overflow_target: u64,
+    /// Pool assets right after the last overflow payout (or the lowest seen since). Only assets
+    /// above this, and above the target, count as new overflow, so a second crank pays nothing.
+    pub overflow_mark: u64,
 }
 
 /// The house pool (D4, D27), created empty by `initialize_pool`: a zero MUSD
@@ -148,6 +156,17 @@ pub struct Bet {
     /// True for a chip bet (D39): its stake sits in the cage vault until settle.
     pub paid_with_chips: bool,
     /// Bump seed for the bet PDA.
+    pub bump: u8,
+}
+
+/// The running total of all losses ever claimed, in MUSD base units (D49). One per program,
+/// at `["loss_tally"]`. `open_claim` reads it to price the early-loser bonus, then adds the loss.
+#[account]
+#[derive(InitSpace)]
+pub struct LossTally {
+    /// Total MUSD lost across all loss claims opened so far, in base units.
+    pub total_lost: u64,
+    /// Bump seed for the loss tally PDA.
     pub bump: u8,
 }
 

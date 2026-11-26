@@ -156,7 +156,15 @@ pub fn handle_migrate_config<'info>(ctx: Context<'info, MigrateConfig<'info>>) -
     };
     let new_len = 8 + ProgramConfig::INIT_SPACE;
     grow(&config_info, &ctx.accounts.upgrade_authority.to_account_info(), &ctx.accounts.system_program.to_account_info(), new_len)?;
-    let config = ProgramConfig { admin: authority, musd_mint, bump, musd_bump };
+    let config = ProgramConfig {
+        admin: authority,
+        musd_mint,
+        bump,
+        musd_bump,
+        transfers_enabled: false,
+        overflow_target: crate::OVERFLOW_TARGET,
+        overflow_mark: 0,
+    };
     write_account(&config_info, &config, new_len)?;
     msg!("Config migrated to the current layout; admin is the upgrade authority");
     Ok(())

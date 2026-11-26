@@ -68,6 +68,18 @@ pub const MUNDA_MINT_AUTHORITY_SEED: &[u8] = b"munda_mint_authority";
 /// base unit of a loss mints one base unit of MUNDA (D26).
 pub const MUNDA_DECIMALS: u8 = 6;
 
+/// Overflow target (D48): the pool keeps up to $10,000 of assets. Above it, half the excess goes
+/// to eligible stakers. Stored in `ProgramConfig::overflow_target`, so the admin can change it later.
+pub const OVERFLOW_TARGET: u64 = 10_000_000_000;
+
+/// Early-loser bonus (D49): the first $1,000 of cumulative losses (base units) mints 5 MUNDA
+/// per 1 lost. Losses after that mint 1:1. Caps the extra supply at 4,000 MUNDA.
+pub const EARLY_LOSS_CAP: u64 = 1_000_000_000;
+/// MUNDA per base unit lost inside the early-loser cap (D49).
+pub const EARLY_LOSS_MULTIPLIER: u64 = 5;
+/// Loss tally PDA seed: `["loss_tally"]`, the one global running total of losses (D49).
+pub const LOSS_TALLY_SEED: &[u8] = b"loss_tally";
+
 /// A loss claim's "Wait" unlocks 24 hours after settle (D23).
 pub const LOSS_UNLOCK_SECS: i64 = 24 * 60 * 60;
 
