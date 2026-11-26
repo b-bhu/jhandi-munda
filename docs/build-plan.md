@@ -40,7 +40,9 @@ House edge      = 1 − that = 1,775 / 46,656 ≈ 0.03804441  →  3.804441%
 
 This is the "~3.8%" from decision 9. The table is slightly in the house's favour before any extra fee.
 
-### Decision 17: 2% fee on wins only
+### Decision 17: 2% fee on wins only (extended to losses by decision 45)
+
+> **Update (D45):** the 2% fee now also applies to losing bets. It is taken from the pool's side, so a loser pays nothing extra and the odds do not change. This section's worked examples still describe the win side. Fee split stays 20/10/70.
 
 Decision 17 does not say whether the 2% is taken from the **total payout** (the 3x / 5x / … you receive) or from the **profit** (payout minus the original $1 stake). Losers still pay nothing extra in both readings. Here are both, so we can lock one before we code the fee.
 
@@ -84,8 +86,8 @@ A judge on devnet should be able to:
 
 1. Get MUSD from the faucet and deposit some into the pool (NAV shares visible).
 2. Approve a session once, then place a bet without a wallet popup on every click.
-3. Join a 90-second public table (normal Ephemeral Rollup), see the bowl reveal, and watch the round settle with the 3 / 5 / 9 / 26 / 101x table and the 2% win fee.
-4. Open a claim card and use both "Wait" and "Take now" (a win claim and a loss claim).
+3. Join a 90-second public table (normal Ephemeral Rollup), see the bowl reveal, and watch the round settle with the 3 / 5 / 9 / 26 / 101x table and the 2% fee (wins from the winner's profit, losses from the pool's side, D45).
+4. Open a claim card and use both "Wait" and "Take now" (a win claim and a loss claim). A loss claim mints MUNDA straight into the stake (D47).
 5. Open the fairness page and follow an Explorer link for that round's VRF fulfillment.
 6. Watch (or replay) the 50-round simulation in which the pool survives a 101x jackpot, using the queue if needed.
 
@@ -127,17 +129,17 @@ Do the game on Solana devnet first, then wrap the live round in a normal ER, the
 **Why.** Provably fair dice, and the host's own tool.
 **Done-when.** A test round requests randomness, the callback writes six faces, and we can point at the callback transaction on Explorer.
 
-### 6. Settle, payout table, and 2% win fee
+### 6. Settle, payout table, and 2% fee (wins and losses)
 
-**What.** After the callback, settle every bet with the total-return table 0 / 0 / 3 / 5 / 9 / 26 / 101x (decision 9). Apply the 2% win fee (decision 17) using the reading locked in the math section above. Split that fee 20% treasury / 10% devs / 70% stakers (decision 15), even if the staker pot just accrues until staking ships. Losing bets stay in the pool.
+**What.** After the callback, settle every bet with the total-return table 0 / 0 / 3 / 5 / 9 / 26 / 101x (decision 9). Apply the 2% fee (decisions 17, 45): on a win, 2% of the profit (using the reading locked in the math section above); on a loss, 2% of the lost stake, taken from the pool's side so the player pays nothing extra. Split every fee 20% insurance / 10% devs / 70% stakers (decision 15), even if the staker pot just accrues until staking ships. Losing bets stay in the pool.
 **Why.** This is the house edge plus the extra fee, in code.
-**Done-when.** A unit test (or devnet script) settles known dice and known bets, and the paid amounts and fee splits match the table to the lamport.
+**Done-when.** A unit test (or devnet script) settles known dice and known bets, and the paid amounts and fee splits match the table to the lamport, and a loss accrues its 2% fee from the pool without charging the player more.
 
 ### 7. Claims (the shared "Wait" / "Take now" card)
 
-**What.** Every result becomes one claim: asset (MUSD for a win, MUNDA for a loss), unlock time, and early-exit fee (decision 13). A win unlocks in full after 90 seconds, or 95% now from the insurance fund, which later collects 100% and keeps 5% (decision 7). A loss becomes MUNDA after 24 hours at 1 MUNDA per 1 MUSD lost, or immediately with a 10% tax (decisions 23, 26). MUNDA is minted only when the loss claim is redeemed.
+**What.** Every result becomes one claim: asset (MUSD for a win, MUNDA for a loss), unlock time, and early-exit fee (decision 13). A win unlocks in full after 90 seconds, or 95% now from the insurance fund, which later collects 100% and keeps 5% (decision 7). A loss becomes MUNDA after 24 hours at 1 MUNDA per 1 MUSD lost, or immediately with a 10% tax (decisions 23, 26). The first $1,000 of cumulative losses mints 5x; the bonus is stored in the claim when it opens, not at redeem (decision 49). MUNDA is minted only when the loss claim is redeemed, and it is minted straight into the player's stake, merged into the newest lot and dated from the loss (decision 47). The loser's Take now stays a 90% MUNDA mint; insurance does not advance MUSD for losses.
 **Why.** One primitive, two uses, and the "losers become owners" story.
-**Done-when.** Tests redeem a win both ways (full after 90s, 95% instantly) and a loss both ways (full MUNDA after 24h, 90% now), and the mint supply only rises on redeem.
+**Done-when.** Tests redeem a win both ways (full after 90s, 95% instantly) and a loss both ways (full MUNDA after 24h, 90% now), the mint supply only rises on redeem, no loose MUNDA appears in the wallet, and a loss inside the first $1,000 mints 5x while one after it mints 1x.
 
 ### 8. FIFO payout queue
 
@@ -147,15 +149,15 @@ Do the game on Solana devnet first, then wrap the live round in a normal ER, the
 
 ### 9. MUNDA staking and the fee split
 
-**What.** Staking the MUNDA token is what earns the 70% staker slice (decision 15). Holding alone earns nothing. The 20% treasury slice goes into the insurance fund until a documented target is reached, then to the treasury (decision 18). The 10% dev slice goes to a dev treasury. Show a simple NAV-style "worth when you got it / worth now" for staked MUNDA (decision 27).
+**What.** Staking the MUNDA token is what earns the 70% staker slice of the 2% fee on wins and losses (decisions 15, 45). Holding alone earns nothing. Above $10,000 of pool assets (vault minus queued IOUs), half of every further gain is paid to eligible stakers by a crank like `distribute_fees`, and half stays with depositors (decision 48). Both payouts wait for an empty payout queue. While the admin transfer switch is off, staked principal is locked (decision 47). The 20% treasury slice goes into the insurance fund until a documented target is reached, then to the treasury (decision 18). The 10% dev slice goes to a dev treasury. Show a simple NAV-style "worth when you got it / worth now" for staked MUNDA (decision 27).
 **Why.** This is the token economics judges will ask about.
-**Done-when.** Two stakers of different sizes receive a 70% fee slice in proportion, the insurance fund grows by the 20% until the target, and an unstaked holder gets zero.
+**Done-when.** Two stakers of different sizes receive a 70% fee slice in proportion, the insurance fund grows by the 20% until the target, and an unstaked holder gets zero. A pool pushed past $10,000 pays half the excess to stakers, and the same pool with a non-empty queue pays nothing.
 
 ### 10. 24-hour staking lock
 
-**What.** Anyone can unstake at any time, but rewards only start counting after the stake has been sitting for 24 hours (decision 29).
+**What.** Rewards only start counting after a lot has been staked for 24 hours (decision 29). At launch `unstake` is refused until the admin transfer switch is turned on (decisions 46, 47); after that, anyone can unstake at any time. A lot minted from a Wait claim is dated from the loss, so it does not wait a second 24 hours.
 **Why.** Stops people from hopping in just before a payout.
-**Done-when.** A test that stakes and immediately unstakes earns no rewards, and a test that waits 24 hours (or a dev clock warp) does.
+**Done-when.** With the switch off, `unstake` fails. With it on, a test that stakes and immediately unstakes earns no rewards, and a test that waits 24 hours (or a dev clock warp) does.
 
 ### 11. Normal Ephemeral Rollup integration
 
@@ -171,7 +173,7 @@ Do the game on Solana devnet first, then wrap the live round in a normal ER, the
 
 ### 13. Daily snapshots
 
-**What.** Every 24 hours, save NAV per share, total pool size, total MUNDA staked, open claims, and queue size (decision 28). Anyone can crank this once the day has turned (same "anyone can call it" spirit as settle).
+**What.** Every 24 hours, save NAV per share, total pool size, total MUNDA staked, open claims, queue size, and how much of the pool is above the $10,000 overflow target (decisions 28, 48). Anyone can crank this once the day has turned (same "anyone can call it" spirit as settle).
 **Why.** A day-by-day chart of the house, and a nice demo visual.
 **Done-when.** A test (with a clock warp or two crank calls a day apart) writes two snapshots with different NAVs, and a simple chart can read them.
 
@@ -207,6 +209,7 @@ Do the game on Solana devnet first, then wrap the live round in a normal ER, the
 - Turning on the self-tuning max bet when the pool is stressed (decision 16). Keep it off for the default demo.
 - More than one public table, or more than about 10 players (decision 25).
 - A real name for the MUNDA token (decision 22, Phase 3).
+- Turning MUNDA transfers on (the admin switch, decisions 46, 47) and a separate MUNDA/MUSD swap pool. Not for the demo: the swap pool is its own build and must stay apart from the house pool.
 - Insurance-fund loan terms beyond "pay instant cash-outs and collect later" (still loosely open in decision 4).
 
 ---
