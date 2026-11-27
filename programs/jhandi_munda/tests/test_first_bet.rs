@@ -2491,6 +2491,73 @@ fn test_overflow_pays_half_excess_to_eligible_stakers() {
     assert_eq!(token_amount(&t.svm, &t.vault), 11_002_200_000);
 }
 
+// #125: LP deposits are not gains. Two stakers hold eligible MUNDA, then an LP deposits
+// $50,000. Nothing was earned, so the overflow crank pays them nothing (D48). A real gain after
+// the deposit still pays: half of it, and only it.
+#[test]
+fn test_overflow_ignores_lp_deposits() {
+    let mut t = setup();
+    stub_vrf(&mut t);
+    let deployer = new_player(&mut t);
+    init_insurance(&mut t, &deployer);
+    init_fee_vaults(&mut t, &deployer);
+
+    // A and B lose 70 and 30 MUSD with no LP in the pool, so those stakes are orphan money:
+    // the next deposit sweeps them to insurance (D43). They hold 70 and 30 eligible MUNDA.
+    let a = new_player(&mut t);
+    let b = new_player(&mut t);
+    mint_munda(&mut t, &[(&a, 70_000_000), (&b, 30_000_000)]);
+
+    // The whale deposits $50,000, far above the $10,000 target.
+    let whale = rich_player(&mut t, 500);
+    deposit(&mut t, &whale, 50_000_000_000);
+    let rewards = pda(&[jhandi_munda::REWARDS_VAULT_SEED]);
+    let rewards_before = token_amount(&t.svm, &rewards);
+    assert!(overflow(&mut t, &deployer, &[&a, &b]).is_ok());
+    assert_eq!(stake_account(&t, &a).pending, 0, "a deposit is not a gain");
+    assert_eq!(stake_account(&t, &b).pending, 0, "a deposit is not a gain");
+    assert_eq!(token_amount(&t.svm, &rewards), rewards_before, "nothing left the pool");
+
+    // A second deposit changes nothing either.
+    deposit(&mut t, &whale, 1_000_000_000);
+    assert!(overflow(&mut t, &deployer, &[&a, &b]).is_ok());
+    assert_eq!(stake_account(&t, &a).pending, 0);
+
+    // A real gain of $2,000 arrives: half of it, $1,000, goes to stakers 70/30.
+    let pool_before = token_amount(&t.svm, &t.vault);
+    let vault = t.vault;
+    transfer_musd(&mut t, &whale, &vault, 2_000_000_000);
+    assert!(overflow(&mut t, &deployer, &[&a, &b]).is_ok());
+    assert_eq!(stake_account(&t, &a).pending, 700_000_000);
+    assert_eq!(stake_account(&t, &b).pending, 300_000_000);
+    assert_eq!(token_amount(&t.svm, &t.vault), pool_before + 1_000_000_000, "the other half stays");
+}
+
+// #125: a withdrawal takes LP money out, it is not a loss and later gains still count once.
+#[test]
+fn test_overflow_after_lp_withdraw_counts_only_gains() {
+    let mut t = setup();
+    stub_vrf(&mut t);
+    let deployer = new_player(&mut t);
+    init_insurance(&mut t, &deployer);
+    init_fee_vaults(&mut t, &deployer);
+    let a = new_player(&mut t);
+    mint_munda(&mut t, &[(&a, 100_000_000)]);
+
+    // $50,000 in, $20,000 out: assets $30,000, still no gain.
+    let whale = rich_player(&mut t, 500);
+    deposit(&mut t, &whale, 50_000_000_000);
+    assert!(lp_withdraw(&mut t, &whale, 20_000_000_000).is_ok());
+    assert!(overflow(&mut t, &deployer, &[&a]).is_ok());
+    assert_eq!(stake_account(&t, &a).pending, 0, "nothing was earned");
+
+    // A $400 gain: half of it, $200, to the staker. Not half of the $20,000 above the target.
+    let vault = t.vault;
+    transfer_musd(&mut t, &whale, &vault, 400_000_000);
+    assert!(overflow(&mut t, &deployer, &[&a]).is_ok());
+    assert_eq!(stake_account(&t, &a).pending, 200_000_000);
+}
+
 // D30: the overflow waits while a win is queued behind the pool.
 #[test]
 fn test_overflow_waits_for_an_empty_queue() {
