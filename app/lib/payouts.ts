@@ -19,6 +19,12 @@ export function grossReturn(stake: bigint, k: number): bigint {
   return stake * BigInt(PAYOUT_MULTIPLIER[k] ?? 0);
 }
 
+/** Profit before the fee: stake x (multiplier - 1). Zero when the bet loses. */
+export function profitFor(stake: bigint, k: number): bigint {
+  const g = grossReturn(stake, k);
+  return g > stake ? g - stake : 0n;
+}
+
 /** What the bettor is owed: stake plus 98% of the profit, rounded down (mirrors payout.rs). */
 export function owedFor(stake: bigint, k: number): bigint {
   const gross = grossReturn(stake, k);

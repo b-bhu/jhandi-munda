@@ -15,7 +15,10 @@ function navOf(vault: bigint, owed: bigint, shares: bigint): bigint {
 export function createMockClient(state: TableState): GameClient {
   const now = nowSecs();
   const rolled = state === "win" || state === "loss" || state === "result";
-  let bets: Bet[] = state === "open" || state === "rolling" ? [] : D.MY_BETS.filter((b) => (state === "win" ? b.result === "won" : state === "loss" ? b.result === "lost" : true));
+  // Open and rolling: both bets are still waiting. Result: they have won or lost. win / loss show one of them.
+  let bets: Bet[] = state === "open" || state === "rolling"
+    ? D.MY_BETS.map((b) => ({ ...b, result: "open" as const, matches: undefined, owed: undefined }))
+    : D.MY_BETS.filter((b) => (state === "win" ? b.result === "won" : state === "loss" ? b.result === "lost" : true));
   let session: SessionView = { ...D.SESSION, expiresAt: now + D.SESSION_SECS_LEFT };
   let position: Position = { ...D.POSITION, value: 0n };
   let claims: Claim[] = bets.filter((b) => b.result !== "open").map((b) => claimFor(b, now));
@@ -28,6 +31,7 @@ export function createMockClient(state: TableState): GameClient {
     openedAt: now - (D.ROUND_SECS - D.OPEN_SECONDS_LEFT),
     closesAt: now + D.OPEN_SECONDS_LEFT,
     players: D.EXAMPLE_PLAYERS,
+    totals: D.SYMBOL_TOTALS,
     faces: rolled ? D.EXAMPLE_FACES : null,
   });
 
@@ -79,7 +83,7 @@ export function createMockClient(state: TableState): GameClient {
 function claimFor(b: Bet, now: number): Claim {
   if (b.result === "won") {
     const owed = b.owed ?? owedFor(b.amount, b.matches ?? 0);
-    return { id: `c-${b.id}`, betId: b.id, kind: "win", asset: "MUSD", amount: owed, unlockAt: now - 10, status: "ready", takeNowPayout: (owed * D.TAKE_NOW_BPS) / 10_000n, road: b.road };
+    return { id: `c-${b.id}`, betId: b.id, kind: "win", asset: "MUSD", amount: owed, unlockAt: now + D.WIN_UNLOCK_SECS, status: "locked", takeNowPayout: (owed * D.TAKE_NOW_BPS) / 10_000n, road: b.road };
   }
   return { id: `c-${b.id}`, betId: b.id, kind: "loss", asset: "MUNDA", amount: b.amount * D.LOSS_MUNDA_PER_MUSD, unlockAt: now + D.LOSS_UNLOCK_SECS - 120, status: "locked", takeNowPayout: null, road: b.road };
 }

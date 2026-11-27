@@ -1,16 +1,17 @@
 import { symbolName } from "@/lib/symbols";
-import "@/styles/dice.css";
+import { matches } from "@/lib/payouts";
 import { SymbolIcon } from "./SymbolIcon";
 
-/** The six dice after the roll. Each shows its symbol; the order is the order the program stored. */
-export function DiceRow({ faces }: { faces: number[] }) {
+/** Six dice. With no faces yet they show "?" (the bowl is covered); `mark` outlines the dice of a winning symbol. */
+export function DiceRow({ faces, mark }: { faces: number[] | null; mark?: boolean }) {
+  if (!faces) {
+    return <div className="dice" role="img" aria-label="Six dice under the bowl, not rolled yet">{Array.from({ length: 6 }, (_, i) => <div key={i} className="die q" aria-hidden>?</div>)}</div>;
+  }
   return (
-    <ol className="dice" aria-label={`Dice: ${faces.map(symbolName).join(", ")}`}>
+    <div className="dice" role="img" aria-label={`The dice: ${faces.map(symbolName).join(", ")}`}>
       {faces.map((f, i) => (
-        <li key={i} className="die" style={{ animationDelay: `${i * 90}ms` }}>
-          <SymbolIcon name={symbolName(f)} size={30} />
-        </li>
+        <div key={i} className={`die${mark && matches(f, faces) >= 2 ? " hit" : ""}`}><SymbolIcon name={symbolName(f)} /></div>
       ))}
-    </ol>
+    </div>
   );
 }
