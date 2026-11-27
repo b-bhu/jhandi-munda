@@ -49,7 +49,7 @@ Both were found by reading the code, not by a failing test.
 - #116 to #121 are built on `main`. Close them after review.
 - #122 (loss claim card wording): the app has no claim card yet (Step 15). Only the explainer card text (`docs/learning/cards/winlose.html`) was fixed.
 - Existing issues that need a small change: #52 (snapshot: add how much of the pool is above $10,000), #59 (claim card, see #122), #64 (simulation: include the loss fee and overflow).
-- Check that the README and the older D13 and D23 entries do not still describe the old loser flow.
+- README, D13 and D23 now describe the current loser flow (#121). D26 and D29 were already annotated by D47.
 
 ## Not decided or built
 - Turning MUNDA transfers on (the admin switch exists, nothing uses it yet).
