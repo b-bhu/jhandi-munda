@@ -1,21 +1,28 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
 import { getClient } from "@/lib/game-client";
-import type { PoolView, Position } from "@/lib/types";
+import type { PoolView, Position, QueueItem, StakeView } from "@/lib/types";
 import { Panel } from "@/components/ui/Panel";
 import "@/styles/pool.css";
 import { NavCard } from "./NavCard";
 import { MyPosition } from "./MyPosition";
 import { DepositWithdraw } from "./DepositWithdraw";
+import { QueueTable } from "./QueueTable";
+import { StakeCard } from "./StakeCard";
+import { UnstakeButton } from "./UnstakeButton";
 
 export function PoolClient() {
   const client = useMemo(() => getClient(), []);
   const [pool, setPool] = useState<PoolView | null>(null);
   const [position, setPosition] = useState<Position | null>(null);
+  const [queue, setQueue] = useState<QueueItem[]>([]);
+  const [stake, setStake] = useState<StakeView | null>(null);
 
   useEffect(() => {
     let live = true;
     client.getPool().then((p) => live && setPool(p));
+    client.getQueue().then((q) => live && setQueue(q));
+    client.getStake().then((x) => live && setStake(x));
     client.getMyPosition().then((p) => live && setPosition(p));
     return () => { live = false; };
   }, [client]);
@@ -34,6 +41,13 @@ export function PoolClient() {
             onDeposit={async (a) => setPosition(await client.deposit(a))}
             onWithdraw={async (s) => setPosition(await client.withdraw(s))}
           />
+        </Panel>
+      )}
+      <Panel title="Payout queue" example><QueueTable items={queue} /></Panel>
+      {stake && (
+        <Panel title="MUNDA stake" example>
+          <StakeCard stake={stake} />
+          <UnstakeButton transfersEnabled={stake.transfersEnabled} staked={stake.staked} />
         </Panel>
       )}
     </div>
