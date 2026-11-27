@@ -427,40 +427,31 @@ pub fn handle_redeem_wait(ctx: Context<RedeemClaim>) -> Result<()> {
 }
 
 /// Take now: a win pays 95% at once from the insurance fund, which the pool
-/// repays in full later; a loss mints 90% of its MUNDA and never mints the 10%.
+/// repays in full later. A loss claim has no Take now (D50): it redeems by Wait only.
 pub fn handle_redeem_take_now(ctx: Context<RedeemClaim>) -> Result<()> {
     check_token_program(&ctx)?;
     let claim = &ctx.accounts.claim;
+    require!(claim.asset == ClaimAsset::Musd, ErrorCode::LossClaimWaitOnly);
     require!(!claim.redeemed, ErrorCode::ClaimAlreadyRedeemed);
     require!(!claim.queued, ErrorCode::ClaimAlreadyQueued);
     let amount = claim.amount;
-    let settled_at = claim.unlock_at - LOSS_UNLOCK_SECS;
     let payout = take_now_payout(amount, claim.early_exit_bps);
-    match claim.asset {
-        ClaimAsset::Musd => {
-            check_player_musd_ata(&ctx)?;
-            require!(
-                token_balance(&ctx.accounts.insurance_vault)? >= payout,
-                ErrorCode::InsufficientInsuranceFunds
-            );
-            ctx.accounts.claim.redeemed = true;
-            ctx.accounts.claim.insurance_owed = amount;
-            let seeds: &[&[u8]] = &[INSURANCE_SEED, &[ctx.bumps.insurance_authority]];
-            spl_transfer(
-                &ctx.accounts.insurance_vault,
-                &ctx.accounts.player_ata,
-                &ctx.accounts.insurance_authority.to_account_info(),
-                payout,
-                &[seeds],
-            )?;
-            msg!("Take now: paid {} base MUSD, insurance is owed {}", payout, amount);
-        }
-        ClaimAsset::Munda => {
-            ctx.accounts.claim.redeemed = true;
-            credit_loss_munda(&ctx, payout, settled_at)?;
-            msg!("Take now: {} base MUNDA staked; the 10% tax is never minted", payout);
-        }
-    }
+    check_player_musd_ata(&ctx)?;
+    require!(
+        token_balance(&ctx.accounts.insurance_vault)? >= payout,
+        ErrorCode::InsufficientInsuranceFunds
+    );
+    ctx.accounts.claim.redeemed = true;
+    ctx.accounts.claim.insurance_owed = amount;
+    let seeds: &[&[u8]] = &[INSURANCE_SEED, &[ctx.bumps.insurance_authority]];
+    spl_transfer(
+        &ctx.accounts.insurance_vault,
+        &ctx.accounts.player_ata,
+        &ctx.accounts.insurance_authority.to_account_info(),
+        payout,
+        &[seeds],
+    )?;
+    msg!("Take now: paid {} base MUSD, insurance is owed {}", payout, amount);
     Ok(())
 }
 

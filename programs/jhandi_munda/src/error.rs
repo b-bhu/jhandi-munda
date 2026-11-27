@@ -132,4 +132,6 @@ pub enum ErrorCode {
     InvalidStakeAccount,
     #[msg("MUNDA transfers are off: unstake stays locked until the admin turns them on (D46)")]
     TransfersDisabled,
+    #[msg("A loss claim has no Take now: it redeems with Wait after 24 hours (D50)")]
+    LossClaimWaitOnly,
 }
