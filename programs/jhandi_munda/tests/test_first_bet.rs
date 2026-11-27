@@ -699,7 +699,7 @@ fn test_open_claim_from_settled_bet() {
     assert_eq!(l.asset, ClaimAsset::Munda);
     assert_eq!(l.amount, 5_000_000);
     assert_eq!(l.unlock_at, BASE_TIME + 100 + 86_400);
-    assert_eq!(l.early_exit_bps, 1000);
+    assert_eq!(l.early_exit_bps, 0, "a loss claim has no early exit (D50)");
 }
 
 // Pool deposit (the existing `deposit`): the pool needs MUSD to pay winners.
@@ -973,23 +973,30 @@ fn test_loss_redeem_full_after_24h() {
     assert!(wait(&mut t, &bob, &bet).is_err(), "a claim redeems once");
 }
 
+// D50: a loss claim has Wait only. Take now is refused, before and after the unlock, and the claim
+// stays open so Wait still pays the full MUNDA.
 #[test]
-fn test_loss_redeem_now_10_percent_tax() {
+fn test_loss_claim_refuses_take_now() {
     let mut t = setup();
     stub_vrf(&mut t);
     let (bob, bet) = losing_claim(&mut t);
 
-    // Take now mints 90% of the 1 MUNDA at once into the stake; the 10% tax is never minted.
-    assert!(take_now(&mut t, &bob, &bet).is_ok());
-    // Take now mints 90% of the 5 MUNDA (D49) into the stake; the 10% tax is never minted.
-    assert_eq!(stake_account(&t, &bob).amount, 4_500_000);
-    assert_eq!(munda_supply(&t), 4_500_000, "only the 90% is ever minted");
-    assert!(claim(&t, &bet).redeemed);
-    assert!(take_now(&mut t, &bob, &bet).is_err(), "a claim redeems once");
+    let e = take_now(&mut t, &bob, &bet).expect_err("a loss has no Take now");
+    assert!(format!("{:?}", e.meta.logs).contains("LossClaimWaitOnly"), "{:?}", e.meta.logs);
+    set_time(&mut t, BASE_TIME + 100 + 86_400);
+    let e = take_now(&mut t, &bob, &bet).expect_err("still no Take now after the unlock");
+    assert!(format!("{:?}", e.meta.logs).contains("LossClaimWaitOnly"), "{:?}", e.meta.logs);
+    assert!(!claim(&t, &bet).redeemed, "the refused call changed nothing");
+    assert_eq!(munda_supply(&t), 0, "nothing was minted");
+
+    // Wait pays 100% of the 5 MUNDA (D49) into the stake.
+    assert!(wait(&mut t, &bob, &bet).is_ok());
+    assert_eq!(stake_account(&t, &bob).amount, 5_000_000);
+    assert_eq!(munda_supply(&t), 5_000_000);
 }
 
 // D47: loss MUNDA never lands in the wallet, and the stake lot starts its clock at the
-// settle time. Wait (after 24 h) is eligible at once; Take now waits 24 h from the loss.
+// settle time, so a Wait redeem (after 24 h) is eligible at once.
 #[test]
 fn test_loss_munda_staked_with_loss_clock() {
     let mut t = setup();
@@ -997,12 +1004,26 @@ fn test_loss_munda_staked_with_loss_clock() {
     let (bob, bet) = losing_claim(&mut t);
     assert!(munda_ata_absent(&t, &bob), "no MUNDA reaches the wallet");
 
-    assert!(take_now(&mut t, &bob, &bet).is_ok());
-    assert!(munda_ata_absent(&t, &bob), "Take now also stakes, not wallet");
+    set_time(&mut t, BASE_TIME + 100 + 86_400);
+    assert!(wait(&mut t, &bob, &bet).is_ok());
+    assert!(munda_ata_absent(&t, &bob), "Wait stakes, not wallet");
     let s = stake_account(&t, &bob);
-    assert_eq!(s.lots[0], jhandi_munda::state::StakeLot { amount: 4_500_000, staked_at: BASE_TIME + 100 });
-    assert_eq!(s.eligible(BASE_TIME + 100 + 86_399), 0, "Take now lot waits 24 h from the loss");
-    assert_eq!(s.eligible(BASE_TIME + 100 + 86_400), 4_500_000);
+    assert_eq!(s.lots[0], jhandi_munda::state::StakeLot { amount: 5_000_000, staked_at: BASE_TIME + 100 });
+    assert_eq!(s.eligible(BASE_TIME + 100 + 86_399), 0);
+    assert_eq!(s.eligible(BASE_TIME + 100 + 86_400), 5_000_000, "dated from the loss, eligible at once");
+}
+
+// Loss MUNDA is always dated from the loss, so no loss redeem makes a fresh lot any more (D50).
+// To test the 24-hour stake clock (D29) this puts a lot's start time at `staked_at` directly.
+fn set_lot_start(t: &mut Table, owner: &Keypair, lot: usize, staked_at: i64) {
+    let address = pda(&[jhandi_munda::STAKE_SEED, owner.pubkey().as_ref()]);
+    let mut acc = t.svm.get_account(&address).unwrap();
+    let mut stake = jhandi_munda::state::Stake::try_deserialize(&mut acc.data.as_slice()).unwrap();
+    stake.lots[lot].staked_at = staked_at;
+    let mut data = Vec::new();
+    stake.try_serialize(&mut data).unwrap();
+    acc.data[..data.len()].copy_from_slice(&data);
+    t.svm.set_account(address, acc).unwrap();
 }
 
 fn munda_ata_absent(t: &Table, wallet: &Keypair) -> bool {
@@ -1482,28 +1503,13 @@ fn lose_and_claim(t: &mut Table, wallet: &Keypair, amount: u64) -> Pubkey {
     bet
 }
 
-// Like `mint_munda`, but each holder takes its MUNDA now (Take now, 90%) at the settle time.
-// The lots start their clock at the loss, so they earn nothing for 24 h (D29).
-fn mint_munda_now(t: &mut Table, holders: &[(&Keypair, u64)]) {
-    init_munda(t, holders[0].0);
-    ensure_staking(t, holders[0].0);
-    let start = clock_now(t);
-    for (h, amount) in holders {
-        assert!(place(t, h, 4, *amount).is_ok());
-    }
-    set_time(t, start + 90);
-    assert!(request_roll(t, holders[0].0).is_ok());
-    let mut randomness = [0u8; 32];
-    randomness[..6].copy_from_slice(&[1, 1, 4, 5, 0, 2]);
-    let request_id = round(t).request_id;
-    assert!(send_callback(t, holders[0].0, randomness, request_id).is_ok());
-    set_time(t, start + 100);
-    let bets: Vec<Pubkey> = holders.iter().map(|(h, _)| bet_pda(h, 4)).collect();
-    assert!(settle_bets(t, holders[0].0, &bets).is_ok());
-    assert!(finish_round(t, holders[0].0).is_ok());
+// Like `mint_munda`, but afterwards every holder's first lot is set to start now, so it is still
+// inside the 24-hour stake clock (D29). Loss redeems no longer make fresh lots (D50).
+fn mint_munda_fresh(t: &mut Table, holders: &[(&Keypair, u64)]) {
+    mint_munda(t, holders);
+    let now = clock_now(t);
     for (h, _) in holders {
-        assert!(open_claim(t, h, &bet_pda(h, 4)).is_ok());
-        assert!(take_now(t, h, &bet_pda(h, 4)).is_ok());
+        set_lot_start(t, h, 0, now);
     }
 }
 
@@ -1825,8 +1831,8 @@ fn test_stake_24h_warp_earns() {
     stub_vrf(&mut t);
     let a = new_player(&mut t);
     let b = new_player(&mut t);
-    // Take now: the lots start their clock at the loss, so they mature 24 h after it.
-    mint_munda_now(&mut t, &[(&a, 70_000_000), (&b, 30_000_000)]);
+    // Fresh lots: their clock starts now, so they mature 24 h from now.
+    mint_munda_fresh(&mut t, &[(&a, 70_000_000), (&b, 30_000_000)]);
     init_fee_vaults(&mut t, &a);
     init_insurance(&mut t, &a);
 
@@ -1858,30 +1864,33 @@ fn test_new_stake_lot_has_own_clock() {
     init_fee_vaults(&mut t, &w);
     init_insurance(&mut t, &w);
 
-    // Lot B: W loses 30 MUSD more and takes the MUNDA now (90%, so 27 MUNDA). The new
-    // lot's clock starts at that loss, so it earns nothing for 24 h (D29).
+    // Lot B: W loses 30 MUSD more and waits out the 24 hours (5x, so 150 MUNDA, D49). Loss
+    // redeems are dated from the loss (D50), so the test starts the new lot's clock now (D29).
     let bet = lose_and_claim(&mut t, &w, 30_000_000);
-    assert!(take_now(&mut t, &w, &bet).is_ok());
+    let unlock = clock_now(&t) + 86_400;
+    set_time(&mut t, unlock);
+    assert!(wait(&mut t, &w, &bet).is_ok());
+    set_lot_start(&mut t, &w, 1, unlock);
     let s = stake_account(&t, &w);
     assert_eq!(s.lots[0].amount, 350_000_000, "lot A keeps its clock");
-    assert_eq!(s.lots[1].amount, 135_000_000, "lot B is its own lot");
+    assert_eq!(s.lots[1].amount, 150_000_000, "lot B is its own lot");
 
     // First fee: the pot is 1,400,000 (mint_munda's losses, 70%) + 420,000 (this loss, 70%)
-    // + 280,000 (the win) = 2,100,000. Only lot A counts: W has 70 of the 100 eligible.
+    // + 280,000 (the win) = 2,100,000. Only lot A counts: W has 350 of the 500 eligible.
     earn_win_fee(&mut t);
     assert!(distribute(&mut t, &w, &[&w, &x]).is_ok());
-    assert_eq!(stake_account(&t, &w).pending, 1_470_000, "lot B earns zero: W gets 70 of 100");
+    assert_eq!(stake_account(&t, &w).pending, 1_470_000, "lot B earns zero: W gets 350 of 500");
     assert_eq!(stake_account(&t, &x).pending, 630_000);
     assert_eq!(staker_pot(&t), 0);
 
-    // A further 24 hours from lot B's loss: lot B matures. W has 97 of the 127 eligible.
+    // A further 24 hours from lot B's loss: lot B matures. W has 500 of the 650 eligible.
     let now = clock_now(&t);
     set_time(&mut t, now + 86_400);
     earn_win_fee(&mut t);
     assert!(distribute(&mut t, &w, &[&w, &x]).is_ok());
-    // The pot is 280,000 (the win): W 280,000 x 97 / 127 = 213,858; X 66,141. One base unit stays.
-    assert_eq!(stake_account(&t, &w).pending, 1_470_000 + 213_858, "lot B earns after its 24 hours");
-    assert_eq!(stake_account(&t, &x).pending, 630_000 + 66_141);
+    // The pot is 280,000 (the win): W 280,000 x 500 / 650 = 215,384; X 64,615. One base unit stays.
+    assert_eq!(stake_account(&t, &w).pending, 1_470_000 + 215_384, "lot B earns after its 24 hours");
+    assert_eq!(stake_account(&t, &x).pending, 630_000 + 64_615);
     assert_eq!(staker_pot(&t), 1, "rounding dust stays in the pot");
 }
 
@@ -2518,10 +2527,14 @@ fn test_overflow_pays_half_excess_to_eligible_stakers() {
     let a = new_player(&mut t);
     let b = new_player(&mut t);
     mint_munda(&mut t, &[(&a, 70_000_000), (&b, 30_000_000)]);
-    // C loses 10 MUSD and takes its 45 MUNDA now (Take now), so its lot is fresh: 24 h lock.
+    // C loses 10 MUSD (50 MUNDA) and waits; its lot's clock is then set to now, so it is still
+    // inside the 24-hour lock (D29). Loss redeems are dated from the loss (D50).
     let c = new_player(&mut t);
     let c_bet = lose_and_claim(&mut t, &c, 10_000_000);
-    assert!(take_now(&mut t, &c, &c_bet).is_ok());
+    let unlock = clock_now(&t) + 86_400;
+    set_time(&mut t, unlock);
+    assert!(wait(&mut t, &c, &c_bet).is_ok());
+    set_lot_start(&mut t, &c, 0, unlock);
 
     assert!(overflow(&mut t, &deployer, &[&a, &b, &c]).is_ok());
     assert_eq!(token_amount(&t.svm, &t.vault), 10_002_200_000, "at the target nothing moves");

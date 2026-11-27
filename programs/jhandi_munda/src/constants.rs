@@ -83,9 +83,6 @@ pub const LOSS_TALLY_SEED: &[u8] = b"loss_tally";
 /// A loss claim's "Wait" unlocks 24 hours after settle (D23).
 pub const LOSS_UNLOCK_SECS: i64 = 24 * 60 * 60;
 
-/// A loss claim's "Take now" tax: 1000 BPS, so 90% now and 10% never minted (D23).
-pub const LOSS_EARLY_EXIT_BPS: u16 = 1_000;
-
 /// Payout queue PDA seed (D4, D30): one queue for the whole table, on Solana.
 pub const QUEUE_SEED: &[u8] = b"payout_queue";
 

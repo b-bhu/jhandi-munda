@@ -9,7 +9,7 @@ use crate::{
     error::ErrorCode,
     payout::loss_munda,
     state::{Bet, Claim, ClaimAsset, LossTally},
-    BET_SEED, CLAIM_SEED, LOSS_EARLY_EXIT_BPS, LOSS_TALLY_SEED, LOSS_UNLOCK_SECS, ROUND_LENGTH_SECS,
+    BET_SEED, CLAIM_SEED, LOSS_TALLY_SEED, LOSS_UNLOCK_SECS, ROUND_LENGTH_SECS,
     WIN_EARLY_EXIT_BPS,
 };
 
@@ -56,7 +56,8 @@ pub fn handle_open_claim(ctx: Context<OpenClaim>) -> Result<()> {
     // A chip bet is paid into chips at settle (D39); it has no claim.
     require!(!bet.paid_with_chips, ErrorCode::ChipBetSettledToChips);
 
-    // A win pays its owed MUSD after one round (D7). A loss pays MUNDA after 24 hours (D23).
+    // A win pays its owed MUSD after one round (D7). A loss pays MUNDA after 24 hours (D23), Wait
+    // only (D50): its early-exit rate is 0 and `redeem_take_now` refuses a MUNDA claim.
     // The loss's MUNDA is priced now, from the global tally, so redeem order cannot change it (D49).
     let (asset, amount, unlock_at, early_exit_bps) = if bet.owed > 0 {
         (ClaimAsset::Musd, bet.owed, bet.settled_at + ROUND_LENGTH_SECS, WIN_EARLY_EXIT_BPS)
@@ -65,7 +66,7 @@ pub fn handle_open_claim(ctx: Context<OpenClaim>) -> Result<()> {
         let munda = loss_munda(tally.total_lost, bet.amount);
         tally.total_lost = tally.total_lost.checked_add(bet.amount).ok_or(ErrorCode::MathOverflow)?;
         tally.bump = ctx.bumps.loss_tally;
-        (ClaimAsset::Munda, munda, bet.settled_at + LOSS_UNLOCK_SECS, LOSS_EARLY_EXIT_BPS)
+        (ClaimAsset::Munda, munda, bet.settled_at + LOSS_UNLOCK_SECS, 0)
     };
 
     let claim = &mut ctx.accounts.claim;
