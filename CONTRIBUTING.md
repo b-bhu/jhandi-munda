@@ -17,7 +17,7 @@ Each build-plan step is a parent **epic** (label `epic`) plus 2–5 **sub-issues
 5. In the PR, paste the proof from the issue's **Acceptance checks**: commands you ran, the output that shows they passed, and any devnet Explorer links.
 6. **Do not merge until Bibhu and his coach have verified the Done-when.** After they sign off and the PR is merged, the **reviewer moves the `next-up` label** from the closed issue to the next sub-issue in order (the next unchecked box on the epic, or the first sub-issue of the next epic). Never leave `next-up` on a closed issue, an epic, or a stretch issue while must-haves remain.
 
-Phase 1 (plan) is already done: 32 decisions are locked in `docs/decisions.md`. Current work is Phase 2 (build on devnet), then Phase 3 (demo and submit).
+Phase 1 (plan) is already done: the design is locked in `docs/decisions.md` (D1 to D51). Current work is Phase 2 (build on devnet), then Phase 3 (demo and submit).
 
 ## Constraints (every PR)
 

@@ -1,5 +1,7 @@
 # Handoff: MUNDA token economics (Step 18)
 
+> For the submission (links, demo script, what is verified), see [`docs/submission.md`](submission.md). This file is the Step 18 hand-off and is kept for history.
+
 Last updated 27 Nov 2026. Read this first, then `docs/decisions.md` (D45 to D49) and epic #123.
 
 ## Where we are
