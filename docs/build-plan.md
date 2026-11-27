@@ -87,7 +87,7 @@ A judge on devnet should be able to:
 1. Get MUSD from the faucet and deposit some into the pool (NAV shares visible).
 2. Approve a session once, then place a bet without a wallet popup on every click.
 3. Join a 90-second public table (normal Ephemeral Rollup), see the bowl reveal, and watch the round settle with the 3 / 5 / 9 / 26 / 101x table and the 2% fee (wins from the winner's profit, losses from the pool's side, D45).
-4. Open a claim card and use both "Wait" and "Take now" (a win claim and a loss claim). A loss claim mints MUNDA straight into the stake (D47).
+4. Open a claim card: a win claim shows both "Wait" and "Take now" (95%); a loss claim shows "Wait" only (D50). A loss claim mints MUNDA straight into the stake (D47).
 5. Open the fairness page and follow an Explorer link for that round's VRF fulfillment.
 6. Watch (or replay) the 50-round simulation in which the pool survives a 101x jackpot, using the queue if needed.
 
@@ -137,7 +137,7 @@ Do the game on Solana devnet first, then wrap the live round in a normal ER, the
 
 ### 7. Claims (the shared "Wait" / "Take now" card)
 
-**What.** Every result becomes one claim: asset (MUSD for a win, MUNDA for a loss), unlock time, and early-exit fee (decision 13). A win unlocks in full after 90 seconds, or 95% now from the insurance fund, which later collects 100% and keeps 5% (decision 7). A loss becomes MUNDA after 24 hours at 1 MUNDA per 1 MUSD lost, or immediately with a 10% tax (decisions 23, 26). The first $1,000 of cumulative losses mints 5x; the bonus is stored in the claim when it opens, not at redeem (decision 49). MUNDA is minted only when the loss claim is redeemed, and it is minted straight into the player's stake, merged into the newest lot and dated from the loss (decision 47). The loser's Take now stays a 90% MUNDA mint; insurance does not advance MUSD for losses.
+**What.** Every result becomes one claim: asset (MUSD for a win, MUNDA for a loss), unlock time, and early-exit fee (decision 13). A win unlocks in full after 90 seconds, or 95% now from the insurance fund, which later collects 100% and keeps 5% (decision 7). A loss becomes MUNDA after 24 hours at 1 MUNDA per 1 MUSD lost (decisions 23, 26); a loss claim has Wait only, no Take now (decision 50). The first $1,000 of cumulative losses mints 5x; the bonus is stored in the claim when it opens, not at redeem (decision 49). MUNDA is minted only when the loss claim is redeemed, and it is minted straight into the player's stake, merged into the newest lot and dated from the loss (decision 47). Insurance does not advance MUSD for losses.
 **Why.** One primitive, two uses, and the "losers become owners" story.
 **Done-when.** Tests redeem a win both ways (full after 90s, 95% instantly) and a loss both ways (full MUNDA after 24h, 90% now), the mint supply only rises on redeem, no loose MUNDA appears in the wallet, and a loss inside the first $1,000 mints 5x while one after it mints 1x.
 

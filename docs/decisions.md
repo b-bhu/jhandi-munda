@@ -27,6 +27,7 @@ Answers from the planning Q&A, in order.
 12. **Session keys:** players approve once with their wallet, then bets go through without a popup each time (MagicBlock session keys).
    - *Why:* smooth, fast play, close to "sign in and just play". Bibhu wants UX framing kept front and centre in every decision. Exact API to be checked against current MagicBlock docs.
 13. **One shared "claim":** every result becomes a claim with three fields: what it pays (USDC for wins, house tokens for losses), when it unlocks, and the fee to exit early. The player sees one card with two buttons, "Wait" and "Take now".
+   - *Update (#121):* the money is MUSD and the house token is MUNDA. Wins keep Wait and Take now. A loss claim pays MUNDA straight into the player's stake (D47), the amount is fixed when the claim opens (D49), and it has Wait only: see D50. The "two buttons" above apply to wins only.
    - *Why:* the same pattern showed up for wins (decision 7) and loser tokens, so building it once saves time in a 7-day build and gives judges one clear story. Token holder rights (pool profit vs insurance fees) still open.
 14. **Token holder rights:** house token holders earn a share of both the pool's edge and the insurance fund's early-exit fees.
    - *Why:* losers become real owners of the whole house, which gives them a reason to stay. Exact split between holders, depositors and treasury still open.
@@ -45,6 +46,7 @@ Answers from the planning Q&A, in order.
 21. **Bet currency:** MUSD (Munda USD), our own devnet test stablecoin pegged at $1, with a faucet we control.
 22. **Staking token:** placeholder name `MUNDA`; real name picked in Phase 3.
 23. **Loss claim:** turns into tokens after 24 hours, or right away with a 10% tax.
+   - *Update (#121):* superseded by D50: a loss claim has no 10% early exit, only the 24-hour Wait for 100%. The MUNDA is minted straight into the stake, dated from the loss (D47). Unstake is refused until the admin transfer switch is on (D46). Amount: 5 MUNDA per $1 on the first $1,000 of all losses ever, then 1 per $1, fixed when the claim opens (D49). The losing bet also pays the 2% fee, from the pool side (D45).
 24. **Fairness page:** each round shows its VRF proof and an Explorer link.
 25. **Demo scope:** one table, one round at a time, up to ~10 players per round. Multi-table after the hackathon.
    - *Why (21–25):* coach recommendations accepted in rapid fire (20 Nov): full control on devnet, no naming detour, a loss unlock that's meaningful but short, cheap proof of fairness for judges, and a scope that fits 7 days.
@@ -69,6 +71,7 @@ Answers from the planning Q&A, in order.
    - *Why:* the UI reads program accounts. Building screens while those accounts are still changing means building them twice. (Bibhu, 20 Nov.)
 35. **Loss Take-now tax:** the 10% cut on a loss Take-now is simply never minted, which works the same as a burn.
    - *Why:* simplest honest rule. No hidden house wallet collects it. (Step 7.3, PR #103, 20 Nov.)
+   - *Update (#121):* superseded by D50. Loser claims have no Take now, so this tax no longer applies to them.
 36. **Win unlock:** a win claim unlocks 90 s after settle for the full 100% Wait payout.
    - *Why:* matches the round length and gives the pool one round to rebalance. (PR #103.)
 37. **MUNDA decimals:** 6, the same as MUSD.
@@ -111,6 +114,7 @@ Answers from the planning Q&A, in order.
    - *Known limit:* a bigger mint moves more of the same income (D45 fee, D48 overflow) to early losers; it does not make MUNDA worth more. On devnet the faucet (D33) lets scripts farm the bonus by losing on purpose with many wallets; MUNDA has no value there, so we accept it and do not build for it.
    - *Open:* nothing left from the MUNDA design discussion. Next is putting D45 to D49 into the build plan.
    - *Code:* no change yet. A global loss counter in the pool or config, a bonus field on the claim (`claim_open.rs`), and the mint amount in `claim_redeem.rs`.
+   - *Update (#121):* the Take-now tax line above is superseded by D50. Loss claims are Wait only, so the 5x amount is minted in full at redeem.
 50. **Loser claims have no "Take now"; Wait only (decided 27 Nov, not coded yet, #124).** A loss claim redeems only after its 24-hour unlock, for 100% of its MUNDA. The 10% early-exit path for losers (D35, `LOSS_EARLY_EXIT_BPS`) is removed. Winners keep both Wait and Take now (D7, D35).
    - *Why:* since D47, loss MUNDA goes straight into the stake, dated from the loss, and stays locked either way. Take now gave 10% fewer tokens and no benefit, so no sensible player would pick it. One path is simpler to explain, test and show in the UI. (Bibhu, "Go with your view".)
    - *Code:* `claim_redeem.rs` refuses Take now on a MUNDA claim (new error); `claim_open.rs` stops setting `LOSS_EARLY_EXIT_BPS`; drop the constant if unused; update tests. UI (#122, #59) shows one button for a loss claim.
