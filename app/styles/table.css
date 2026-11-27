@@ -8,3 +8,8 @@
 .tile-name { font-size: 0.8rem; font-weight: 600; text-align: center; }
 .tile-stake, .tile-shown { font-size: 0.72rem; }
 @media (max-width: 420px) { .board { gap: 6px; padding: 8px; } .tile-name { font-size: 0.7rem; } }
+.bet-panel { display: grid; gap: 10px; }
+.small { font-size: 0.8rem; }
+.session { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 10px; border-radius: 10px; font-size: 0.85rem; margin-bottom: 10px; border: 1px solid var(--line); }
+.session.on { border-color: var(--win); }
+.session .btn { padding: 6px 12px; min-height: 36px; }
