@@ -23,3 +23,8 @@
 .die { display: grid; place-items: center; aspect-ratio: 1; background: var(--cloth); color: var(--cloth-ink); border-radius: 8px; box-shadow: 0 2px 0 rgba(0, 0, 0, 0.4); animation: drop 0.4s both; }
 @keyframes drop { from { transform: translateY(-14px) rotate(-12deg); opacity: 0; } to { transform: none; opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .bowl.rolling svg, .die { animation: none; } .bowl.rolled .bowl-lid { transition: none; } }
+.claims { display: grid; gap: 12px; }
+@media (min-width: 800px) { .claims { grid-template-columns: 1fr 1fr; } }
+.claim { border: 1px solid var(--line); border-radius: 10px; padding: 12px; background: var(--panel-2); }
+.claim h3 { margin-bottom: 6px; }
+.claim .row .btn { flex: 1 1 140px; }

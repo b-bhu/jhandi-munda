@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { getClient, isMock, type TableState } from "@/lib/game-client";
-import type { Bet, Round, SessionView } from "@/lib/types";
+import type { Bet, Claim, Round, SessionView } from "@/lib/types";
 import type { SymbolId } from "@/lib/symbols";
 import { Panel } from "@/components/ui/Panel";
 import "@/styles/table.css";
@@ -13,6 +13,7 @@ import { SessionBadge } from "./SessionBadge";
 import { MyBets } from "./MyBets";
 import { Bowl } from "./Bowl";
 import { DiceRow } from "./DiceRow";
+import { ClaimCard } from "./ClaimCard";
 
 const STATES: TableState[] = ["open", "rolling", "win", "loss", "result"];
 
@@ -28,12 +29,14 @@ export function PlayClient() {
   const [round, setRound] = useState<Round | null>(null);
   const [bets, setBets] = useState<Bet[]>([]);
   const [selected, setSelected] = useState<SymbolId | null>(null);
+  const [claims, setClaims] = useState<Claim[]>([]);
   const [session, setSession] = useState<SessionView | null>(null);
 
   useEffect(() => {
     let live = true;
     const off = client.subscribeRound((r) => live && setRound(r));
     client.getMyBets().then((b) => live && setBets(b));
+    client.getMyClaims().then((c) => live && setClaims(c));
     client.getSession().then((x) => live && setSession(x));
     return () => { live = false; off(); };
   }, [client]);
@@ -57,6 +60,15 @@ export function PlayClient() {
             <Bowl status={round.status} />
           </div>
           <Board selected={selected} onSelect={setSelected} disabled={round.status !== "open"} staked={staked} faces={round.faces} />
+        </Panel>
+      )}
+      {claims.length > 0 && (
+        <Panel title="Your results" example>
+          <div className="claims">
+            {claims.map((c) => (
+              <ClaimCard key={c.id} claim={c} onRedeem={async (id, how) => { const done = await client.redeemClaim(id, how); setClaims((cs) => cs.map((x) => (x.id === id ? done : x))); }} />
+            ))}
+          </div>
         </Panel>
       )}
       <div className="grid-2">
