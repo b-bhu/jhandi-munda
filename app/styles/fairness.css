@@ -1,6 +1,0 @@
-.faces { list-style: none; margin: 0 0 12px; padding: 0; display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; }
-.face { display: grid; justify-items: center; gap: 4px; text-align: center; }
-.face .die { width: 100%; animation: none; }
-.steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
-.steps li { display: grid; gap: 2px; padding-left: 12px; border-left: 3px solid var(--brass); }
-@media (max-width: 420px) { .face span { font-size: 0.62rem; } }

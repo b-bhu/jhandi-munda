@@ -29,3 +29,5 @@
 .app .claim h2 { font: 700 22px var(--ui); margin: 12px 0 6px; letter-spacing: -0.02em; }
 .app .kv .r { color: var(--tilak-text); }
 .app .field .amt { min-height: 32px; }
+.app .proof a { display: inline-flex; align-items: center; min-height: 44px; margin: -14px 0; }
+@media (max-width: 760px) { .app .proof a { margin: -8px 0; } }
