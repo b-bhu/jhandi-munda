@@ -138,11 +138,12 @@ export interface SimRound {
   vault: bigint; // pool vault after the round
   nav: bigint; // pool NAV per share, 6-decimal ratio
   queue: number; // wins waiting in the payout queue
+  queueOwed: bigint; // what those queued wins add up to, MUSD base units
   insurance: bigint;
   note: string | null;
 }
 
-export interface PoolSnap { vault: bigint; queue: number; insurance: bigint }
+export interface PoolSnap { vault: bigint; queue: number; queueOwed: bigint; insurance: bigint }
 
 /** The injected six-match round: a 99 MUSD win the pool could not pay, so it queued. */
 export interface SimJackpot {

@@ -3777,6 +3777,8 @@ struct PoolStats {
     vault: u64,
     nav_micro: u64,
     queue_len: u64,
+    /// MUSD the queue still owes (the sum of its entries), base units.
+    queue_owed: u64,
     insurance: u64,
 }
 
@@ -3791,6 +3793,12 @@ fn pool_stats(t: &Table) -> PoolStats {
         vault,
         nav_micro,
         queue_len: tail - head,
+        queue_owed: (head..tail)
+            .map(|i| {
+                let at = 24 + (i % jhandi_munda::QUEUE_CAPACITY as u64) as usize * 40;
+                u64::from_le_bytes(queue[at + 32..at + 40].try_into().unwrap())
+            })
+            .sum(),
         insurance: token_amount(&t.svm, &pda(&[INSURANCE_VAULT_SEED])),
     }
 }
@@ -3899,17 +3907,17 @@ fn run_rounds(rounds: u64, seed: u64) -> Vec<String> {
             // 1 MUSD stake, 6 matches: 101 gross, 99 owed after the 2% win fee on the 100 profit.
             lines.push(format!(
                 "JACKPOT round {} (index {}): P0 bet 1.000000 on face 6, faces {:?}, six matches, 101x gross, owed 99.000000\n\
-                 \x20 before settle: pool {} | queue {} | insurance {}\n\
-                 \x20 after settle:  pool {} | queue {} | insurance {}  (queued when the pool is short)\n\
-                 \x20 after the queue pass and the round: pool {} | queue {} | insurance {}",
+                 \x20 before settle: pool {} | queue {} | insurance {} | owed {}\n\
+                 \x20 after settle:  pool {} | queue {} | insurance {} | owed {}  (queued when the pool is short)\n\
+                 \x20 after the queue pass and the round: pool {} | queue {} | insurance {} | owed {}",
                 round_id, r, faces,
-                before.vault, before.queue_len, before.insurance,
-                after_settle.vault, after_settle.queue_len, after_settle.insurance,
-                s.vault, s.queue_len, s.insurance,
+                before.vault, before.queue_len, before.insurance, before.queue_owed,
+                after_settle.vault, after_settle.queue_len, after_settle.insurance, after_settle.queue_owed,
+                s.vault, s.queue_len, s.insurance, s.queue_owed,
             ));
         }
         lines.push(format!(
-            "round {:>3} | bets {:<16} | faces {:?} | pool {:>10} | NAV {:>9.6} | queue {} | insurance {}{}",
+            "round {:>3} | bets {:<16} | faces {:?} | pool {:>10} | NAV {:>9.6} | queue {} | insurance {} | owed {}{}",
             round_id,
             if bet_text.is_empty() { "-".to_string() } else { bet_text.join(" ") },
             faces,
@@ -3917,6 +3925,7 @@ fn run_rounds(rounds: u64, seed: u64) -> Vec<String> {
             s.nav_micro as f64 / 1e6,
             s.queue_len,
             s.insurance,
+            s.queue_owed,
             deposit_note,
         ));
     }

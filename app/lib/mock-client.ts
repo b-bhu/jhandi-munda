@@ -93,19 +93,19 @@ function claimFor(b: Bet, now: number): Claim {
 /** The 50-round simulation, written by scripts/gen-sim.mjs from the real program. Amounts are strings in the file. */
 interface SimFile {
   seed: number; source: string;
-  rounds: { id: number; bets: { player: number; face: number }[]; faces: number[]; vault: string; navMicro: number; queue: number; insurance: string; note: string | null }[];
+  rounds: { id: number; bets: { player: number; face: number }[]; faces: number[]; vault: string; navMicro: number; queue: number; owed: string; insurance: string; note: string | null }[];
   jackpot: { round: number; owedMusd: string; beforeSettle: SnapFile; afterSettle: SnapFile; afterRound: SnapFile } | null;
 }
-type SnapFile = { vault: string; queue: number; insurance: string };
+type SnapFile = { vault: string; queue: number; insurance: string; owed: string };
 
 async function loadReplay(): Promise<Replay> {
   const res = await fetch("/sim.json");
   if (!res.ok) throw new Error("The simulation file /sim.json is missing: run node scripts/gen-sim.mjs");
   const f = (await res.json()) as SimFile;
-  const snap = (x: SnapFile) => ({ vault: BigInt(x.vault), queue: x.queue, insurance: BigInt(x.insurance) });
+  const snap = (x: SnapFile) => ({ vault: BigInt(x.vault), queue: x.queue, queueOwed: BigInt(x.owed), insurance: BigInt(x.insurance) });
   return {
     isSimulation: true, seed: f.seed, source: f.source,
-    rounds: f.rounds.map((r) => ({ id: r.id, bets: r.bets, faces: r.faces, vault: BigInt(r.vault), nav: BigInt(r.navMicro), queue: r.queue, insurance: BigInt(r.insurance), note: r.note })),
+    rounds: f.rounds.map((r) => ({ id: r.id, bets: r.bets, faces: r.faces, vault: BigInt(r.vault), nav: BigInt(r.navMicro), queue: r.queue, queueOwed: BigInt(r.owed), insurance: BigInt(r.insurance), note: r.note })),
     jackpot: f.jackpot && {
       round: f.jackpot.round, owed: BigInt(Math.round(Number(f.jackpot.owedMusd) * 1e6)),
       beforeSettle: snap(f.jackpot.beforeSettle), afterSettle: snap(f.jackpot.afterSettle), afterRound: snap(f.jackpot.afterRound),

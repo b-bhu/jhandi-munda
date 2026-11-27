@@ -1,8 +1,10 @@
-.scrub { display: grid; grid-template-columns: 44px 1fr 44px; gap: 8px; align-items: center; margin-top: 8px; }
-.scrub input[type="range"] { width: 100%; accent-color: var(--brass); min-height: 44px; }
-.scrub .btn { padding: 0; font-size: 1.3rem; }
-.replay-dice { margin: 0 0 12px; max-width: 280px; }
-.scrub-wrap { display: grid; gap: 8px; }
-.scrub-row { justify-content: space-between; }
-.input.jump { width: 90px; }
-.sim-bets { margin: 0; padding-left: 18px; display: grid; gap: 4px; font-size: 14px; }
+.app .grid2[data-wide] { grid-template-columns: 1.6fr 1fr; }
+@media (max-width: 760px) { .app .grid2[data-wide] { grid-template-columns: minmax(0, 1fr); } }
+.app .scrub .play { border: 0; cursor: pointer; flex: none; font-size: 14px; }
+.app .scrub .seek { flex: 1; min-width: 0; accent-color: var(--gold); min-height: 44px; }
+.app .scrub-extra { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; }
+.app .jump-form { display: flex; align-items: center; gap: 8px; margin-left: auto; flex-wrap: wrap; }
+.app .jump { width: 84px; background: var(--bg); color: var(--t1); border: 1px solid var(--line2); border-radius: 4px; padding: 8px 10px; font: 600 14px var(--mono); min-height: 44px; }
+.app .step { min-width: 44px; min-height: 44px; border: 1px solid var(--line3); background: transparent; color: var(--t1); border-radius: 4px; font: 700 18px var(--ui); cursor: pointer; }
+.app .step.wide { font: 700 14px var(--ui); padding: 0 14px; }
+.app .step:disabled { opacity: 0.4; cursor: not-allowed; }
