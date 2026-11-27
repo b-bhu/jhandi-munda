@@ -158,7 +158,7 @@ export default function GetMusdPage() {
   }
 
   return (
-    <main>
+    <main className="center">
       <h1>Get MUSD</h1>
       <p>
         Devnet test chips for the Jhandi Munda Casino. MUSD is our $1 test
