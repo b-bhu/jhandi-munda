@@ -20,6 +20,7 @@ import {
   Transaction,
   TransactionInstruction,
 } from "@solana/web3.js";
+import { injected, NO_PHANTOM_MESSAGE } from "@/lib/wallet";
 
 /** Program id — matches `declare_id!` in programs/jhandi_munda/src/lib.rs. */
 const PROGRAM_ID = new PublicKey("4nsQ6ntZgpBhsDJt4bN5nu4bBvyqXtD4ReQdhAdSRhtH");
@@ -63,24 +64,12 @@ const FAUCET_TEXT = "100 MUSD";
 const CONNECTION = new Connection("https://api.devnet.solana.com", "confirmed");
 const explorer = (path: string) => `https://explorer.solana.com/${path}?cluster=devnet`;
 
-/** Minimal wallet surface used here: connect + sign-and-send one transaction. */
-type BrowserWallet = {
-  connect: () => Promise<{ publicKey: PublicKey }>;
-  signAndSendTransaction: (transaction: Transaction) => Promise<{ signature: string }>;
-};
-
-declare global {
-  interface Window {
-    phantom?: { solana?: BrowserWallet };
-    solana?: BrowserWallet;
-  }
-}
-
-function findWallet(): BrowserWallet | undefined {
-  if (typeof window === "undefined") return undefined;
-  const wallet = window.phantom?.solana ?? window.solana;
-  if (!wallet?.connect || !wallet?.signAndSendTransaction) return undefined;
-  return wallet;
+/** Phantom-only: reuse the shared helper so a generic window.solana hijack cannot sign. */
+function findWallet() {
+  const wallet = injected();
+  const signAndSendTransaction = wallet?.signAndSendTransaction;
+  if (!wallet || !signAndSendTransaction) return undefined;
+  return { connect: wallet.connect.bind(wallet), signAndSendTransaction };
 }
 
 /** Reads the wallet's MUSD balance across its token accounts, in base units. */
@@ -115,9 +104,10 @@ export default function GetMusdPage() {
     try {
       const browserWallet = findWallet();
       if (!browserWallet) {
-        throw new Error("No devnet wallet found. Install Phantom, switch it to Solana devnet, then try again.");
+        throw new Error(NO_PHANTOM_MESSAGE);
       }
-      const { publicKey } = await browserWallet.connect();
+      const { publicKey: rawKey } = await browserWallet.connect();
+      const publicKey = new PublicKey(rawKey.toString());
       setWallet(publicKey.toBase58());
 
       const instruction = new TransactionInstruction({

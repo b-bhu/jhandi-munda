@@ -3,12 +3,12 @@ import { useEffect } from "react";
 import { connectWallet, disconnectWallet, useWallet, verifyCluster } from "@/lib/wallet";
 import { shortKey } from "@/lib/format";
 
-/** The wallet pill in the top bar. It stays disabled unless the devnet guard has passed. */
+/** The wallet pill in the top bar. It stays disabled unless the devnet guard has passed. Connects only when the user clicks, never on load. */
 export function WalletPill() {
   const w = useWallet();
 
   useEffect(() => {
-    verifyCluster().then(() => connectWallet(true));
+    void verifyCluster();
   }, []);
 
   if (w.address) {
