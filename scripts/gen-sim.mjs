@@ -26,15 +26,15 @@ export function parseSim(text, seed = 1) {
     const line = lines[i];
     const jp = /^JACKPOT round (\d+) .*?owed ([\d.]+)/.exec(line);
     if (jp) {
-      const pick = (s) => /pool (\d+) \| queue (\d+) \| insurance (\d+)/.exec(s);
+      const pick = (s) => /pool (\d+) \| queue (\d+) \| insurance (\d+)(?: \| owed (\d+))?/.exec(s);
       const [b, a, f] = [lines[i + 1], lines[i + 2], lines[i + 3]].map(pick);
       if (!b || !a || !f) throw new Error(`malformed JACKPOT block at line ${i + 1}`);
-      const st = (m) => ({ vault: m[1], queue: Number(m[2]), insurance: m[3] });
+      const st = (m) => ({ vault: m[1], queue: Number(m[2]), insurance: m[3], owed: m[4] ?? "0" });
       pending = { round: Number(jp[1]), owedMusd: jp[2], beforeSettle: st(b), afterSettle: st(a), afterRound: st(f) };
       i += 3;
       continue;
     }
-    const m = /^round\s+(\d+) \| bets (.*?) \| faces \[([\d, ]+)\] \| pool\s+(\d+) \| NAV\s+([\d.]+) \| queue (\d+) \| insurance (\d+)(?: \| (.+))?$/.exec(line);
+    const m = /^round\s+(\d+) \| bets (.*?) \| faces \[([\d, ]+)\] \| pool\s+(\d+) \| NAV\s+([\d.]+) \| queue (\d+) \| insurance (\d+)(?: \| owed (\d+))?(?: \| (.+))?$/.exec(line);
     if (!m) continue;
     const bets = m[2].trim() === "-" ? [] : m[2].trim().split(/\s+/).map((b) => {
       const bm = /^P(\d+):f([1-6])$/.exec(b);
@@ -45,7 +45,7 @@ export function parseSim(text, seed = 1) {
     if (faces.length !== 6) throw new Error(`expected six faces in: ${line}`);
     rounds.push({
       id: Number(m[1]), bets, faces, vault: m[4], navMicro: Math.round(Number(m[5]) * 1e6),
-      queue: Number(m[6]), insurance: m[7], note: m[8] ?? null,
+      queue: Number(m[6]), insurance: m[7], owed: m[8] ?? "0", note: m[9] ?? null,
     });
     if (pending && pending.round === Number(m[1])) { jackpot = pending; pending = null; }
   }
