@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { WalletPill } from "./WalletPill";
 
 export const REPO_URL = "https://github.com/b-bhu/jhandi-munda";
 export const DOCS_URL = `${REPO_URL}#readme`; // the README until /docs exists (#150)
@@ -18,7 +19,8 @@ export function TopBar() {
         {LINKS.map((l) => <Link key={l.href} href={l.href}>{l.label}</Link>)}
         <a href={DOCS_URL} target="_blank" rel="noreferrer">Docs</a>
         <a href={REPO_URL} target="_blank" rel="noreferrer">GitHub</a>
-        <Link href="/get-musd" className="pill">Get MUSD</Link>
+        <Link href="/get-musd">Get MUSD</Link>
+        <WalletPill />
       </nav>
     </header>
   );
