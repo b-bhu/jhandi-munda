@@ -8,7 +8,7 @@ export function Hero() {
   return (
     <>
       <div className="film">
-        <span className="badge"><i />Solana devnet · test MUSD only</span>
+        <span className="badge"><i />Test network only</span>
         <Image src={im.src} width={im.width} height={im.height} alt={im.alt} priority unoptimized />
         <Link href="/play" className="cta">Play a round →</Link>
       </div>
@@ -17,9 +17,9 @@ export function Hero() {
         <p className="sub">Six symbol dice, one covered bowl, a 90-second table. The roll comes from MagicBlock’s random number service, so anyone can check it wasn’t rigged.</p>
         <CornerBox className="ctabox">
           <div className="h">Get free test MUSD, then take a seat</div>
-          <div className="b"><code>100 MUSD per click · devnet faucet</code><Link href="/get-musd" className="btn gbtn">Get MUSD</Link></div>
+          <div className="b"><code>100 MUSD per click · test chips</code><Link href="/get-musd" className="btn gbtn">Get MUSD</Link></div>
         </CornerBox>
-        <p className="hint"><i />Hackathon demo · Solana devnet only · no real money</p>
+        <p className="hint"><i />Hackathon demo. Test network only. Chips have no real value.</p>
         <a className="alt" href="#house">Or read how the house works ↓</a>
       </section>
     </>

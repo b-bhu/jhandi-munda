@@ -7,7 +7,7 @@ import { House } from "@/components/landing/House";
 import { Proof } from "@/components/landing/Proof";
 import "@/styles/landing.css";
 
-export const metadata = { title: "Jhandi Munda Casino · devnet" };
+export const metadata = { title: "Jhandi Munda Casino" };
 
 export default function Home() {
   return (

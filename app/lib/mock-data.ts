@@ -75,12 +75,12 @@ export const ROUND_12: FairnessProof = {
   roundId: 12,
   faces: [2, 2, 4, 6, 4, 5],
   steps: [
-    { label: "Bet placed", detail: "1 MUSD of chips on spade (place_bet_chips)", tx: "45KEdeQTrCqz9yV6smK8U6dYwg5Xw1s19VWgTexnDSDPRwovZqdhrRNnD15y6pMdXGHiBZqBBWuHCnrDVqRYeqob" },
-    { label: "Roll requested", detail: "The 90-second window ended; anyone can ask MagicBlock VRF for randomness (request_roll)", tx: "4hSyiicby5eaYtM8hBzGH5euGPcpyiSQWdqvHht6yZvQ7ZkrGDd27mgy8z8v5iKoo2ZQQzR9SwNwRnqbBFihfcRa" },
-    { label: "VRF callback", detail: "The oracle's randomness is checked and written as six faces (face = byte % 6 + 1)", tx: "5aQ75QwPrQafMvV8sbHgZW69afP1fH4N3HaB2tm9jJAZBH83Turikxv1bmL3iq2s4CvmJ8V2Ma8iMap1aXhyAZtF" },
-    { label: "Settled", detail: "Stakes move to the pool; the 2-match win is owed 2.96 MUSD (settle_chip_bets)", tx: "5XFUaLXUZQcRkQy1BFj4ksjhwYn7eBMm5umXBn9AdZyBfiASyP2ChHZhc6mTaPqDUw9nUhNSP4fde7Hijx4J1hSN" },
-    { label: "Win paid", detail: "The win was queued first, then paid out of the pool (pay_queue)", tx: "5yX32eVCaGaYvXV2nWPxcjM4wAP7egB7d5GAzq8dgxafh9pm64DpkQasJHe1ouuVxrEnMHaNMuMUCsyiqVrUfJLS" },
-    { label: "Round finished", detail: "The round goes idle for the next one (finish_round)", tx: "5bWST8rVjWo1LLv3WgmWn3x2uJEC7s4bmpbo8KUYTAJ7xr2Gort3vHDpe3rb2FR3w6B9EhpeJ5UxSvfLbpRicSfd" },
+    { label: "Bet placed", detail: "1 MUSD of chips on spade", tx: "45KEdeQTrCqz9yV6smK8U6dYwg5Xw1s19VWgTexnDSDPRwovZqdhrRNnD15y6pMdXGHiBZqBBWuHCnrDVqRYeqob" },
+    { label: "Roll requested", detail: "The 90-second window ended, and anyone can ask MagicBlock for a random roll", tx: "4hSyiicby5eaYtM8hBzGH5euGPcpyiSQWdqvHht6yZvQ7ZkrGDd27mgy8z8v5iKoo2ZQQzR9SwNwRnqbBFihfcRa" },
+    { label: "Dice result written", detail: "The random result is checked and written as six faces", tx: "5aQ75QwPrQafMvV8sbHgZW69afP1fH4N3HaB2tm9jJAZBH83Turikxv1bmL3iq2s4CvmJ8V2Ma8iMap1aXhyAZtF" },
+    { label: "Settled", detail: "Stakes move to the pool; the 2-match win is owed 2.96 MUSD", tx: "5XFUaLXUZQcRkQy1BFj4ksjhwYn7eBMm5umXBn9AdZyBfiASyP2ChHZhc6mTaPqDUw9nUhNSP4fde7Hijx4J1hSN" },
+    { label: "Win paid", detail: "The win was queued first, then paid out of the pool", tx: "5yX32eVCaGaYvXV2nWPxcjM4wAP7egB7d5GAzq8dgxafh9pm64DpkQasJHe1ouuVxrEnMHaNMuMUCsyiqVrUfJLS" },
+    { label: "Round finished", detail: "The round closes, ready for the next one", tx: "5bWST8rVjWo1LLv3WgmWn3x2uJEC7s4bmpbo8KUYTAJ7xr2Gort3vHDpe3rb2FR3w6B9EhpeJ5UxSvfLbpRicSfd" },
   ],
   bets: [{ player: "5qPRTWcUZw1XYGnXqUCCF65TGBgMjk9BfMyz2VBHacm7", symbol: 2, amount: 1n * M, matches: 2, owed: 2_960_000n, road: "chips" }],
   isExample: false,
@@ -95,9 +95,9 @@ export const EXAMPLE_PROOF_BETS: FairnessProof["bets"] = [
 
 export const EXAMPLE_PROOF_STEPS: FairnessProof["steps"] = [
   { label: "Bets placed", detail: "Three players bet before the window ended", tx: null },
-  { label: "Roll requested", detail: "Example round: no real transaction behind it", tx: null },
-  { label: "VRF callback", detail: "Example round: no real transaction behind it", tx: null },
-  { label: "Settled", detail: "Example round: no real transaction behind it", tx: null },
+  { label: "Roll requested", detail: "Sample round: no real transaction behind it", tx: null },
+  { label: "Dice result written", detail: "Sample round: no real transaction behind it", tx: null },
+  { label: "Settled", detail: "Sample round: no real transaction behind it", tx: null },
 ];
 
 export const FAUCET_AMOUNT = 100n * M;

@@ -3,7 +3,7 @@ import type { Round } from "@/lib/types";
 import { formatClock } from "@/lib/format";
 import { useNow } from "@/components/ui/useNow";
 
-const LABEL = { idle: "No round running", open: "Join window", rolling: "Dice are rolling", rolled: "Result" } as const;
+const LABEL = { idle: "No round running", open: "Bets are open", rolling: "Dice are rolling", rolled: "Result" } as const;
 
 export function RoundTimer({ round }: { round: Round }) {
   const now = useNow();

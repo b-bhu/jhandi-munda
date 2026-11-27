@@ -57,8 +57,6 @@ function musdAta(wallet: PublicKey): PublicKey {
 const MUSD_FAUCET_DATA = Buffer.from([0x2e, 0xc9, 0x3b, 0x58, 0xbd, 0x65, 0x51, 0x03]);
 
 /** Documented faucet amount: 100 MUSD per call, 6 decimals like USDC (D33). */
-const FAUCET_BASE_UNITS = 100_000_000;
-const FAUCET_TEXT = "100 MUSD";
 
 /** Devnet only. The script at scripts/devnet-musd.mjs refuses mainnet URLs. */
 const CONNECTION = new Connection("https://api.devnet.solana.com", "confirmed");
@@ -131,15 +129,15 @@ export default function GetMusdPage() {
       );
       setTxSig(signature);
 
-      setStatus("Confirming on devnet…");
+      setStatus("Confirming…");
       const confirmed = await CONNECTION.confirmTransaction(signature, "confirmed");
       if (confirmed.value.err) {
-        throw new Error(`Faucet call failed onchain: ${JSON.stringify(confirmed.value.err)}`);
+        throw new Error("Couldn't add the chips. Please try again.");
       }
 
       const after = await readMusdBalance(publicKey);
       setBalanceBase(after);
-      setStatus(`Balance is now ${formatMusd(after)} MUSD (+${FAUCET_TEXT} per click).`);
+      setStatus(`You now have ${formatMusd(after)} MUSD. Each click adds 100.`);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -149,17 +147,13 @@ export default function GetMusdPage() {
 
   return (
     <div className="center">
-      <h1>Get MUSD</h1>
+      <h1>Get free test chips</h1>
       <p>
-        Devnet test chips for the Jhandi Munda Casino. MUSD is our $1 test
-        dollar (D21, D26) with no real value, minted on devnet only.
+        Grab 100 MUSD to play with. They&apos;re test-only and have no real value.
       </p>
-      <p>
-        The faucet mints {FAUCET_TEXT} ({FAUCET_BASE_UNITS.toString()} base units,
-        6 decimals) to your wallet per click.
-      </p>
-      <p>
-        Mint: <code>{MUSD_MINT.toBase58()}</code> —{" "}
+      <p className="dim small">
+        Details: mint <code>{MUSD_MINT.toBase58()}</code>
+        {" — "}
         <a href={explorer(`address/${MUSD_MINT.toBase58()}`)}>open on Solana Explorer</a>
       </p>
       <Link href="/" className="backlink">← Back to the casino</Link>
@@ -173,10 +167,10 @@ export default function GetMusdPage() {
           Wallet: <code>{wallet}</code>
         </p>
       )}
-      {balanceBase !== null && <p>MUSD balance: {formatMusd(balanceBase)} MUSD</p>}
+      {balanceBase !== null && <p>Your balance: {formatMusd(balanceBase)} MUSD</p>}
       {txSig !== null && (
         <p>
-          Faucet transaction:{" "}
+          Transaction:{" "}
           <a href={explorer(`tx/${txSig}`)}>{txSig}</a>
         </p>
       )}

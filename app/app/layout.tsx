@@ -13,8 +13,8 @@ const sans = Inter_Tight({ subsets: ["latin"], weight: ["400", "500", "600"], va
 const mono = JetBrains_Mono({ subsets: ["latin"], weight: ["400", "500", "600", "700"], variable: "--font-mono", display: "swap" });
 
 export const metadata: Metadata = {
-  title: "Jhandi Munda Casino - devnet",
-  description: "The street dice game Jhandi Munda, onchain on Solana devnet.",
+  title: "Jhandi Munda Casino",
+  description: "Jhandi Munda, the street dice game, on a test network. Chips have no real value.",
 };
 
 export const viewport: Viewport = { width: "device-width", initialScale: 1 };

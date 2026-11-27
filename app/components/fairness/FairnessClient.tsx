@@ -20,11 +20,11 @@ export function FairnessClient({ roundId }: { roundId: number }) {
   }, [client, roundId]);
 
   if (!proof) return <div className="page">Loading the proof…</div>;
-  const tag = proof.isExample ? undefined : <span className="tag real">Real devnet round</span>;
+  const tag = proof.isExample ? undefined : <span className="tag real">Real test round</span>;
   return (
     <div className="page">
       <h1>Fairness: round {proof.roundId}</h1>
-      <p className="dim">Check the dice yourself: every step below is a devnet transaction you can open on Solana Explorer.</p>
+      <p className="dim">Check the dice yourself: every step below is a test-network transaction you can open on Solana Explorer.</p>
       <Panel title="The dice" example={proof.isExample} tag={tag}>
         <FacesRow faces={proof.faces} />
         <RoundSummary proof={proof} />

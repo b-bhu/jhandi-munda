@@ -16,7 +16,7 @@ export function SnapshotChart({ snapshots }: { snapshots: Snapshot[] }) {
   const ticks = [lo, lo + span / 2, hi];
   return (
     <>
-      <svg className="chart" viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Pool NAV per share, one point a day">
+      <svg className="chart" viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Pool share price, one point a day">
         {ticks.map((t) => (
           <g key={t}>
             <line x1={PAD.l} x2={W - PAD.r} y1={y(t)} y2={y(t)} stroke="var(--line)" strokeDasharray="3 4" />
@@ -30,7 +30,7 @@ export function SnapshotChart({ snapshots }: { snapshots: Snapshot[] }) {
         ) : null))}
       </svg>
       <table className="sr-only">
-        <caption>NAV per share by day</caption>
+        <caption>Share price by day</caption>
         <tbody>{snapshots.map((s) => <tr key={s.day}><th scope="row">{s.day}</th><td>{formatRatio(s.nav, 1_000_000n, 4)}</td></tr>)}</tbody>
       </table>
     </>

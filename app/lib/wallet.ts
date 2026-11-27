@@ -16,7 +16,7 @@ import { useSyncExternalStore } from "react";
 
 export const DEVNET_GENESIS = "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG";
 export const RPC_URL = process.env.NEXT_PUBLIC_RPC_URL ?? "https://api.devnet.solana.com";
-export const NO_PHANTOM_MESSAGE = "No Phantom wallet found. Install Phantom and set it to Solana devnet.";
+export const NO_PHANTOM_MESSAGE = "No Phantom wallet found. Install Phantom and use it on devnet.";
 
 /** devnet: verified. blocked: the RPC is another cluster. unknown: could not ask. checking: asking now. */
 export type GuardState = "checking" | "devnet" | "blocked" | "unknown";
@@ -70,7 +70,7 @@ export async function verifyCluster() {
 
 /** Connects Phantom, but only when the guard says devnet. `silent` reuses an earlier approval. */
 export async function connectWallet(silent = false) {
-  if (state.guard !== "devnet") return set({ error: "Connecting is blocked until the app is on Solana devnet." });
+  if (state.guard !== "devnet") return set({ error: "Connecting is paused until the test network is confirmed." });
   const w = injected();
   if (!w) return set({ error: NO_PHANTOM_MESSAGE });
   set({ busy: true, error: null });

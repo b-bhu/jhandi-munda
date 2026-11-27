@@ -23,13 +23,13 @@ export function DepositWithdraw({ queued, maxShares, onDeposit, onWithdraw }: {
         <label className="dim" htmlFor="dep">Deposit test MUSD</label>
         <input id="dep" className="input" inputMode="decimal" value={dep} onChange={(e) => setDep(e.target.value)} />
         <button type="button" className="btn" disabled={busy || depAmt === null || depAmt <= 0n} onClick={() => depAmt && run(() => onDeposit(depAmt))}>Deposit</button>
-        <p className="dim small">You get shares at the current NAV.</p>
+        <p className="dim small">You get shares at today&apos;s price.</p>
       </div>
       <div className="bet-panel">
         <label className="dim" htmlFor="wd">Withdraw shares (you hold {formatAmount(maxShares)})</label>
         <input id="wd" className="input" inputMode="decimal" value={wd} onChange={(e) => setWd(e.target.value)} />
         <button type="button" className="btn ghost" disabled={!canWd} onClick={() => wdAmt && run(() => onWithdraw(wdAmt))}>Withdraw</button>
-        <p className="dim small">{queued > 0 ? `Closed: ${queued} queued win${queued > 1 ? "s are" : " is"} paid first (D30).` : "Pays shares × NAV."}</p>
+        <p className="dim small">{queued > 0 ? `Closed for now: ${queued} waiting win${queued > 1 ? "s are" : " is"} paid first.` : "Pays out at today's share price."}</p>
       </div>
     </div>
   );

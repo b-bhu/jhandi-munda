@@ -43,8 +43,8 @@ export function createMockClient(state: TableState): GameClient {
     getMyClaims: () => wait(claims),
     redeemClaim: async (id, how) => {
       const c = claims.find((x) => x.id === id);
-      if (!c) throw new Error("no such claim");
-      if (how === "takeNow" && c.kind === "loss") throw new Error("A loss claim has Wait only (D50)");
+      if (!c) throw new Error("That claim wasn't found.");
+      if (how === "takeNow" && c.kind === "loss") throw new Error("A loss can only be claimed with Wait.");
       const done: Claim = { ...c, status: "redeemed" };
       claims = claims.map((x) => (x.id === id ? done : x));
       return wait(done);
@@ -94,7 +94,7 @@ type SnapFile = { vault: string; queue: number; insurance: string };
 
 async function loadReplay(): Promise<Replay> {
   const res = await fetch("/sim.json");
-  if (!res.ok) throw new Error("The simulation file /sim.json is missing: run node scripts/gen-sim.mjs");
+  if (!res.ok) throw new Error("The replay isn't available right now.");
   const f = (await res.json()) as SimFile;
   const snap = (x: SnapFile) => ({ vault: BigInt(x.vault), queue: x.queue, insurance: BigInt(x.insurance) });
   return {

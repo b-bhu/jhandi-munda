@@ -11,7 +11,7 @@ export function RoundSummary({ proof }: { proof: FairnessProof }) {
         {" "}A symbol with 2 or more dice wins; 0 or 1 pays nothing.
       </p>
       <p className="dim small">
-        The faces come from MagicBlock VRF. The program keeps random bytes below 252 only (so no face is likelier than another) and turns each into a face with <span className="mono">byte % 6 + 1</span>.
+        The faces come from MagicBlock&apos;s random numbers. To keep every symbol equally likely, the program only uses random bytes below 252, then turns each into a face with <span className="mono">byte % 6 + 1</span>.
       </p>
     </>
   );

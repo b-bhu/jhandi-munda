@@ -33,10 +33,10 @@ export function PoolClient() {
   return (
     <div className="page">
       <h1>The house pool</h1>
-      <p className="dim">Anyone can put test MUSD into the pool and become part of the house. Devnet only, no real money.</p>
-      {pool && <Panel title="Pool NAV" example><NavCard pool={pool} /></Panel>}
+      <p className="dim">Anyone can put test MUSD into the pool and become part of the house. Test network only. Chips have no real value.</p>
+      {pool && <Panel title="Pool share price"><NavCard pool={pool} /></Panel>}
       {pool && position && (
-        <Panel title="My position" example>
+        <Panel title="My position">
           <MyPosition position={position} />
           <DepositWithdraw
             queued={pool.queueLength}
@@ -46,10 +46,10 @@ export function PoolClient() {
           />
         </Panel>
       )}
-      <Panel title="NAV per day" example><SnapshotChart snapshots={snaps} /><p className="dim small">One snapshot a day. Past NAV says nothing about the future.</p></Panel>
-      <Panel title="Payout queue" example><QueueTable items={queue} /></Panel>
+      <Panel title="Share price, day by day"><SnapshotChart snapshots={snaps} /><p className="dim small">One snapshot a day. Past prices say nothing about the future.</p></Panel>
+      <Panel title="Payout queue"><QueueTable items={queue} /></Panel>
       {stake && (
-        <Panel title="MUNDA stake" example>
+        <Panel title="MUNDA stake">
           <StakeCard stake={stake} />
           <UnstakeButton transfersEnabled={stake.transfersEnabled} staked={stake.staked} />
         </Panel>

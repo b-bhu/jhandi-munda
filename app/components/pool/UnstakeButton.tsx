@@ -5,7 +5,7 @@ export function UnstakeButton({ transfersEnabled, staked }: { transfersEnabled: 
     <div className="bet-panel">
       <button type="button" className="btn ghost" disabled={disabled} aria-describedby="unstake-why">Unstake</button>
       <p id="unstake-why" className="dim small">
-        {transfersEnabled ? "Unstaking returns MUNDA to your wallet." : "Locked: MUNDA transfers are off for now, so staked MUNDA stays staked until the admin switch is turned on."}
+        {transfersEnabled ? "Unstaking returns MUNDA to your wallet." : "Locked for now: you can't unstake MUNDA until transfers are turned back on."}
       </p>
     </div>
   );

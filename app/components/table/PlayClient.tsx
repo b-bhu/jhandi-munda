@@ -53,7 +53,7 @@ export function PlayClient() {
     <div className="page">
       <h1>The table</h1>
       {round && (
-        <Panel example>
+        <Panel>
           <RoundTimer round={round} />
           <div className="stage">
             {round.faces ? <DiceRow faces={round.faces} /> : null}
@@ -63,7 +63,7 @@ export function PlayClient() {
         </Panel>
       )}
       {claims.length > 0 && (
-        <Panel title="Your results" example>
+        <Panel title="Your results">
           <div className="claims">
             {claims.map((c) => (
               <ClaimCard key={c.id} claim={c} onRedeem={async (id, how) => { const done = await client.redeemClaim(id, how); setClaims((cs) => cs.map((x) => (x.id === id ? done : x))); }} />
@@ -72,11 +72,11 @@ export function PlayClient() {
         </Panel>
       )}
       <div className="grid-2">
-        <Panel title="Place a bet" example>
+        <Panel title="Place a bet">
           <SessionBadge session={session} onStart={() => client.startSession().then(setSession)} onRevoke={() => client.revokeSession().then(setSession)} />
           <BetPanel symbol={selected} open={round?.status === "open"} onPlace={place} />
         </Panel>
-        <Panel title="My bets" example>
+        <Panel title="My bets">
           <MyBets bets={bets} />
         </Panel>
       </div>

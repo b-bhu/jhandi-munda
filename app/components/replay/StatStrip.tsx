@@ -13,7 +13,7 @@ export function StatStrip({ rounds, at }: { rounds: SimRound[]; at: number }) {
       <div className="stat"><b>{at + 1} / {rounds.length}</b><span>Rounds shown</span></div>
       <div className="stat"><b>{bets}</b><span>Bets of 1 MUSD</span></div>
       <div className="stat"><b>{formatMusd(now.vault)}</b><span>Pool now</span></div>
-      <div className="stat"><b>${formatRatio(now.nav, 1_000_000n, 3)}</b><span>NAV now (low ${formatRatio(lowNav, 1_000_000n, 3)})</span></div>
+      <div className="stat"><b>${formatRatio(now.nav, 1_000_000n, 3)}</b><span>Share price now (low ${formatRatio(lowNav, 1_000_000n, 3)})</span></div>
       <div className="stat"><b>{now.queue}</b><span>Wins queued (peak {peakQueue})</span></div>
     </div>
   );

@@ -21,7 +21,7 @@ export function ClaimCard({ claim, onRedeem }: { claim: Claim; onRedeem: (id: st
     return (
       <article className="claim win-card">
         <h3 className="win">You won {formatMusd(claim.amount)}</h3>
-        <p className="dim">Wait pays the full amount {unlocked ? "now" : `in ${formatWait(left)}`}. Take now pays {claim.takeNowPayout !== null ? formatMusd(claim.takeNowPayout) : "95%"} at once (95%) from the insurance fund.</p>
+        <p className="dim">Wait pays the full amount {unlocked ? "now" : `in ${formatWait(left)}`}. Take now pays {claim.takeNowPayout !== null ? formatMusd(claim.takeNowPayout) : "95%"} at once (95%) from a safety pot.</p>
         <div className="row">
           <button type="button" className="btn" disabled={busy || redeemed || !unlocked} onClick={() => go("wait")}>{redeemed ? "Paid" : "Wait"}</button>
           <button type="button" className="btn ghost" disabled={busy || redeemed} onClick={() => go("takeNow")}>Take now (95%)</button>

@@ -19,7 +19,7 @@ export function SessionBadge({ session, onStart, onRevoke }: { session: SessionV
   return (
     <div className="session on">
       <span>Session on · spent {formatMusd(session.spent, 0)} of {formatMusd(session.cap, 0)} cap · {now ? formatWait(left) : "…"} left</span>
-      <button type="button" className="btn ghost" onClick={onRevoke}>Revoke</button>
+      <button type="button" className="btn ghost" onClick={onRevoke}>End session</button>
     </div>
   );
 }

@@ -14,17 +14,17 @@ export function WalletPill() {
   if (w.address) {
     return <button type="button" className="pill on" onClick={disconnectWallet} title="Disconnect">● {shortKey(w.address)}</button>;
   }
-  if (w.guard === "checking") return <button type="button" className="pill" disabled>Checking devnet…</button>;
+  if (w.guard === "checking") return <button type="button" className="pill" disabled>Checking the test network…</button>;
   if (w.guard === "blocked") {
-    return <span className="pill bad" role="alert" title="This app only works on Solana devnet. Its RPC is a different cluster, so connecting is blocked.">Not devnet · blocked</span>;
+    return <span className="pill bad" role="alert" title="This table only runs on the test network, and that isn't confirmed yet.">Can&apos;t connect</span>;
   }
   if (w.guard === "unknown") {
-    return <button type="button" className="pill" onClick={verifyCluster} title="Could not confirm the RPC is Solana devnet. Connecting stays blocked until it can.">Retry devnet check</button>;
+    return <button type="button" className="pill" onClick={verifyCluster} title="Couldn't confirm the test network. Connecting stays paused until it can.">Try again</button>;
   }
   return (
     <span className="wallet-wrap">
       <button type="button" className="pill" onClick={() => connectWallet()} disabled={w.busy}>{w.busy ? "Connecting…" : "Connect wallet"}</button>
-      <span className="wallet-msg" role="status">{w.error ?? "Devnet only · set your wallet to devnet"}</span>
+      <span className="wallet-msg" role="status">{w.error ?? "Use Phantom on devnet"}</span>
     </span>
   );
 }
