@@ -1,4 +1,5 @@
 import { symbolName } from "@/lib/symbols";
+import "@/styles/dice.css";
 import { SymbolIcon } from "./SymbolIcon";
 
 /** The six dice after the roll. Each shows its symbol; the order is the order the program stored. */

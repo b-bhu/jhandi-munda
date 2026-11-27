@@ -122,6 +122,7 @@ export interface FairnessProof {
 
 export interface SimRound {
   index: number;
+  symbol: number; // the symbol the simulated player bet on
   faces: number[];
   stake: bigint;
   matches: number;

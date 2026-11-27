@@ -1,0 +1,4 @@
+.scrub { display: grid; grid-template-columns: 44px 1fr 44px; gap: 8px; align-items: center; margin-top: 8px; }
+.scrub input[type="range"] { width: 100%; accent-color: var(--brass); min-height: 44px; }
+.scrub .btn { padding: 0; font-size: 1.3rem; }
+.replay-dice { margin-bottom: 8px; max-width: 280px; }

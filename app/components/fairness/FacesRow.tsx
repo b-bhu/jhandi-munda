@@ -1,4 +1,5 @@
 import { SYMBOLS, symbolName } from "@/lib/symbols";
+import "@/styles/dice.css";
 import { SymbolIcon } from "@/components/table/SymbolIcon";
 
 /** The six dice, each with its number and symbol name, so a face can be checked against the proof. */

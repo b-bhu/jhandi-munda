@@ -19,10 +19,7 @@
 .bowl.rolled .bowl-lid { transform: translate(40px, -26px) rotate(14deg); transition: transform 0.5s; }
 .bowl.rolling svg { animation: shake 0.35s infinite; }
 @keyframes shake { 0%, 100% { transform: translateX(0) rotate(0); } 25% { transform: translateX(-5px) rotate(-3deg); } 75% { transform: translateX(5px) rotate(3deg); } }
-.dice { list-style: none; display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; margin: 0; padding: 0; width: 100%; max-width: 360px; }
-.die { display: grid; place-items: center; aspect-ratio: 1; background: var(--cloth); color: var(--cloth-ink); border-radius: 8px; box-shadow: 0 2px 0 rgba(0, 0, 0, 0.4); animation: drop 0.4s both; }
-@keyframes drop { from { transform: translateY(-14px) rotate(-12deg); opacity: 0; } to { transform: none; opacity: 1; } }
-@media (prefers-reduced-motion: reduce) { .bowl.rolling svg, .die { animation: none; } .bowl.rolled .bowl-lid { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .bowl.rolling svg { animation: none; } .bowl.rolled .bowl-lid { transition: none; } }
 .claims { display: grid; gap: 12px; }
 @media (min-width: 800px) { .claims { grid-template-columns: 1fr 1fr; } }
 .claim { border: 1px solid var(--line); border-radius: 10px; padding: 12px; background: var(--panel-2); }
