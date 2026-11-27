@@ -20,7 +20,7 @@ export function Hero() {
           <div className="b"><code>100 MUSD per click · devnet faucet</code><Link href="/get-musd" className="btn gbtn">Get MUSD</Link></div>
         </CornerBox>
         <p className="hint"><i />Hackathon demo · Solana devnet only · no real money</p>
-        <a className="alt" href="#how">Or read how a round works ↓</a>
+        <a className="alt" href="#house">Or read how the house works ↓</a>
       </header>
     </>
   );

@@ -49,6 +49,9 @@ export function formatWait(secs: number): string {
   return `${s}s`;
 }
 
+/** First 8 and last 6 characters of a transaction signature. */
+export const shortSig = (sig: string) => (sig.length > 16 ? `${sig.slice(0, 8)}…${sig.slice(-6)}` : sig);
+
 export const shortKey = (key: string) => (key.length > 10 ? `${key.slice(0, 4)}…${key.slice(-4)}` : key);
 
 export const explorerTx = (sig: string) => `https://explorer.solana.com/tx/${sig}?cluster=devnet`;
