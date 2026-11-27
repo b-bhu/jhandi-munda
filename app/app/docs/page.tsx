@@ -1,6 +1,7 @@
 import { SectionRule } from "@/components/ui/SectionRule";
 import { Panel } from "@/components/ui/Panel";
 import { REPO_URL } from "@/components/shell/TopBar";
+import { PAYOUT_ROWS } from "@/lib/payouts";
 
 export const metadata = { title: "Docs · Jhandi Munda" };
 
@@ -23,7 +24,7 @@ export default function DocsPage() {
       <p className="dim">The full documents live on GitHub, next to the code. Devnet only: MUSD is a test token with no value, and nothing here promises returns.</p>
       <Panel title="In one minute">
         <ul className="plain">
-          <li>Players pick one of six symbols. Six dice are rolled from MagicBlock&apos;s random number service (VRF). A symbol with 2 or more matching dice wins: 3x, 5x, 9x, 26x or 101x back. 0 or 1 match pays nothing.</li>
+          <li>Players pick one of six symbols. Six dice are rolled from MagicBlock&apos;s random number service (VRF). A symbol with 2 or more matching dice wins: {PAYOUT_ROWS.map((r) => `${r.multiplier}x`).join(", ")} back for 2 to 6 matches. 0 or 1 match pays nothing.</li>
           <li>A 2% fee is taken from a winner&apos;s profit, and from the pool side on a losing bet. Wins are paid in MUSD: Wait for the full amount, or Take now for 95%.</li>
           <li>A loss is not a refund. It becomes MUNDA, which goes straight into your stake after 24 hours. Losses have Wait only. Chip bets earn MUNDA too.</li>
           <li>Anyone can put test MUSD in the house pool and get shares at the current NAV. If the pool cannot pay a win, the win joins a first-in, first-out queue.</li>
