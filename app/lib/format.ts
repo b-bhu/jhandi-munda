@@ -52,6 +52,14 @@ export function formatWait(secs: number): string {
 /** First 8 and last 6 characters of a transaction signature. */
 export const shortSig = (sig: string) => (sig.length > 16 ? `${sig.slice(0, 8)}…${sig.slice(-6)}` : sig);
 
+/** "3.2 days ago", "6 h ago", "12 min ago". */
+export function formatAgo(secs: number): string {
+  const s = Math.max(0, Math.floor(secs));
+  if (s >= 86_400) return `${(s / 86_400).toFixed(1)} days ago`;
+  if (s >= 3_600) return `${Math.floor(s / 3_600)} h ago`;
+  return `${Math.max(1, Math.floor(s / 60))} min ago`;
+}
+
 export const shortKey = (key: string) => (key.length > 10 ? `${key.slice(0, 4)}…${key.slice(-4)}` : key);
 
 export const explorerTx = (sig: string) => `https://explorer.solana.com/tx/${sig}?cluster=devnet`;

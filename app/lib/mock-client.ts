@@ -60,7 +60,9 @@ export function createMockClient(state: TableState): GameClient {
     getMyPosition: () => wait({ ...position, value: val(position.shares) }),
     deposit: async (amount) => {
       const shares = (amount * 1_000_000n) / navOf(D.POOL.vault, D.POOL.owed, D.POOL.shares);
-      position = { ...position, shares: position.shares + shares, walletMusd: position.walletMusd - amount };
+      const total = position.shares + shares;
+      const cost = position.shares * position.boughtAt + shares * navOf(D.POOL.vault, D.POOL.owed, D.POOL.shares);
+      position = { ...position, shares: total, walletMusd: position.walletMusd - amount, boughtAt: total === 0n ? position.boughtAt : cost / total };
       return wait({ ...position, value: val(position.shares) });
     },
     withdraw: async (shares) => {

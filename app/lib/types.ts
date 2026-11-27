@@ -66,10 +66,13 @@ export interface Position {
   shares: bigint;
   value: bigint; // shares x NAV
   walletMusd: bigint;
+  /** Average NAV per share when the shares were bought (6-decimal ratio, 1_000_000n = $1.00). */
+  boughtAt: bigint;
 }
 
 export interface QueueItem {
   id: string;
+  label: string; // for example "Win · round 9"
   owner: string;
   amount: bigint;
   position: number; // 1 = next
@@ -89,6 +92,9 @@ export interface StakeView {
   /** Admin switch (D46). While false, unstake is refused and loss MUNDA stays staked (D47). */
   transfersEnabled: boolean;
   munda: bigint; // loose MUNDA in the wallet (none while transfers are off)
+  /** What the staked MUNDA cost in lost MUSD when it was minted, and what it is worth now (#36), MUSD base units. */
+  worthThen: bigint;
+  worthNow: bigint;
 }
 
 export interface Snapshot {

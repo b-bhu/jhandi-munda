@@ -36,39 +36,45 @@ export const MY_BETS: Bet[] = [
 /** A loss mints MUNDA at 5x inside the first $1,000 of all losses (D49), Wait only after 24 h (D50). */
 export const LOSS_MUNDA_PER_MUSD = 5n;
 
+/** vault 1,262.00, owed 12.00, 1,000 shares: NAV = (1,262 - 12) / 1,000 = 1.25 (the pool mock). */
 export const POOL: PoolView = {
-  vault: 1_042_500_000n,
-  owed: 29_600_000n,
+  vault: 1_262_000_000n,
+  owed: 12_000_000n,
   shares: 1_000_000_000n,
   nav: 0n, // computed by the client from vault, owed and shares
-  queueLength: 2,
+  queueLength: 3,
   insurance: 48_250_000n,
 };
-export const POSITION: Position = { shares: 250_000_000n, value: 0n, walletMusd: 100n * M };
+export const POSITION: Position = { shares: 80n * M, value: 0n, walletMusd: 340n * M, boughtAt: 1_000_000n };
+/** The queue sums to the 12.00 the pool owes: 2.96 + 6.40 + 2.64. */
 export const QUEUE: QueueItem[] = [
-  { id: "q1", owner: "4Fd8mock3333333333333333333333333333Qa11", amount: 29_600_000n, position: 1, enqueuedAt: 0 },
-  { id: "q2", owner: "BnT6mock4444444444444444444444444444Qb22", amount: 5_920_000n, position: 2, enqueuedAt: 0 },
+  { id: "q1", label: "Win · round 9", owner: "4Fd8mock3333333333333333333333333333Qa11", amount: 2_960_000n, position: 1, enqueuedAt: 0 },
+  { id: "q2", label: "Win · round 10", owner: "BnT6mock4444444444444444444444444444Qb22", amount: 6_400_000n, position: 2, enqueuedAt: 0 },
+  { id: "q3", label: "Win · round 11", owner: "9Kx4mock2222222222222222222222222222Ssn3", amount: 2_640_000n, position: 3, enqueuedAt: 0 },
 ];
 export const STAKE: StakeView = {
-  staked: 500n * M,
-  eligible: 350n * M,
+  staked: 165n * M,
+  eligible: 140n * M,
   pending: 1_680_000n,
   lots: [
-    { amount: 350n * M, stakedAt: 0 },
-    { amount: 150n * M, stakedAt: 0 },
+    { amount: 100n * M, stakedAt: 0 },
+    { amount: 40n * M, stakedAt: 0 },
+    { amount: 25n * M, stakedAt: 0 },
   ],
   transfersEnabled: false,
   munda: 0n,
+  worthThen: 3_300_000n,
+  worthNow: 3_800_000n,
 };
-/** Seconds before "now" that each stake lot started (lot 2 is still inside the 24 h clock). */
-export const STAKE_LOT_AGES = [200_000, 3_600];
-export const QUEUE_AGES = [420, 95];
+/** Seconds before "now" that each stake lot started: 3.2 days, 1.1 days, 6 hours (the last is inside the 24 h clock). */
+export const STAKE_LOT_AGES = [276_480, 95_040, 21_600];
+export const QUEUE_AGES = [420, 300, 95];
 
 /** Daily NAV per share (6-decimal ratio, 1_000_000n = $1.0000), 1,000 shares, so vault = nav x 1,000. */
 const NAV_BY_DAY: [string, bigint][] = [
-  ["2026-11-21", 1_000_000n], ["2026-11-22", 1_004_200n], ["2026-11-23", 998_900n],
-  ["2026-11-24", 1_011_500n], ["2026-11-25", 1_019_800n], ["2026-11-26", 1_016_300n],
-  ["2026-11-27", 1_029_900n],
+  ["2026-11-21", 1_000_000n], ["2026-11-22", 1_025_000n], ["2026-11-23", 1_012_000n],
+  ["2026-11-24", 1_085_000n], ["2026-11-25", 1_140_000n], ["2026-11-26", 1_200_000n],
+  ["2026-11-27", 1_250_000n],
 ];
 export const SNAPSHOTS: Snapshot[] = NAV_BY_DAY.map(([day, nav]) => ({ day, nav, vault: nav * 1_000n, shares: 1_000_000_000n }));
 
