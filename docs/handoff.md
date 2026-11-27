@@ -1,11 +1,13 @@
 # Handoff: MUNDA token economics (Step 18)
 
-Last updated 26 Nov 2026. Read this first, then `docs/decisions.md` (D45 to D49) and epic #123.
+Last updated 27 Nov 2026. Read this first, then `docs/decisions.md` (D45 to D49) and epic #123.
 
 ## Where we are
 All the code and docs for Step 18 are on `main`, commits `153a37c` (program code and tests) and `ed31163` (docs). They were committed straight to `main`, with no pull request and no human review yet.
 
-Tests: `cargo test -p jhandi_munda` gives 91 passed, 0 failed, 1 ignored. `anchor test` has not been run (it needs a local validator).
+Tests: `cargo test -p jhandi_munda` gives 94 passed, 0 failed, 1 ignored (after #127 and #128).
+
+**Devnet:** upgraded on 27 Nov 2026 to `main` with #127 and #128, and `migrate_config` was run (config 74 -> 91 bytes). Signatures and the round proof are in `docs/deploys.md`. `anchor test` has not been run (it needs a local validator).
 
 ```bash
 source scripts/env.sh
@@ -33,13 +35,13 @@ Why: with the fee on wins only, one MUNDA earned about 1.3 cents over its whole 
 7. Value to stakers, only for stakes older than 24 hours and only while the payout queue is empty: `distribute_fees` (70% slice) and `distribute_overflow` (half of assets above $10,000).
 
 ## Open problems (start here)
-- **#124: loser "Take now" is strictly worse than Wait.** Both stake the MUNDA and start earning at the same moment, and unstake is locked either way. Take now only gives 10% fewer tokens. Decision needed: remove it, or give it a real benefit.
+- **#124: loser "Take now" is strictly worse than Wait.** Both stake the MUNDA and start earning at the same moment, and unstake is locked either way. Take now only gives 10% fewer tokens. Decided: remove it (D50). Not coded yet; next PR.
 - **#125 (fixed in its own PR):** overflow counted LP deposits as gains. `deposit` and `withdraw` now keep `overflow_mark` in step with LP money (D48 update). `deposit` and `withdraw` take the `config` account now.
 
 Both were found by reading the code, not by a failing test.
 
 ## Before deploying to devnet
-- The config account grew by 17 bytes, not one (`transfers_enabled` 1, `overflow_target` 8, `overflow_mark` 8): 74 -> 91. `migrate_config` now takes the 42-byte and the 74-byte layouts, keeping the admin from 74. Check the real size of the devnet config account before running it; any other length is refused.
+- The config account grew by 17 bytes, not one (`transfers_enabled` 1, `overflow_target` 8, `overflow_mark` 8): 74 -> 91. `migrate_config` now takes the 42-byte and the 74-byte layouts, keeping the admin from 74. Check the real size of the devnet config account before running it; any other length is refused. (Done on 27 Nov: it was 74 bytes and is now 91.)
 - Loss claims opened before the 5x change keep their old amounts (no backfill).
 - Many existing tests were rewritten for the new rules (loss MUNDA now stakes, 5x amounts, new fee totals). Read the test diff in `153a37c`.
 - Per-issue line counts and test counts in the issues came from the agent's log and were not re-measured.
