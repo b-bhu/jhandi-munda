@@ -334,7 +334,7 @@ async function main() {
       const have = tokenAmount((await info(musdAta)).data);
       if (have < 1_000_000n) throw new Error("wallet needs 1 MUSD to sweep orphan pool funds via D43");
       record("deposit_d43_sweep", await send("deposit 1 MUSD (D43 orphan sweep)", base, [wallet], buildIx(idl, "deposit", {
-        pool: POOL, share_mint: SHARE_MINT, vault: POOL_VAULT, depositor: wallet.publicKey, depositor_ata: musdAta,
+        pool: POOL, config: CONFIG, share_mint: SHARE_MINT, vault: POOL_VAULT, depositor: wallet.publicKey, depositor_ata: musdAta,
         depositor_shares: shareAta, insurance_vault: INSURANCE_VAULT, queue: QUEUE, token_program: TOKEN_PROGRAM,
         system_program: SystemProgram.programId, associated_token_program: ATA_PROGRAM,
       }, u64(1_000_000n))));
@@ -343,7 +343,7 @@ async function main() {
     if (st.shares > 0n && st.vault > 0n) {
       console.log(`  withdrawing all ${st.shares} LP shares to empty the pool`);
       record("withdraw_all_shares", await send("withdraw all LP shares", base, [wallet], buildIx(idl, "withdraw", {
-        pool: POOL, share_mint: SHARE_MINT, vault: POOL_VAULT, withdrawer: wallet.publicKey,
+        pool: POOL, config: CONFIG, share_mint: SHARE_MINT, vault: POOL_VAULT, withdrawer: wallet.publicKey,
         withdrawer_shares: shareAta, withdrawer_ata: musdAta, queue: QUEUE, token_program: TOKEN_PROGRAM,
       }, u64(st.shares))));
       st = await poolState();
@@ -484,7 +484,7 @@ async function main() {
         const depositAmt = shortfall + 1_000_000n;
         if (depositAmt > 0n && shortfall > 0n) {
           record("deposit", await send("deposit (to pay the queue)", base, [wallet], buildIx(idl, "deposit", {
-            pool: POOL, share_mint: SHARE_MINT, vault: POOL_VAULT, depositor: wallet.publicKey, depositor_ata: musdAta,
+            pool: POOL, config: CONFIG, share_mint: SHARE_MINT, vault: POOL_VAULT, depositor: wallet.publicKey, depositor_ata: musdAta,
             depositor_shares: shareAta, insurance_vault: INSURANCE_VAULT, queue: QUEUE, token_program: TOKEN_PROGRAM,
             system_program: SystemProgram.programId, associated_token_program: ATA_PROGRAM,
           }, u64(depositAmt))));
@@ -621,7 +621,7 @@ async function main() {
     }
     const chipsBefore = decodeChips((await info(chips)).data).balance;
     record("deposit", await send("deposit (to pay the queue)", base, [wallet], buildIx(idl, "deposit", {
-      pool: POOL, share_mint: SHARE_MINT, vault: POOL_VAULT, depositor: wallet.publicKey, depositor_ata: musdAta,
+      pool: POOL, config: CONFIG, share_mint: SHARE_MINT, vault: POOL_VAULT, depositor: wallet.publicKey, depositor_ata: musdAta,
       depositor_shares: shareAta, insurance_vault: INSURANCE_VAULT, queue: QUEUE, token_program: TOKEN_PROGRAM,
       system_program: SystemProgram.programId, associated_token_program: ATA_PROGRAM,
     }, u64(depositAmt))));
