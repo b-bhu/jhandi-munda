@@ -3424,6 +3424,44 @@ fn test_session_bet_over_cap_rejected() {
     assert!(place_session_bet(&mut t, &session, &alice.pubkey(), 4, 1_000_000).is_err(), "an expired session is refused");
 }
 
+// A wallet that already holds a cap can grant a new session key: the cap is replaced, so the old
+// key stops working, the spent count starts again and the expiry moves.
+#[test]
+fn test_grant_session_again_replaces_the_cap() {
+    let (mut t, alice, old_key) = session_setup();
+    assert!(open_chip_bet(&mut t, &alice, 0, 2).is_ok());
+    assert!(place_session_bet(&mut t, &old_key, &alice.pubkey(), 2, 10_000_000).is_ok());
+
+    // Thirty seconds later (still inside the join window) the wallet grants a new key, with a new cap.
+    set_time(&mut t, BASE_TIME + 30);
+    let new_key = Keypair::new();
+    t.svm.airdrop(&new_key.pubkey(), 1_000_000_000).unwrap();
+    assert!(grant_session_by(&mut t, &alice, &new_key.pubkey(), 8_000_000, 3600).is_ok(), "a second grant is accepted");
+    put_session_token(&mut t, &alice.pubkey(), &new_key.pubkey(), BASE_TIME + 30 + 3600);
+    let cap = jhandi_munda::state::SessionCap::try_deserialize(
+        &mut t.svm.get_account(&session_cap_pda(&alice.pubkey())).unwrap().data.as_slice(),
+    )
+    .unwrap();
+    assert_eq!(cap.session_signer, new_key.pubkey());
+    assert_eq!((cap.cap, cap.spent, cap.expires_at), (8_000_000, 0, BASE_TIME + 30 + 3600));
+
+    // The old key is refused; the new key bets within its own cap and not above it.
+    assert!(open_chip_bet(&mut t, &alice, 0, 4).is_ok());
+    assert!(place_session_bet(&mut t, &old_key, &alice.pubkey(), 4, 1_000_000).is_err(), "the old key no longer works");
+    assert!(place_session_bet(&mut t, &new_key, &alice.pubkey(), 4, 9_000_000).is_err(), "over the new cap");
+    let r = place_session_bet(&mut t, &new_key, &alice.pubkey(), 4, 8_000_000);
+    assert!(r.is_ok(), "the new key bets: {:?}", r.err().map(|e| e.meta.logs));
+
+    // Another wallet cannot touch Alice's cap: its grant lands on its own PDA.
+    let mallory = new_player(&mut t);
+    assert!(grant_session_by(&mut t, &mallory, &old_key.pubkey(), 1_000_000, 3600).is_ok());
+    let alice_cap = jhandi_munda::state::SessionCap::try_deserialize(
+        &mut t.svm.get_account(&session_cap_pda(&alice.pubkey())).unwrap().data.as_slice(),
+    )
+    .unwrap();
+    assert_eq!(alice_cap.session_signer, new_key.pubkey(), "Alice's cap is unchanged");
+}
+
 #[test]
 fn test_session_key_cannot_use_other_instructions() {
     let (mut t, alice, session) = session_setup();

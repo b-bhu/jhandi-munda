@@ -408,13 +408,12 @@ async function main() {
   record("fund_session_signer", await send("fund session signer 0.02 SOL", base, [wallet],
     SystemProgram.transfer({ fromPubkey: wallet.publicKey, toPubkey: session.publicKey, lamports: 0.02 * LAMPORTS_PER_SOL })));
 
-  if (await info(cap)) {
-    console.log(`grant_session: SessionCap already exists at ${cap.toBase58()}; not re-created (init-only)`);
-  } else {
-    grantSig = record("grant_session", await send("grant_session", base, [wallet], buildIx(idl, "grant_session", {
-      owner: wallet.publicKey, cap, system_program: SystemProgram.programId,
-    }, Buffer.concat([session.publicKey.toBuffer(), u64(SESSION_CAP), i64(SESSION_SECS)]))));
-  }
+  // The cap is one per wallet, and grant_session replaces an existing one (new signer, spent 0,
+  // new expiry), so every run grants its own fresh session key. Needs the program with that change.
+  if (await info(cap)) console.log(`grant_session: SessionCap exists at ${cap.toBase58()}; the grant replaces it`);
+  grantSig = record("grant_session", await send("grant_session", base, [wallet], buildIx(idl, "grant_session", {
+    owner: wallet.publicKey, cap, system_program: SystemProgram.programId,
+  }, Buffer.concat([session.publicKey.toBuffer(), u64(SESSION_CAP), i64(SESSION_SECS)]))));
 
   if (await info(tokenPda)) {
     console.log(`create_session: V1 SessionToken already exists at ${tokenPda.toBase58()}`);

@@ -320,8 +320,10 @@ pub struct GrantSession<'info> {
     #[account(mut)]
     pub owner: Signer<'info>,
 
+    /// One cap per wallet. A second grant replaces the signer, cap, spent and expiry: only the
+    /// wallet can sign it (the seeds carry its key), so it can only reset its own cap.
     #[account(
-        init,
+        init_if_needed,
         payer = owner,
         space = 8 + SessionCap::INIT_SPACE,
         seeds = [SESSION_CAP_SEED, owner.key().as_ref()],
