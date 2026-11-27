@@ -15,8 +15,8 @@ export function TopBar() {
         </Suspense>
         <a href={REPO_URL} target="_blank" rel="noreferrer">GitHub</a>
         <Link href="/get-musd">Get MUSD</Link>
-        <WalletPill />
       </nav>
+      <div className="topbar-wallet"><WalletPill /></div>
     </header>
   );
 }

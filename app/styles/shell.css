@@ -1,6 +1,9 @@
 .mock-strip { width: min(1200px, 100% - 48px); margin: 8px auto 0; display: flex; gap: 10px; align-items: center; font: 600 11px var(--mono); letter-spacing: 0.08em; color: var(--t3); text-transform: uppercase; }
 .mock-strip span { border: 1px dashed var(--gold); color: var(--gold); border-radius: 3px; padding: 3px 8px; }
-.topbar { min-height: 72px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 24px; padding: 8px 40px; }
+.topbar { min-height: 72px; display: grid; grid-template-columns: auto 1fr auto; grid-template-areas: "logo nav wallet"; align-items: center; gap: 4px 24px; padding: 8px 40px; }
+.topbar .logo { grid-area: logo; }
+.topbar nav { grid-area: nav; justify-content: flex-end; }
+.topbar-wallet { grid-area: wallet; }
 .logo { font: 400 26px var(--serif); letter-spacing: -0.01em; }
 .logo i { color: var(--gold); font-style: normal; }
 .topbar nav { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 28px; font-size: 15px; color: var(--t2); }
@@ -11,7 +14,13 @@
 .foot .logo { color: var(--t1); font-size: 24px; }
 .foot .fl { display: flex; flex-wrap: wrap; gap: 4px 18px; }
 .foot .fl a { padding: 10px 0; }
-@media (max-width: 600px) { .topbar { padding: 8px 16px; } .topbar nav { gap: 0 18px; } }
+@media (max-width: 760px) {
+  .topbar { grid-template-columns: 1fr auto; grid-template-areas: "logo wallet" "nav nav"; padding: 8px 16px 0; gap: 0 12px; }
+  /* one row of links that scrolls sideways instead of wrapping onto three lines */
+  .topbar nav { flex-wrap: nowrap; overflow-x: auto; justify-content: flex-start; gap: 0 22px; margin: 0 -16px; padding: 0 16px; white-space: nowrap; scrollbar-width: none; border-top: 1px solid var(--line); }
+  .topbar nav::-webkit-scrollbar { display: none; }
+  .wallet-msg { display: none; }
+}
 .pill:disabled { opacity: 0.6; cursor: default; }
 button.pill { cursor: pointer; font: 600 13px var(--ui); }
 .pill.on { border-color: var(--green); color: var(--green); }

@@ -7,9 +7,11 @@ export function Hero() {
   const im = IMAGES.street;
   return (
     <>
-      <div className="film">
-        <span className="badge"><i />Solana devnet · test MUSD only</span>
-        <Image src={im.src} width={im.width} height={im.height} alt={im.alt} priority unoptimized />
+      <div className="film-wrap">
+        <div className="film">
+          <span className="badge"><i />Solana devnet · test MUSD only</span>
+          <Image src={im.src} alt={im.alt} fill priority sizes="(max-width: 760px) calc(100vw - 32px), (max-width: 1440px) calc(100vw - 80px), 1360px" />
+        </div>
         <Link href="/play" className="cta">Play a round →</Link>
       </div>
       <section className="hero" aria-labelledby="hero-title">
