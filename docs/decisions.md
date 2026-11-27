@@ -26,8 +26,8 @@ Answers from the planning Q&A, in order.
    - *Why:* provably fair, so nobody (including us) can rig a roll, and it's the hackathon host's own tool. Exact API to be checked against current MagicBlock docs before building.
 12. **Session keys:** players approve once with their wallet, then bets go through without a popup each time (MagicBlock session keys).
    - *Why:* smooth, fast play, close to "sign in and just play". Bibhu wants UX framing kept front and centre in every decision. Exact API to be checked against current MagicBlock docs.
-13. **One shared "claim":** every result becomes a claim with three fields: what it pays (MUSD for wins, MUNDA for losses), when it unlocks, and the fee to exit early. The player sees one card with two buttons, "Wait" and "Take now".
-   - *Updated (#121, D45 to D49):* a win claim works as written (Wait: full after 90 s; Take now: 95% from insurance). A loss claim pays MUNDA, but the MUNDA goes straight into the player's stake, never to the wallet (D47), and the amount is fixed when the claim opens (D49). The loser's Take now (10% fewer MUNDA) has no real benefit yet: open problem #124.
+13. **One shared "claim":** every result becomes a claim with three fields: what it pays (USDC for wins, house tokens for losses), when it unlocks, and the fee to exit early. The player sees one card with two buttons, "Wait" and "Take now".
+   - *Update (#121):* the money is MUSD and the house token is MUNDA. Wins keep Wait and Take now. A loss claim pays MUNDA straight into the player's stake (D47), the amount is fixed when the claim opens (D49), and it has Wait only: see D50. The "two buttons" above apply to wins only.
    - *Why:* the same pattern showed up for wins (decision 7) and loser tokens, so building it once saves time in a 7-day build and gives judges one clear story. Token holder rights (pool profit vs insurance fees) still open.
 14. **Token holder rights:** house token holders earn a share of both the pool's edge and the insurance fund's early-exit fees.
    - *Why:* losers become real owners of the whole house, which gives them a reason to stay. Exact split between holders, depositors and treasury still open.
@@ -45,8 +45,8 @@ Answers from the planning Q&A, in order.
    - *Why:* fast, cheap rounds, and the host's flagship tech. Private mode gives privacy-minded players an option. Unverified: how MagicBlock's private ER currently works and what it costs. Check the docs before building; Bibhu: build normal first, add private after; normal is the default. Update 20 Nov: private mode ON HOLD (needs its own table and clashes with the public fairness page).
 21. **Bet currency:** MUSD (Munda USD), our own devnet test stablecoin pegged at $1, with a faucet we control.
 22. **Staking token:** placeholder name `MUNDA`; real name picked in Phase 3.
-23. **Loss claim:** turns into MUNDA after 24 hours (Wait), or right away with a 10% tax (Take now, the 10% is never minted, D35).
-   - *Updated (#121, D45 to D49):* the MUNDA is minted straight into the player's stake, with its lot dated from the loss, so a Wait claim does not wait a second 24 hours to earn (D47). Unstake is refused until the admin transfer switch is on (D46). The amount is 5 MUNDA per $1 on the first $1,000 of all losses ever, then 1 per $1, fixed when the claim opens (D49). The losing bet also pays the 2% fee, taken from the pool side (D45).
+23. **Loss claim:** turns into tokens after 24 hours, or right away with a 10% tax.
+   - *Update (#121):* superseded by D50: a loss claim has no 10% early exit, only the 24-hour Wait for 100%. The MUNDA is minted straight into the stake, dated from the loss (D47). Unstake is refused until the admin transfer switch is on (D46). Amount: 5 MUNDA per $1 on the first $1,000 of all losses ever, then 1 per $1, fixed when the claim opens (D49). The losing bet also pays the 2% fee, from the pool side (D45).
 24. **Fairness page:** each round shows its VRF proof and an Explorer link.
 25. **Demo scope:** one table, one round at a time, up to ~10 players per round. Multi-table after the hackathon.
    - *Why (21–25):* coach recommendations accepted in rapid fire (20 Nov): full control on devnet, no naming detour, a loss unlock that's meaningful but short, cheap proof of fairness for judges, and a scope that fits 7 days.
@@ -71,6 +71,7 @@ Answers from the planning Q&A, in order.
    - *Why:* the UI reads program accounts. Building screens while those accounts are still changing means building them twice. (Bibhu, 20 Nov.)
 35. **Loss Take-now tax:** the 10% cut on a loss Take-now is simply never minted, which works the same as a burn.
    - *Why:* simplest honest rule. No hidden house wallet collects it. (Step 7.3, PR #103, 20 Nov.)
+   - *Update (#121):* superseded by D50. Loser claims have no Take now, so this tax no longer applies to them.
 36. **Win unlock:** a win claim unlocks 90 s after settle for the full 100% Wait payout.
    - *Why:* matches the round length and gives the pool one round to rebalance. (PR #103.)
 37. **MUNDA decimals:** 6, the same as MUSD.
