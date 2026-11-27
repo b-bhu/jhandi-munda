@@ -2,6 +2,30 @@
 
 Devnet only. Program `4nsQ6ntZgpBhsDJt4bN5nu4bBvyqXtD4ReQdhAdSRhtH`, upgrade authority and config admin `5qPRTWcUZw1XYGnXqUCCF65TGBgMjk9BfMyz2VBHacm7` (`keys/dev-wallet.json`, gitignored).
 
+## 27 Nov 2026, evening IST: #130 (grant_session replaces an existing cap)
+- Code: `main` at `906f922` plus #130 (squash-merged as `bc9193d`). `anchor build`, `cargo test -p jhandi_munda`: 96 passed, 0 failed, 1 ignored.
+- `.so` 1,250,568 bytes, program data 1,257,653, so no extend was needed. Upgrade (slot 526874437): [38L9Yru9…](https://explorer.solana.com/tx/38L9Yru9MXvkXNF9G63kbCc46zPC4R6tiQGCt62J6K6PtuU3csQG5VKDAAHhpBM2a4dKz4RcuJhLsy7LfMAeuw6x?cluster=devnet)
+- Review: `GrantSession.cap` goes from `init` to `init_if_needed`, same seeds `["session_cap", owner]` with `owner` a `Signer`. Only the wallet can sign for its own PDA, so nobody else can replace its cap. The handler overwrites owner, signer, cap, spent, expiry and bump. There is no realloc or close, and `init-if-needed` was already on.
+- Full script `node scripts/devnet-checks-112.mjs`, run twice in a row, both with the existing cap replaced and no `InvalidSession` (6057). Checks 2, 3, 4, 5, 6 PASS each time (the "second take_snapshot should fail" line in check 2 is the expected negative test).
+  - Run 1, round 15, faces [2, 2, 4, 5, 5, 2], a 3-match chip win of 4.92 MUSD queued and paid:
+  - grant_session (replaces the old cap): [4z6gVWfi…](https://explorer.solana.com/tx/4z6gVWfixafuY7jteNdHHjYihBLMtVcZrpXdrZ1JYRtGe8Pe5KtpQE54FfbBeH2M9mxe5Cbg1NeisjfCkqdYHY6X?cluster=devnet)
+  - create_session: [TcGWFQ6U…](https://explorer.solana.com/tx/TcGWFQ6U4xJgyTfZJczvJ7MzQKXLyin1sHPSNHmziSkzUbRLYLNEUmeH6XsGKMYK6pGb5YAxTJGfYGwZ6rqHbbi?cluster=devnet)
+  - open_chip_bet: [4VuhrcHP…](https://explorer.solana.com/tx/4VuhrcHPWttvrZ29JwiADrixbHbXE85k6q5p3HFtmzLJ1qsjMDCnqPkNAFxduH1w65ejXMoWXpixMBTcnKg5ZcBw?cluster=devnet)
+  - place_bet_chips_session: [4pQYm7AY…](https://explorer.solana.com/tx/4pQYm7AY7bsa7oLFW5sHG9GpzYSnmtei6egjsErSBkKTrtwe8TqWSJD1HARbjFgPYTLj32KjPkmV8ERG4DjTPZpD?cluster=devnet)
+  - request_roll: [5bFXqWdR…](https://explorer.solana.com/tx/5bFXqWdRBeiUpZSVvMScqMFSWcvw8XGG9x6EaqkrHDEE9RqCA2C1xZvLqcjAw73scc7zcuaZEJLQdjvrfcQPjVP5?cluster=devnet)
+  - settle_chip_bets: [5UzRfFR4…](https://explorer.solana.com/tx/5UzRfFR477hgXN9dexXMZx1FZ9F8RPKJ2yGvCPqRAgJEJsiLEq959HBHgBiZMHchQRhrKkZFYHc9vfkjARNojczd?cluster=devnet)
+  - pay_queue: [4e9e5vuz…](https://explorer.solana.com/tx/4e9e5vuzP1BJrSGajoQGxZ3vjrsHUiLWV22vH5wdjiqKipUEPb9gxLxS9bJ7S6BMja1JxBAaDGzH1x1mbMK3Sjg9?cluster=devnet)
+  - Run 2, round 16, faces [4, 3, 5, 2, 1, 2]:
+  - grant_session (replaces the run 1 cap): [3wtjMmKw…](https://explorer.solana.com/tx/3wtjMmKwJxX3gXewbhmbnShBu3ZyYpnxkn776Auop997t1webeYMzB3j6fbovPTkaBL9K8592phnfXaCpiGQmyS7?cluster=devnet)
+  - create_session: [4QJKfvwy…](https://explorer.solana.com/tx/4QJKfvwyKvQVxpzXtBBhGuv58Ki8bGYbP3vHBZPrvT1mbJ4ropiVTapWGwfKTtE5jgh6cjuGMNTtryk6p3goLK28?cluster=devnet)
+  - open_chip_bet: [WEn7X1s2…](https://explorer.solana.com/tx/WEn7X1s25FtsQeoVm561SXixuUezgvBejwRJfY1h7cTVvGnb88V6FsxR9HBVrEFgM6sEQVU9sDDTWqo1zFNfrgL?cluster=devnet)
+  - place_bet_chips_session: [8FwAXsZ9…](https://explorer.solana.com/tx/8FwAXsZ9WLxkfiqnMvfEekEyvS5LYVf32WQeTi3p52fBsHJepNKDRvbo3c8zThinmrM4R6CekDM6qZsUXZFmXA3?cluster=devnet)
+  - request_roll: [2MNQZRem…](https://explorer.solana.com/tx/2MNQZRemf2qHRbx5VB6mZK8bQUdq6rv6vDAUpFQvsWPVs1Ny8Pod6hX85aPqj6cbwUaVZCS7AQxPZu1Vw3e13vMZ?cluster=devnet)
+  - settle_chip_bets: [fbvBfLuc…](https://explorer.solana.com/tx/fbvBfLucsXMwFybJ3huV8H92QSyHqePSmKKd8ijR2qtEDCiRpfeZzNJFXVyJtHBpQ2nKNWdyD5M66XrvGyATZRr?cluster=devnet)
+  - pay_queue: [LKgsYz1z…](https://explorer.solana.com/tx/LKgsYz1zLX9aeWjW344fyg1FPsRrouukSQVevJsmLSnoaKuwiocwdX5FqCqRF2jbKTLG1oFTGcePDHHE5cBpQBh?cluster=devnet)
+- Not covered here: the ER delegation of the session token and `SessionCap` (still unverified).
+- Side effect: the script withdraws all LP shares each run, so the pool holds only what the round left.
+
 ## 27 Nov 2026, 16:10 IST: Step 18 + #127 + #128
 - Code: `main` at `f9952aa` (program code as of `2525fee`, #128). Built with `anchor build` (anchor-cli 1.0.2, solana-cli 3.1.9). `cargo test -p jhandi_munda`: 94 passed, 0 failed, 1 ignored.
 - `.so` 1,247,672 bytes; program data was 1,187,653, so it was extended by 70,000 bytes first (now 1,257,653).
