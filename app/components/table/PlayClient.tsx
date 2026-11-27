@@ -11,6 +11,8 @@ import { RoundTimer } from "./RoundTimer";
 import { BetPanel } from "./BetPanel";
 import { SessionBadge } from "./SessionBadge";
 import { MyBets } from "./MyBets";
+import { Bowl } from "./Bowl";
+import { DiceRow } from "./DiceRow";
 
 const STATES: TableState[] = ["open", "rolling", "win", "loss", "result"];
 
@@ -50,6 +52,10 @@ export function PlayClient() {
       {round && (
         <Panel example>
           <RoundTimer round={round} />
+          <div className="stage">
+            {round.faces ? <DiceRow faces={round.faces} /> : null}
+            <Bowl status={round.status} />
+          </div>
           <Board selected={selected} onSelect={setSelected} disabled={round.status !== "open"} staked={staked} faces={round.faces} />
         </Panel>
       )}
