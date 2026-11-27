@@ -105,14 +105,18 @@ export interface FairnessBet {
   road: BetRoad;
 }
 
+export interface ProofStep {
+  label: string;
+  detail: string;
+  tx: string | null; // a devnet transaction signature, null when there is none to show
+}
+
 export interface FairnessProof {
   roundId: number;
   faces: number[];
-  requestId: string | null; // the VRF request id, when known
-  requestTx: string;
-  callbackTx: string;
-  settleTx: string | null;
+  steps: ProofStep[];
   bets: FairnessBet[];
+  /** True for made-up data. False only for a real devnet round copied from docs/deploys.md. */
   isExample: boolean;
 }
 

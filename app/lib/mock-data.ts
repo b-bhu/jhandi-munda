@@ -74,22 +74,30 @@ export const SNAPSHOTS: Snapshot[] = NAV_BY_DAY.map(([day, nav]) => ({ day, nav,
 export const ROUND_12: FairnessProof = {
   roundId: 12,
   faces: [2, 2, 4, 6, 4, 5],
-  requestId: null,
-  requestTx: "4hSyiicby5eaYtM8hBzGH5euGPcpyiSQWdqvHht6yZvQ7ZkrGDd27mgy8z8v5iKoo2ZQQzR9SwNwRnqbBFihfcRa",
-  callbackTx: "5aQ75QwPrQafMvV8sbHgZW69afP1fH4N3HaB2tm9jJAZBH83Turikxv1bmL3iq2s4CvmJ8V2Ma8iMap1aXhyAZtF",
-  settleTx: "5XFUaLXUZQcRkQy1BFj4ksjhwYn7eBMm5umXBn9AdZyBfiASyP2ChHZhc6mTaPqDUw9nUhNSP4fde7Hijx4J1hSN",
+  steps: [
+    { label: "Bet placed", detail: "1 MUSD of chips on spade (place_bet_chips)", tx: "45KEdeQTrCqz9yV6smK8U6dYwg5Xw1s19VWgTexnDSDPRwovZqdhrRNnD15y6pMdXGHiBZqBBWuHCnrDVqRYeqob" },
+    { label: "Roll requested", detail: "The 90-second window ended; anyone can ask MagicBlock VRF for randomness (request_roll)", tx: "4hSyiicby5eaYtM8hBzGH5euGPcpyiSQWdqvHht6yZvQ7ZkrGDd27mgy8z8v5iKoo2ZQQzR9SwNwRnqbBFihfcRa" },
+    { label: "VRF callback", detail: "The oracle's randomness is checked and written as six faces (face = byte % 6 + 1)", tx: "5aQ75QwPrQafMvV8sbHgZW69afP1fH4N3HaB2tm9jJAZBH83Turikxv1bmL3iq2s4CvmJ8V2Ma8iMap1aXhyAZtF" },
+    { label: "Settled", detail: "Stakes move to the pool; the 2-match win is owed 2.96 MUSD (settle_chip_bets)", tx: "5XFUaLXUZQcRkQy1BFj4ksjhwYn7eBMm5umXBn9AdZyBfiASyP2ChHZhc6mTaPqDUw9nUhNSP4fde7Hijx4J1hSN" },
+    { label: "Win paid", detail: "The win was queued first, then paid out of the pool (pay_queue)", tx: "5yX32eVCaGaYvXV2nWPxcjM4wAP7egB7d5GAzq8dgxafh9pm64DpkQasJHe1ouuVxrEnMHaNMuMUCsyiqVrUfJLS" },
+    { label: "Round finished", detail: "The round goes idle for the next one (finish_round)", tx: "5bWST8rVjWo1LLv3WgmWn3x2uJEC7s4bmpbo8KUYTAJ7xr2Gort3vHDpe3rb2FR3w6B9EhpeJ5UxSvfLbpRicSfd" },
+  ],
   bets: [{ player: "5qPRTWcUZw1XYGnXqUCCF65TGBgMjk9BfMyz2VBHacm7", symbol: 2, amount: 1n * M, matches: 2, owed: 2_960_000n, road: "chips" }],
   isExample: false,
 };
-export const ROUND_12_PLACE_TX = "45KEdeQTrCqz9yV6smK8U6dYwg5Xw1s19VWgTexnDSDPRwovZqdhrRNnD15y6pMdXGHiBZqBBWuHCnrDVqRYeqob";
-export const ROUND_12_PAY_QUEUE_TX = "5yX32eVCaGaYvXV2nWPxcjM4wAP7egB7d5GAzq8dgxafh9pm64DpkQasJHe1ouuVxrEnMHaNMuMUCsyiqVrUfJLS";
-export const ROUND_12_FINISH_TX = "5bWST8rVjWo1LLv3WgmWn3x2uJEC7s4bmpbo8KUYTAJ7xr2Gort3vHDpe3rb2FR3w6B9EhpeJ5UxSvfLbpRicSfd";
 
 /** Example for any other round id: made-up faces and bets, tagged EXAMPLE on the page. */
 export const EXAMPLE_PROOF_BETS: FairnessProof["bets"] = [
   { player: MOCK_WALLET, symbol: 2, amount: 10n * M, matches: 2, owed: owedFor(10n * M, 2), road: "wallet" },
   { player: "4Fd8mock3333333333333333333333333333Qa11", symbol: 4, amount: 5n * M, matches: 0, owed: 0n, road: "wallet" },
   { player: "BnT6mock4444444444444444444444444444Qb22", symbol: 5, amount: 2n * M, matches: 1, owed: 0n, road: "chips" },
+];
+
+export const EXAMPLE_PROOF_STEPS: FairnessProof["steps"] = [
+  { label: "Bets placed", detail: "Three players bet before the window ended", tx: null },
+  { label: "Roll requested", detail: "Example round: no real transaction behind it", tx: null },
+  { label: "VRF callback", detail: "Example round: no real transaction behind it", tx: null },
+  { label: "Settled", detail: "Example round: no real transaction behind it", tx: null },
 ];
 
 /* The 50-round replay (SIMULATION): a seeded fixture, not real play. See buildReplay below. */

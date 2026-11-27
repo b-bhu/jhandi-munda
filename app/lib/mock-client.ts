@@ -68,7 +68,7 @@ export function createMockClient(state: TableState): GameClient {
     getFairness: async (roundId) => {
       if (roundId === D.ROUND_12.roundId) return wait(D.ROUND_12);
       const faces = D.EXAMPLE_FACES;
-      return wait({ roundId, faces, requestId: null, requestTx: "", callbackTx: "", settleTx: null, bets: D.EXAMPLE_PROOF_BETS, isExample: true });
+      return wait({ roundId, faces, steps: D.EXAMPLE_PROOF_STEPS, bets: D.EXAMPLE_PROOF_BETS, isExample: true });
     },
     getReplay: () => wait(D.buildReplay()),
     faucet: () => wait(D.FAUCET_AMOUNT),
