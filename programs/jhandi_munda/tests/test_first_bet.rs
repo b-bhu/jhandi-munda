@@ -2422,6 +2422,57 @@ fn test_migrate_config_then_delegate() {
     assert!(delegate_round_by(&mut t, &admin).is_ok(), "the admin delegates the round");
 }
 
+// The devnet config before `transfers_enabled` and the overflow fields: the current layout
+// cut back to its first 74 bytes (discriminator, admin, musd_mint, two bumps).
+fn write_v74_config(t: &mut Table, admin: &Pubkey) {
+    let mut acc = t.svm.get_account(&t.config).unwrap();
+    acc.data[8..40].copy_from_slice(admin.as_ref());
+    acc.data.truncate(74);
+    t.svm.set_account(t.config, acc).unwrap();
+}
+
+// The devnet config (74 bytes) is upgraded in place: every old field is kept, the admin
+// included (it is NOT replaced by the upgrade authority), and the new ones start at defaults.
+#[test]
+fn test_migrate_config_74_to_current() {
+    let mut t = setup();
+    stub_vrf(&mut t);
+    let upgrader = t.admin.insecure_clone();
+    let stranger = new_player(&mut t);
+    set_upgrade_authority(&mut t, &upgrader.pubkey());
+    let before = t.svm.get_account(&t.config).unwrap().data;
+    let current_len = 8 + <jhandi_munda::state::ProgramConfig as anchor_lang::Space>::INIT_SPACE;
+    assert_eq!(before.len(), current_len);
+
+    // The admin on devnet is a different key from the upgrade authority.
+    let devnet_admin = Pubkey::new_unique();
+    write_v74_config(&mut t, &devnet_admin);
+    assert_eq!(t.svm.get_account(&t.config).unwrap().data.len(), 74);
+
+    assert!(migrate(&mut t, &stranger).is_err(), "a stranger cannot migrate the config");
+    assert_eq!(t.svm.get_account(&t.config).unwrap().data.len(), 74, "the refused call changed nothing");
+
+    assert!(migrate(&mut t, &upgrader).is_ok(), "the upgrade authority migrates the 74-byte config");
+    let data = t.svm.get_account(&t.config).unwrap().data;
+    assert_eq!(data.len(), current_len, "the config is in the current layout");
+    let cfg = jhandi_munda::state::ProgramConfig::try_deserialize(&mut data.as_slice()).unwrap();
+    assert_eq!(cfg.admin, devnet_admin, "the admin is kept, not replaced");
+    assert_eq!(cfg.musd_mint, t.musd_mint, "the MUSD mint is kept");
+    assert_eq!(&data[8 + 32..8 + 64], &before[8 + 32..8 + 64]);
+    assert_eq!((cfg.bump, cfg.musd_bump), (before[72], before[73]), "bumps are kept");
+    assert!(!cfg.transfers_enabled, "transfers start off (D46)");
+    assert_eq!(cfg.overflow_target, jhandi_munda::OVERFLOW_TARGET);
+    assert_eq!(cfg.overflow_mark, 0);
+    assert!(migrate(&mut t, &upgrader).is_err(), "a second migration is refused");
+
+    // A config of any other length is refused and left alone.
+    let mut acc = t.svm.get_account(&t.config).unwrap();
+    acc.data.truncate(80);
+    t.svm.set_account(t.config, acc).unwrap();
+    assert!(migrate(&mut t, &upgrader).is_err(), "an unknown layout is refused");
+    assert_eq!(t.svm.get_account(&t.config).unwrap().data.len(), 80);
+}
+
 // --- Overflow rule (D48, #120) ---
 
 // The overflow crank: the stake accounts are the remaining accounts.

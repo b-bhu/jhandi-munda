@@ -7,7 +7,9 @@
 //!   so the new size comes from the struct itself (`INIT_SPACE`), not from a number;
 //! - runs once: an account that is not in the expected old length is refused.
 //!
-//! - `migrate_config`: the config (42 -> current). Sets `admin` to the authority (D40).
+//! - `migrate_config`: the config (42 or 74 -> current). From 42 it sets `admin` to the authority
+//!   (D40); from 74 (the layout before `transfers_enabled` and the overflow fields, D46, D48) it keeps
+//!   `admin` and every other field, and the new fields start at their defaults.
 //! - `migrate_table`: the table (34 -> current). New fee pots are zero.
 //! - `migrate_round`: the round (388 -> current). It only grows the account and
 //!   sets `bet_count` and `settled_count` to zero. It does NOT change the status or
@@ -27,6 +29,9 @@ use crate::{
 
 /// The config before `admin`: 8 discriminator + musd_mint 32 + bump 1 + musd_bump 1.
 const OLD_CONFIG_LEN: usize = 8 + 32 + 1 + 1;
+/// The config before `transfers_enabled`, `overflow_target` and `overflow_mark` (the devnet
+/// layout): 8 discriminator + admin 32 + musd_mint 32 + bump 1 + musd_bump 1.
+const CONFIG_V74_LEN: usize = 8 + 32 + 32 + 1 + 1;
 /// The table before the fee pots: 8 discriminator + 34 - 8 = 26 bytes of fields.
 const OLD_TABLE_LEN: usize = 34;
 /// The round before bet_count and settled_count: 8 discriminator + 380 bytes.
@@ -148,16 +153,26 @@ pub fn handle_migrate_config<'info>(ctx: Context<'info, MigrateConfig<'info>>) -
     require_upgrade_authority(&ctx.accounts.program_data.to_account_info(), &authority)?;
 
     let config_info = ctx.accounts.config.to_account_info();
-    let (musd_mint, bump, musd_bump) = {
+    let (admin, musd_mint, bump, musd_bump) = {
         let data = config_info.try_borrow_data()?;
-        require!(data.len() == OLD_CONFIG_LEN, ErrorCode::ConfigAlreadyMigrated);
+        require!(
+            data.len() == OLD_CONFIG_LEN || data.len() == CONFIG_V74_LEN,
+            ErrorCode::ConfigAlreadyMigrated
+        );
         require!(data[0..8] == *ProgramConfig::DISCRIMINATOR, ErrorCode::BetAccountMismatch);
-        (Pubkey::from(<[u8; 32]>::try_from(&data[8..40]).unwrap()), data[40], data[41])
+        let key = |from: usize| Pubkey::from(<[u8; 32]>::try_from(&data[from..from + 32]).unwrap());
+        if data.len() == OLD_CONFIG_LEN {
+            // 42 bytes: no admin yet. The upgrade authority becomes the admin (D40).
+            (authority, key(8), data[40], data[41])
+        } else {
+            // 74 bytes: the admin was set at `initialize`; keep it.
+            (key(8), key(40), data[72], data[73])
+        }
     };
     let new_len = 8 + ProgramConfig::INIT_SPACE;
     grow(&config_info, &ctx.accounts.upgrade_authority.to_account_info(), &ctx.accounts.system_program.to_account_info(), new_len)?;
     let config = ProgramConfig {
-        admin: authority,
+        admin,
         musd_mint,
         bump,
         musd_bump,
@@ -166,7 +181,7 @@ pub fn handle_migrate_config<'info>(ctx: Context<'info, MigrateConfig<'info>>) -
         overflow_mark: 0,
     };
     write_account(&config_info, &config, new_len)?;
-    msg!("Config migrated to the current layout; admin is the upgrade authority");
+    msg!("Config migrated to the current layout; admin is {}", admin);
     Ok(())
 }
 
