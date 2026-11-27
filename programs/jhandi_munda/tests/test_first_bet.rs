@@ -3260,6 +3260,71 @@ fn pay_queue_chips(t: &mut Table, signer: &Keypair, stacks: &[Pubkey]) -> Transa
 }
 
 // #110 (D30): a chip win the pool cannot pay joins the FIFO queue; the round still settles.
+// D51: a losing chip bet opens a MUNDA claim like a wallet loss: same global tally, same 5x
+// bonus, Wait only (D50), minted into the stake dated from the loss. A winning chip bet still has
+// no claim: it was paid into chips at settle.
+#[test]
+fn test_chip_loser_gets_munda_like_a_wallet_loser() {
+    let mut t = setup();
+    stub_vrf(&mut t);
+    let funder = new_player(&mut t);
+    deposit(&mut t, &funder, 100_000_000);
+    init_cage(&mut t, &funder);
+    init_munda(&mut t, &funder);
+    init_staking(&mut t, &funder);
+    let (loser, winner, wallet_loser) = (new_player(&mut t), new_player(&mut t), new_player(&mut t));
+    assert!(buy_chips(&mut t, &loser, 20_000_000).is_ok());
+    assert!(buy_chips(&mut t, &winner, 20_000_000).is_ok());
+
+    // Dice [2, 2, 5, 6, 1, 3]: face 2 wins, face 4 loses.
+    assert!(place_chip_bet(&mut t, &loser, 4, 10_000_000).is_ok());
+    assert!(place_chip_bet(&mut t, &winner, 2, 10_000_000).is_ok());
+    assert!(place(&mut t, &wallet_loser, 4, 4_000_000).is_ok());
+    set_time(&mut t, BASE_TIME + 90);
+    assert!(request_roll(&mut t, &loser).is_ok());
+    let mut randomness = [0u8; 32];
+    randomness[..6].copy_from_slice(&[1, 1, 4, 5, 0, 2]);
+    let request_id = round(&t).request_id;
+    assert!(send_callback(&mut t, &loser, randomness, request_id).is_ok());
+    set_time(&mut t, BASE_TIME + 100);
+    let (lb, wb, wl) = (bet_pda_r(0, &loser, 4), bet_pda_r(0, &winner, 2), bet_pda(&wallet_loser, 4));
+    let (lc, wc) = (chip_stack(&loser), chip_stack(&winner));
+    assert!(settle_chip_bets(&mut t, &loser, &[(lb, lc), (wb, wc)]).is_ok());
+    assert!(settle_bets(&mut t, &loser, &[wl]).is_ok());
+    assert!(finish_round(&mut t, &loser).is_ok());
+
+    // The chip win has no claim; the chip loss does.
+    assert!(open_claim(&mut t, &winner, &wb).is_err(), "a winning chip bet has no claim");
+    assert!(open_claim(&mut t, &loser, &lb).is_ok(), "a losing chip bet opens a claim");
+    // The wallet loss that follows continues the same tally: 10 MUSD already counted.
+    assert!(open_claim(&mut t, &wallet_loser, &wl).is_ok());
+
+    let c = claim(&t, &lb);
+    assert_eq!(c.player, loser.pubkey());
+    assert_eq!(c.asset, ClaimAsset::Munda);
+    assert_eq!(c.amount, 50_000_000, "5 MUNDA per 1 MUSD inside the first $1,000 (D49)");
+    assert_eq!(c.unlock_at, BASE_TIME + 100 + 86_400);
+    assert_eq!(c.early_exit_bps, 0);
+    assert_eq!(claim(&t, &wl).amount, 20_000_000, "the wallet loss is priced after it, same tally");
+    let tally = jhandi_munda::state::LossTally::try_deserialize(
+        &mut t.svm.get_account(&pda(&[jhandi_munda::LOSS_TALLY_SEED])).unwrap().data.as_slice(),
+    )
+    .unwrap();
+    assert_eq!(tally.total_lost, 14_000_000);
+
+    // Wait only: Take now is refused, and nothing mints before the 24 hours are over.
+    assert!(take_now(&mut t, &loser, &lb).is_err(), "no Take now for a loss (D50)");
+    assert!(wait(&mut t, &loser, &lb).is_err(), "not before the unlock");
+    assert_eq!(munda_supply(&t), 0);
+    set_time(&mut t, BASE_TIME + 100 + 86_400);
+    assert!(wait(&mut t, &loser, &lb).is_ok());
+    let s = stake_account(&t, &loser);
+    assert_eq!(s.lots[0], jhandi_munda::state::StakeLot { amount: 50_000_000, staked_at: BASE_TIME + 100 });
+    assert_eq!(munda_supply(&t), 50_000_000, "minted straight into the stake");
+    // The chips are untouched by the claim: the stake was lost at settle, the claim only mints MUNDA.
+    assert_eq!(chip_balance(&t, &loser), 10_000_000);
+}
+
 #[test]
 fn test_chip_win_queues_when_pool_short_then_pays_after_deposit() {
     let mut t = setup();
