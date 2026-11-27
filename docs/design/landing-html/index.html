@@ -1,0 +1,163 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Jhandi Munda Casino — mock</title>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Manrope:wght@400;500;600;700&family=Inter+Tight:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#101216;--surface:#181a20;--surface-2:#1f222a;--raised:#14161b;--line:#ffffff17;--line2:#ffffff24;--line3:#ffffff3d;
+--t1:#fafafa;--t2:#d4d4d4;--t3:#a3a3a3;--t4:#8a8a8a;--corner:#5a5d64;
+--gold:#f2b84b;--gold-h:#ffcf6e;--on-gold:#1d1300;--tilak:#e0483b;--green:#8fd3b6;
+--serif:"Instrument Serif",Georgia,serif;--ui:"Manrope","Inter Tight",system-ui,sans-serif;--sans:"Inter Tight",system-ui,sans-serif;--mono:"JetBrains Mono",ui-monospace,monospace}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--t1);font:500 16px/1.5 var(--sans);letter-spacing:-.01em;-webkit-font-smoothing:antialiased}
+a{color:inherit;text-decoration:none}h1,h2,h3,p{margin:0}
+.wrap{width:min(1120px,100% - 48px);margin:0 auto}
+.top{height:72px;display:flex;align-items:center;justify-content:space-between;padding:0 40px}
+.logo{font:400 26px var(--serif);letter-spacing:-.01em}.logo i{color:var(--gold)}
+.nav{display:flex;gap:30px;align-items:center;font-size:15px;color:var(--t2)}
+.pill{height:36px;padding:0 16px;border-radius:999px;border:1px solid var(--line3);display:inline-flex;align-items:center;font:600 13px var(--ui);color:var(--t1)}
+.film{width:min(1360px,100% - 80px);margin:0 auto;aspect-ratio:16/9;max-height:720px;border-radius:14px;overflow:hidden;position:relative;box-shadow:0 24px 80px #00000073;background:#000}
+.film img{width:100%;height:100%;object-fit:cover;display:block}
+.film:after{content:"";position:absolute;inset:0;background:linear-gradient(180deg,#10121600 55%,#101216cc 100%)}
+.badge{position:absolute;top:18px;left:18px;z-index:2;background:#101216d1;border:1px solid #fff4;border-radius:999px;padding:6px 14px;font:600 12px var(--ui);display:flex;gap:8px;align-items:center}
+.badge i{width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 0 1px #8fd3b640}
+.cta{position:absolute;z-index:2;left:50%;bottom:9%;translate:-50%;height:56px;padding:0 34px;border-radius:999px;background:var(--gold);color:var(--on-gold);font:700 17px var(--ui);display:flex;align-items:center;gap:10px;box-shadow:0 10px 34px #f2b84b59}
+.hero{text-align:center;padding:72px 0 8px;display:flex;flex-direction:column;align-items:center}
+.hero h1{font:600 72px/1.04 var(--ui);letter-spacing:-.035em;max-width:11em;text-wrap:balance;margin-bottom:24px}
+.hero h1 em{font:italic 400 1.08em var(--serif);color:var(--gold);letter-spacing:-.02em}
+.sub{max-width:620px;color:var(--t3);font-size:19px;line-height:1.55;text-wrap:balance}
+.box{background:var(--raised);border:1px solid var(--line2);border-radius:4px;position:relative}
+.box:before,.box:after{content:"";position:absolute;width:14px;height:14px;border:0 solid var(--corner);pointer-events:none;z-index:2}
+.box:before{top:-1px;left:-1px;border-top-width:2px;border-left-width:2px}.box:after{bottom:-1px;right:-1px;border-bottom-width:2px;border-right-width:2px}
+.ctabox{width:min(660px,100%);margin-top:40px;text-align:left}
+.ctabox .h{font:600 13px var(--ui);color:var(--t2);padding:10px 14px 2px}
+.ctabox .b{display:flex;align-items:center}.ctabox code{flex:1;padding:12px 14px 14px;font:14px var(--mono);color:var(--t1)}
+.btn{background:var(--gold);color:var(--on-gold);font:700 13px var(--ui);border-radius:4px;margin:8px;padding:9px 20px;min-width:96px;text-align:center}
+.hint{color:var(--t4);font-size:13.5px;margin-top:14px;display:inline-flex;gap:8px;align-items:center}.hint i{width:7px;height:7px;border-radius:50%;background:var(--gold);box-shadow:0 0 0 1px #f2b84b40}
+.alt{color:var(--t3);margin-top:8px;font-size:14px}
+section.blk{padding-top:128px}
+.rule{font:500 12px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--line3);display:flex;align-items:center;gap:10px}
+.rule .l{color:var(--t3)}.rule b{color:var(--t1);margin-right:4px}.rule .x{flex:1;height:1px;background:var(--line2)}
+h2{font:600 52px/1.1 var(--ui);letter-spacing:-.03em;margin:28px 0 14px}
+.lead{max-width:640px;color:var(--t3);line-height:1.55}
+.pipe{display:grid;grid-template-columns:repeat(3,1fr);margin:40px 0 0;padding:0;list-style:none}
+.pipe li{padding-right:28px}.pn{font:700 15px var(--mono);display:flex;align-items:center;gap:12px}
+.pipe li:not(:last-child) .pn:after{content:"";flex:1;height:1px;margin-right:-28px;background:linear-gradient(90deg,var(--gold),var(--line2) 60%)}
+.pipe h3{font:700 19px/1.3 var(--ui);margin:18px 0 8px}.pipe p{color:var(--t3);font-size:14.5px;line-height:1.55}
+.pipe code{display:block;margin-top:16px;border-left:2px solid var(--gold);padding:4px 0 4px 10px;font:12px/1.6 var(--mono);color:var(--t2)}
+.two{display:grid;grid-template-columns:1.05fr 1fr;gap:48px;margin-top:40px;align-items:start}
+.photo{border-radius:6px;overflow:hidden;border:1px solid var(--line2);position:relative}.photo img{width:100%;display:block}
+.cap{font:11px var(--mono);color:var(--t4);padding:8px 2px}
+table{border-collapse:collapse;width:100%}th,td{text-align:left;padding:13px 12px 13px 0;border-bottom:1px dashed var(--line);font-size:15px}
+th{font:500 12px var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--t4);border-bottom:1px solid var(--line2)}
+td.m{font:700 15px var(--mono)}td.g{font:700 15px var(--mono);color:var(--gold)}
+.note{font-size:13px;color:var(--t4);margin-top:14px;line-height:1.5}
+.symbols{display:flex;gap:10px;margin-top:22px}.sym{width:46px;height:46px;border:1px solid var(--line2);border-radius:4px;display:grid;place-items:center;font-size:22px;background:var(--raised)}
+.dealer{height:420px;background:url(img/dealer-sheet.jpg) no-repeat;background-size:300% auto;background-position:100% 8%}
+.tree{margin-top:36px;font-family:var(--mono)}
+.claims{display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-top:40px}
+.claim{padding:26px 26px 22px}.claim .tag{font:600 12px var(--mono);letter-spacing:.08em;text-transform:uppercase}
+.claim h3{font:700 22px var(--ui);margin:14px 0 6px;letter-spacing:-.02em}.claim p{color:var(--t3);font-size:14.5px}
+.claim .acts{display:flex;gap:10px;margin-top:20px}
+.b1{flex:1;text-align:center;border-radius:4px;padding:12px;font:700 14px var(--ui);background:var(--gold);color:var(--on-gold)}
+.b2{flex:1;text-align:center;border-radius:4px;padding:12px;font:700 14px var(--ui);border:1px solid var(--line3);color:var(--t1)}
+.b2.off{opacity:.35;border-style:dashed}
+.kv{display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px dashed var(--line);font-size:14px;color:var(--t3)}.kv b{font:600 14px var(--mono);color:var(--t1)}
+.ex{display:inline-block;font:600 10px var(--mono);letter-spacing:.08em;border:1px solid var(--line3);color:var(--t3);border-radius:3px;padding:2px 6px;margin-left:8px;vertical-align:middle}
+.nav3{display:grid;grid-template-columns:repeat(3,1fr);margin-top:28px;border-top:1px solid var(--line2);border-bottom:1px solid var(--line2)}
+.fact{padding:20px 22px;color:var(--t3);font-size:14px;line-height:1.5}.fact:first-child{padding-left:0}.fact+.fact{border-left:1px solid var(--line)}
+.fact b{display:block;font:700 16px var(--ui);color:var(--t1);margin-bottom:6px}
+.proof{list-style:none;padding:0;margin:36px 0 0;border-top:1px solid var(--line2)}
+.proof li{display:grid;grid-template-columns:1fr 150px auto;gap:24px;align-items:baseline;padding:16px 0;border-bottom:1px dashed var(--line)}
+.proof .w{font-size:15px;font-weight:500}.proof .c{color:var(--t4);font-size:13px}.proof a{font:13px var(--mono);color:var(--t2)}
+.foot{margin-top:96px;border-top:1px solid var(--line);padding:28px 0 40px;display:flex;justify-content:space-between;align-items:center;color:var(--t4);font-size:13px}
+.foot .logo{font-size:24px;color:var(--t1)}.foot .fl{display:flex;gap:18px}
+.warn{margin-top:28px;font-size:13.5px;color:var(--t3);border:1px dashed var(--line3);border-radius:4px;padding:14px 16px;max-width:760px}
+</style></head><body>
+<header class="top"><span class="logo">jhandi munda<i>.</i></span>
+<nav class="nav"><a>Play</a><a>Pool</a><a>Fairness</a><a>Docs</a><a>GitHub</a><span class="pill">Connect wallet</span></nav></header>
+
+<div class="film"><span class="badge"><i></i>Solana devnet · test MUSD only</span>
+<img src="img/street-scene-wide.jpg" alt=""><span class="cta">Play a round →</span></div>
+
+<main class="wrap">
+<header class="hero">
+<h1>The street dice game, <em>onchain.</em></h1>
+<p class="sub">Six symbol dice, one covered bowl, a 90-second table. The roll comes from MagicBlock’s random number service, so anyone can check it wasn’t rigged.</p>
+<div class="box ctabox"><div class="h">Get free test MUSD, then take a seat</div>
+<div class="b"><code>100 MUSD per click · devnet faucet</code><span class="btn">Get MUSD</span></div></div>
+<p class="hint"><i></i>Hackathon demo · Solana devnet only · no real money</p>
+<a class="alt">Or read how the house works ↓</a>
+</header>
+
+<section class="blk"><div class="rule"><span class="l"><b>01</b> How a round works</span><span class="x"></span></div>
+<h2>Three steps to a bowl reveal.</h2>
+<p class="lead">You need a Solana wallet on devnet. Rounds run in a MagicBlock Ephemeral Rollup, so bets are fast. Approve a session once and bet without a popup on every click.</p>
+<ol class="pipe">
+<li><span class="pn">[1]</span><h3>Pick a symbol, place a bet</h3><p>Heart, spade, diamond, club, crown or flag. $1 minimum. Join the open table or start one with your bet.</p><code>bet: crown · 5 MUSD</code></li>
+<li><span class="pn">[2]</span><h3>The dealer covers the bowl</h3><p>The table stays open for 90 seconds. Then the random number service rolls six dice at once.</p><code>round 12 · 90 s · VRF requested</code></li>
+<li><span class="pn">[3]</span><h3>The bowl opens</h3><p>Count the dice that show your symbol. Two or more is a win. Zero or one is a loss.</p><code>faces: 2 · 2 · 4 · 6 · 4 · 5</code></li>
+</ol></section>
+
+<section class="blk"><div class="rule"><span class="l"><b>02</b> The board and the payouts</span><span class="x"></span></div>
+<h2>The more dice match, the more you win.</h2>
+<p class="lead">Six dice, six symbols each. Pick one symbol and count how many dice land on it.</p>
+<div class="two">
+<div><div class="photo"><img src="img/board.jpg" alt=""></div><div class="cap">board.jpg · the worn cloth, 2 × 3</div></div>
+<div><table><tr><th>Dice matching</th><th>Profit</th><th>You get back</th></tr>
+<tr><td class="m">0 or 1</td><td class="m">—</td><td class="m">0</td></tr>
+<tr><td class="m">2</td><td class="g">2x</td><td class="m">3x</td></tr>
+<tr><td class="m">3</td><td class="g">4x</td><td class="m">5x</td></tr>
+<tr><td class="m">4</td><td class="g">8x</td><td class="m">9x</td></tr>
+<tr><td class="m">5</td><td class="g">25x</td><td class="m">26x</td></tr>
+<tr><td class="m">6</td><td class="g">100x</td><td class="m">101x</td></tr></table>
+<p class="note">“You get back” includes your stake. A 2% fee comes out of a winner’s profit. The table leans slightly to the house (about 3.8% before fees); we publish it instead of hiding it.</p></div>
+</div></section>
+
+<section class="blk"><div class="rule"><span class="l"><b>03</b> The dealer</span><span class="x"></span></div>
+<h2>Watch the bowl, not the wallet.</h2>
+<p class="lead">The dealer shakes the covered bowl, lifts the lid, and the six dice show. Late arrivals see the result too, never a blank board.</p>
+<div class="two" style="grid-template-columns:1fr 1.2fr">
+<div class="photo"><div class="dealer"></div></div>
+<div><div class="photo"><img src="img/dice-and-bowl.jpg" alt=""></div><div class="cap">dice-and-bowl.jpg · six wooden symbol dice, steel bowl and lid</div></div>
+</div></section>
+
+<section class="blk"><div class="rule"><span class="l"><b>04</b> Win or lose</span><span class="x"></span></div>
+<h2>Every result becomes one claim card.</h2>
+<p class="lead">Wins pay in MUSD. Losses pay in MUNDA, a house token that goes straight into your stake. A loss is not a refund.</p>
+<div class="claims">
+<div class="box claim"><span class="tag" style="color:var(--gold)">You won</span><h3>Claim your win</h3><p>Wait 90 seconds for the full payout, or take 95% now. If the pool is short, your win joins a first-in, first-out queue.</p>
+<div class="acts"><span class="b1">Wait · 100%</span><span class="b2">Take now · 95%</span></div></div>
+<div class="box claim"><span class="tag" style="color:var(--tilak)">You lost</span><h3>You earned MUNDA</h3><p>MUNDA is a share of house fees. This is not a refund. After 24 hours it is yours; it goes straight into your stake. First $1,000 of losses earn 5x MUNDA.</p>
+<div class="acts"><span class="b1">Wait · 24h</span><span class="b2 off">Take now · not for losses</span></div></div>
+</div></section>
+
+<section class="blk"><div class="rule"><span class="l"><b>05</b> The house</span><span class="x"></span></div>
+<h2>Anyone can be the house.</h2>
+<p class="lead">Players bet against one shared pool. Deposit test MUSD, get pool shares, and see what they were worth when you bought them and what they’re worth now.</p>
+<div class="two" style="grid-template-columns:1fr 1fr">
+<div class="box" style="padding:22px 24px"><div style="font:600 12px var(--mono);letter-spacing:.08em;color:var(--t4)">YOUR POOL SHARES <span class="ex">EXAMPLE NUMBERS</span></div>
+<div class="kv"><span>You bought at</span><b>$1.00 / share</b></div><div class="kv"><span>Worth now</span><b>$1.25 / share</b></div><div class="kv"><span>Your profit</span><b style="color:var(--green)">+25.0%</b></div>
+<div class="kv"><span>Payout queue</span><b>0 wins waiting</b></div>
+<p class="note">Example only. Live numbers read from the devnet pool. Pool value can go down as well as up.</p></div>
+<div><div class="tree">
+<div class="nav3" style="grid-template-columns:1fr;margin-top:0;border-top:0">
+<div class="fact" style="padding-left:0"><b>Pool shares (LP)</b>Deposit MUSD, get shares at the current NAV. Withdraw any time at today’s NAV.</div>
+<div class="fact" style="padding-left:0;border-left:0;border-top:1px solid var(--line)"><b>MUNDA stake</b>Losers get MUNDA. Stakers share 70% of the 2% fee, plus half of pool gains above $10,000.</div>
+<div class="fact" style="padding-left:0;border-left:0;border-top:1px solid var(--line)"><b>Strict queue</b>When the pool can’t pay, wins queue first-in, first-out and are paid from future losses.</div></div></div></div>
+</div></section>
+
+<section class="blk"><div class="rule"><span class="l"><b>06</b> Proof</span><span class="x"></span></div>
+<h2>Every claim has a transaction.</h2>
+<p class="lead">Each round has a public fairness page: the six faces, the bets, and the Explorer link for the random-number callback.</p>
+<ul class="proof">
+<li><span class="w">Program upgrade on devnet</span><span class="c">Solana devnet</span><a>xCb37j2D…DY41pt ↗</a></li>
+<li><span class="w">Config upgrade (74 to 91 bytes)</span><span class="c">Solana devnet</span><a>4udnHt1F…FKLUPg ↗</a></li>
+<li><span class="w">Dice roll from VRF, round 12</span><span class="c">Solana devnet</span><a>5aQ75QwP…hyAZtF ↗</a></li>
+<li><span class="w">Queued win paid out</span><span class="c">Solana devnet</span><a>5yX32eVC…rUfJLS ↗</a></li></ul>
+<div class="nav3"><div class="fact"><b>Ephemeral Rollup</b>The table runs on MagicBlock’s fast lane. Settled results land back on Solana.</div>
+<div class="fact"><b>Session keys</b>Approve once, then place bets with no wallet popup. Cap and revoke any time.</div>
+<div class="fact"><b>Devnet only</b>Test MUSD from a faucet. No real money, no real USDC, no promised returns.</div></div>
+<p class="warn">Hackathon demo. Gambling games carry risk and may be restricted where you live. Nothing here is financial advice or a promise of returns.</p>
+</section>
+
+<footer class="foot"><span class="logo">jhandi munda</span><span class="fl"><a>Play</a><a>Pool</a><a>Fairness</a><a>Docs</a><a>GitHub</a><a>Explorer ↗</a></span><span>Built for MagicBlock Solana Blitz v10</span></footer>
+</main></body></html>
