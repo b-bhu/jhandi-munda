@@ -12,7 +12,7 @@ use anchor_lang::solana_program::{
 };
 
 use crate::{
-    error::ErrorCode, state::{PayoutQueue, PoolState}, POOL_SEED, POOL_VAULT_SEED, QUEUE_SEED,
+    error::ErrorCode, state::{PayoutQueue, PoolState, ProgramConfig}, CONFIG_SEED, POOL_SEED, POOL_VAULT_SEED, QUEUE_SEED,
     SHARE_MINT_SEED, SPL_TOKEN_PROGRAM_ID,
 };
 
@@ -65,6 +65,11 @@ pub struct Withdraw<'info> {
     /// are queued for payment, so they cannot jump the line (D30).
     #[account(seeds = [QUEUE_SEED], bump)]
     pub queue: AccountLoader<'info, PayoutQueue>,
+
+    /// The config. A withdraw scales `overflow_mark` down with the share of the vault that
+    /// leaves, so LP money going out does not hide later gains (D48, #125).
+    #[account(mut, seeds = [CONFIG_SEED], bump = config.bump)]
+    pub config: Account<'info, ProgramConfig>,
 
     /// CHECK: verified against SPL_TOKEN_PROGRAM_ID in the handler.
     pub token_program: UncheckedAccount<'info>,
@@ -197,6 +202,15 @@ pub fn handler(ctx: Context<Withdraw>, amount: u64) -> Result<()> {
         ],
         &[&[POOL_SEED, &[ctx.bumps.pool]]],
     )?;
+
+    // The money that left was mostly LP money: shrink the overflow baseline by the same share of the
+    // vault (rounded up, so the baseline never sits below what stays in the pool), D48, #125.
+    if vault_amount > 0 {
+        let config = &mut ctx.accounts.config;
+        let kept = (vault_amount - paid) as u128;
+        let mark = (config.overflow_mark as u128 * kept).div_ceil(vault_amount as u128);
+        config.overflow_mark = mark as u64;
+    }
 
     msg!("Withdraw of {} shares paid {} base MUSD", amount, paid);
     Ok(())

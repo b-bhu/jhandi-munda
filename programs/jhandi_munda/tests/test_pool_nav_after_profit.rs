@@ -203,6 +203,7 @@ fn try_deposit(svm: &mut LiteSVM, wallet: &Keypair, pool: &Pubkey, musd_mint: &P
         &jhandi_munda::instruction::Deposit { amount }.data(),
         jhandi_munda::accounts::Deposit {
             pool: *pool,
+            config: Pubkey::find_program_address(&[CONFIG_SEED], &jhandi_munda::id()).0,
             share_mint: *share_mint,
             vault: *vault,
             depositor,
@@ -233,6 +234,7 @@ fn try_withdraw(svm: &mut LiteSVM, wallet: &Keypair, pool: &Pubkey, musd_mint: &
         &jhandi_munda::instruction::Withdraw { amount }.data(),
         jhandi_munda::accounts::Withdraw {
             pool: *pool,
+            config: Pubkey::find_program_address(&[CONFIG_SEED], &jhandi_munda::id()).0,
             share_mint: *share_mint,
             vault: *vault,
             withdrawer,

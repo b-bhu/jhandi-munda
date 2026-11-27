@@ -34,7 +34,7 @@ Why: with the fee on wins only, one MUNDA earned about 1.3 cents over its whole 
 
 ## Open problems (start here)
 - **#124: loser "Take now" is strictly worse than Wait.** Both stake the MUNDA and start earning at the same moment, and unstake is locked either way. Take now only gives 10% fewer tokens. Decision needed: remove it, or give it a real benefit.
-- **#125: overflow pays stakers half of LP deposits.** `distribute_overflow` measures the whole pool vault, and deposits go into the same vault. A $50,000 deposit would let anyone send about $20,000 of it to stakers. D48 says "gains". First step: write a test that reproduces it.
+- **#125 (fixed in its own PR):** overflow counted LP deposits as gains. `deposit` and `withdraw` now keep `overflow_mark` in step with LP money (D48 update). `deposit` and `withdraw` take the `config` account now.
 
 Both were found by reading the code, not by a failing test.
 

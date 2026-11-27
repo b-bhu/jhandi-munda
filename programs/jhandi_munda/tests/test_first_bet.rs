@@ -717,6 +717,7 @@ fn try_deposit(t: &mut Table, funder: &Keypair, amount: u64) -> TransactionResul
         ix(
             jhandi_munda::accounts::Deposit {
                 pool: t.pool,
+                config: t.config,
                 share_mint,
                 vault: t.vault,
                 depositor: funder.pubkey(),
@@ -1278,6 +1279,7 @@ fn lp_withdraw(t: &mut Table, lp: &Keypair, amount: u64) -> TransactionResult {
         ix(
             jhandi_munda::accounts::Withdraw {
                 pool: t.pool,
+                config: t.config,
                 share_mint,
                 vault: t.vault,
                 withdrawer: lp.pubkey(),
@@ -2474,8 +2476,11 @@ fn test_overflow_pays_half_excess_to_eligible_stakers() {
     assert_eq!(token_amount(&t.svm, &t.vault), 10_002_200_000, "at the target nothing moves");
     assert_eq!(stake_account(&t, &a).pending, 0);
 
-    // $2,000 more: assets $12,000, excess $2,000, half of it ($1,000) to stakers.
-    deposit(&mut t, &whale, 2_000_000_000);
+    // $2,000 more, earned by the house (sent straight into the vault, like the mocked profit of
+    // Step 3.4; an LP deposit would not count, #125): assets $12,000, excess $2,000, half of it
+    // ($1,000) to stakers.
+    let vault = t.vault;
+    transfer_musd(&mut t, &whale, &vault, 2_000_000_000);
     assert!(overflow(&mut t, &deployer, &[&a, &b, &c]).is_ok());
     // A has 350 and B 150 eligible MUNDA; C has nothing eligible (24 h lock), so it gets 0.
     assert_eq!(stake_account(&t, &a).pending, 700_000_000, "70% of the $1,000");
@@ -2509,7 +2514,7 @@ fn test_overflow_ignores_lp_deposits() {
     mint_munda(&mut t, &[(&a, 70_000_000), (&b, 30_000_000)]);
 
     // The whale deposits $50,000, far above the $10,000 target.
-    let whale = rich_player(&mut t, 500);
+    let whale = rich_player(&mut t, 530);
     deposit(&mut t, &whale, 50_000_000_000);
     let rewards = pda(&[jhandi_munda::REWARDS_VAULT_SEED]);
     let rewards_before = token_amount(&t.svm, &rewards);
@@ -3546,6 +3551,7 @@ fn test_insolvent_pool_burns_to_zero_then_mints_one_to_one() {
             ix(
                 jhandi_munda::accounts::Deposit {
                     pool: t.pool,
+                    config: t.config,
                     share_mint,
                     vault: t.vault,
                     depositor: bob.pubkey(),
