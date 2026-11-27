@@ -113,6 +113,7 @@ Answers from the planning Q&A, in order.
    - *Known limit:* a bigger mint moves more of the same income (D45 fee, D48 overflow) to early losers; it does not make MUNDA worth more. On devnet the faucet (D33) lets scripts farm the bonus by losing on purpose with many wallets; MUNDA has no value there, so we accept it and do not build for it.
    - *Open:* nothing left from the MUNDA design discussion. Next is putting D45 to D49 into the build plan.
    - *Code:* no change yet. A global loss counter in the pool or config, a bonus field on the claim (`claim_open.rs`), and the mint amount in `claim_redeem.rs`.
+   - *Update (#121):* the Take-now tax line above is superseded by D50. Loss claims are Wait only, so the 5x amount is minted in full at redeem.
 50. **Loser claims have no "Take now"; Wait only (decided 27 Nov, not coded yet, #124).** A loss claim redeems only after its 24-hour unlock, for 100% of its MUNDA. The 10% early-exit path for losers (D35, `LOSS_EARLY_EXIT_BPS`) is removed. Winners keep both Wait and Take now (D7, D35).
    - *Why:* since D47, loss MUNDA goes straight into the stake, dated from the loss, and stays locked either way. Take now gave 10% fewer tokens and no benefit, so no sensible player would pick it. One path is simpler to explain, test and show in the UI. (Bibhu, "Go with your view".)
    - *Code:* `claim_redeem.rs` refuses Take now on a MUNDA claim (new error); `claim_open.rs` stops setting `LOSS_EARLY_EXIT_BPS`; drop the constant if unused; update tests. UI (#122, #59) shows one button for a loss claim.
