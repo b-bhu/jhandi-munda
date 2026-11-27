@@ -4,7 +4,7 @@
  * docs/deploys.md (27 Nov 2026, scripts/devnet-checks-112.mjs --queue-only).
  * Money is bigint base units (6 decimals): 1_000_000n = 1 MUSD.
  */
-import type { Bet, FairnessProof, PoolView, Position, QueueItem, Replay, SessionView, SimRound, Snapshot, StakeView } from "./types";
+import type { Bet, FairnessProof, PoolView, Position, QueueItem, SessionView, Snapshot, StakeView } from "./types";
 import { owedFor } from "./payouts";
 
 const M = 1_000_000n; // one MUSD
@@ -99,31 +99,5 @@ export const EXAMPLE_PROOF_STEPS: FairnessProof["steps"] = [
   { label: "VRF callback", detail: "Example round: no real transaction behind it", tx: null },
   { label: "Settled", detail: "Example round: no real transaction behind it", tx: null },
 ];
-
-/* The 50-round replay (SIMULATION): a seeded fixture, not real play. See buildReplay below. */
-export const REPLAY_SEED = 20261127;
-export const REPLAY_ROUNDS = 50;
-export const REPLAY_START_VAULT = 100n * M;
-export const REPLAY_STAKE = 5n * M;
-export const REPLAY_FORCED: Record<number, number[]> = { 37: [5, 5, 5, 5, 5, 5] }; // six crowns: the 101x story
-export const REPLAY_FORCED_SYMBOL = 5;
-
-export function buildReplay(): Replay {
-  let s = REPLAY_SEED;
-  const rnd = () => ((s = (s * 1_103_515_245 + 12_345) & 0x7fffffff), s);
-  let vault = REPLAY_START_VAULT;
-  const rounds: SimRound[] = [];
-  for (let i = 1; i <= REPLAY_ROUNDS; i++) {
-    const faces = REPLAY_FORCED[i] ?? Array.from({ length: 6 }, () => (rnd() % 6) + 1);
-    const symbol = REPLAY_FORCED[i] ? REPLAY_FORCED_SYMBOL : (rnd() % 6) + 1;
-    const k = faces.filter((f) => f === symbol).length;
-    const owed = owedFor(REPLAY_STAKE, k);
-    vault += REPLAY_STAKE;
-    const paid = owed <= vault ? owed : 0n;
-    vault -= paid;
-    rounds.push({ index: i, symbol, faces, stake: REPLAY_STAKE, matches: k, owed, poolVault: vault, queueOwed: owed - paid, note: k === 6 ? "6 matches: 101x" : undefined });
-  }
-  return { rounds, isSimulation: true };
-}
 
 export const FAUCET_AMOUNT = 100n * M;

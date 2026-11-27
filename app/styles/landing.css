@@ -72,9 +72,6 @@ td.g { font: 700 15px var(--mono); color: var(--gold); }
 .b2.off { opacity: 0.55; border-style: dashed; }
 .two-even { grid-template-columns: 1fr 1fr; }
 .eyebrow { font: 600 12px var(--mono); letter-spacing: 0.08em; color: var(--t4); text-transform: uppercase; }
-.ex { display: inline-block; font: 600 10px var(--mono); letter-spacing: 0.08em; border: 1px solid var(--line3); color: var(--t3); border-radius: 3px; padding: 2px 6px; margin-left: 8px; vertical-align: middle; }
-.kv { display: flex; justify-content: space-between; gap: 12px; padding: 10px 0; border-bottom: 1px dashed var(--line); font-size: 14px; color: var(--t3); }
-.kv b { font: 600 14px var(--mono); color: var(--t1); text-align: right; }
 .fact { padding: 20px 22px 20px 0; color: var(--t3); font-size: 14px; line-height: 1.5; }
 .fact b { display: block; font: 700 16px var(--ui); color: var(--t1); margin-bottom: 6px; }
 .facts .fact + .fact { border-top: 1px solid var(--line); }

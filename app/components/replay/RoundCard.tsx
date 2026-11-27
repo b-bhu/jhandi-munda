@@ -1,24 +1,34 @@
 import type { SimRound } from "@/lib/types";
-import "@/styles/dice.css";
-import { SYMBOLS, symbolName } from "@/lib/symbols";
-import { PAYOUT_MULTIPLIER } from "@/lib/payouts";
+import { symbolName, SYMBOLS } from "@/lib/symbols";
+import { PAYOUT_MULTIPLIER, matches, owedFor } from "@/lib/payouts";
 import { formatMusd } from "@/lib/format";
 import { SymbolIcon } from "@/components/table/SymbolIcon";
+import "@/styles/dice.css";
+
+const STAKE = 1_000_000n; // every simulated bet is 1 MUSD
 
 export function RoundCard({ round }: { round: SimRound }) {
-  const win = round.owed > 0n;
   return (
-    <article className={`claim ${win ? "win-card" : "loss-card"}`}>
-      {round.note && <h3>{round.note}</h3>}
-      <ol className="dice replay-dice" aria-label="Dice">
+    <article className="claim">
+      <ol className="dice replay-dice" aria-label={`Round ${round.id} dice`}>
         {round.faces.map((f, i) => <li key={i} className="die"><SymbolIcon name={symbolName(f)} size={26} /></li>)}
       </ol>
-      <p>
-        Bet {formatMusd(round.stake, 0)} on <b>{SYMBOLS.find((s) => s.id === round.symbol)?.name}</b>: {round.matches} match{round.matches === 1 ? "" : "es"}
-        {PAYOUT_MULTIPLIER[round.matches] ? ` (${PAYOUT_MULTIPLIER[round.matches]}x)` : ""}.{" "}
-        {win ? <span className="win">Owed {formatMusd(round.owed)}.</span> : <span className="loss">Lost the stake.</span>}
-      </p>
-      <p className="dim small">Pool after: {formatMusd(round.poolVault)}{round.queueOwed > 0n ? ` · ${formatMusd(round.queueOwed)} of this win waits in the queue` : ""}</p>
+      {round.bets.length === 0 ? <p className="dim">No bets this round.</p> : (
+        <ul className="sim-bets">
+          {round.bets.map((b, i) => {
+            const k = matches(b.face, round.faces);
+            const owed = owedFor(STAKE, k);
+            return (
+              <li key={i}>
+                Player {b.player + 1} · {SYMBOLS.find((s) => s.id === b.face)?.name} · {k} match{k === 1 ? "" : "es"}
+                {PAYOUT_MULTIPLIER[k] ? ` (${PAYOUT_MULTIPLIER[k]}x)` : ""} ·{" "}
+                {owed > 0n ? <span className="win">owed {formatMusd(owed)}</span> : <span className="loss">lost 1.00 MUSD</span>}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      {round.note && <p className="dim small">{round.note}</p>}
     </article>
   );
 }

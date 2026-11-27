@@ -3,6 +3,7 @@ import type { GameClient, TableState } from "./game-client";
 import type { Bet, Claim, PoolView, Position, Round, SessionView, StakeView, QueueItem } from "./types";
 import * as D from "./mock-data";
 import { owedFor } from "./payouts";
+import type { Replay } from "./types";
 
 const nowSecs = () => Math.floor(Date.now() / 1000);
 const wait = <T,>(v: T) => new Promise<T>((r) => setTimeout(() => r(v), 60));
@@ -70,7 +71,7 @@ export function createMockClient(state: TableState): GameClient {
       const faces = D.EXAMPLE_FACES;
       return wait({ roundId, faces, steps: D.EXAMPLE_PROOF_STEPS, bets: D.EXAMPLE_PROOF_BETS, isExample: true });
     },
-    getReplay: () => wait(D.buildReplay()),
+    getReplay: loadReplay,
     faucet: () => wait(D.FAUCET_AMOUNT),
   };
 }
@@ -81,4 +82,27 @@ function claimFor(b: Bet, now: number): Claim {
     return { id: `c-${b.id}`, betId: b.id, kind: "win", asset: "MUSD", amount: owed, unlockAt: now - 10, status: "ready", takeNowPayout: (owed * D.TAKE_NOW_BPS) / 10_000n, road: b.road };
   }
   return { id: `c-${b.id}`, betId: b.id, kind: "loss", asset: "MUNDA", amount: b.amount * D.LOSS_MUNDA_PER_MUSD, unlockAt: now + D.LOSS_UNLOCK_SECS - 120, status: "locked", takeNowPayout: null, road: b.road };
+}
+
+/** The 50-round simulation, written by scripts/gen-sim.mjs from the real program. Amounts are strings in the file. */
+interface SimFile {
+  seed: number; source: string;
+  rounds: { id: number; bets: { player: number; face: number }[]; faces: number[]; vault: string; navMicro: number; queue: number; insurance: string; note: string | null }[];
+  jackpot: { round: number; owedMusd: string; beforeSettle: SnapFile; afterSettle: SnapFile; afterRound: SnapFile } | null;
+}
+type SnapFile = { vault: string; queue: number; insurance: string };
+
+async function loadReplay(): Promise<Replay> {
+  const res = await fetch("/sim.json");
+  if (!res.ok) throw new Error("The simulation file /sim.json is missing: run node scripts/gen-sim.mjs");
+  const f = (await res.json()) as SimFile;
+  const snap = (x: SnapFile) => ({ vault: BigInt(x.vault), queue: x.queue, insurance: BigInt(x.insurance) });
+  return {
+    isSimulation: true, seed: f.seed, source: f.source,
+    rounds: f.rounds.map((r) => ({ id: r.id, bets: r.bets, faces: r.faces, vault: BigInt(r.vault), nav: BigInt(r.navMicro), queue: r.queue, insurance: BigInt(r.insurance), note: r.note })),
+    jackpot: f.jackpot && {
+      round: f.jackpot.round, owed: BigInt(Math.round(Number(f.jackpot.owedMusd) * 1e6)),
+      beforeSettle: snap(f.jackpot.beforeSettle), afterSettle: snap(f.jackpot.afterSettle), afterRound: snap(f.jackpot.afterRound),
+    },
+  };
 }

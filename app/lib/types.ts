@@ -120,20 +120,36 @@ export interface FairnessProof {
   isExample: boolean;
 }
 
+export interface SimBet { player: number; face: number } // face 1..6, a 1 MUSD chip bet
+
+/** One round of the program simulation (scripts/sim-rounds.sh run in LiteSVM, saved as public/sim.json). */
 export interface SimRound {
-  index: number;
-  symbol: number; // the symbol the simulated player bet on
+  id: number;
+  bets: SimBet[];
   faces: number[];
-  stake: bigint;
-  matches: number;
+  vault: bigint; // pool vault after the round
+  nav: bigint; // pool NAV per share, 6-decimal ratio
+  queue: number; // wins waiting in the payout queue
+  insurance: bigint;
+  note: string | null;
+}
+
+export interface PoolSnap { vault: bigint; queue: number; insurance: bigint }
+
+/** The injected six-match round: a 99 MUSD win the pool could not pay, so it queued. */
+export interface SimJackpot {
+  round: number;
   owed: bigint;
-  poolVault: bigint;
-  queueOwed: bigint;
-  note?: string;
+  beforeSettle: PoolSnap;
+  afterSettle: PoolSnap;
+  afterRound: PoolSnap;
 }
 
 export interface Replay {
   rounds: SimRound[];
-  /** Always true: a replay is a SIMULATION fixture, never real rounds. */
+  jackpot: SimJackpot | null;
+  seed: number;
+  source: string;
+  /** Always true: a replay is a SIMULATION, never real rounds. */
   isSimulation: true;
 }
