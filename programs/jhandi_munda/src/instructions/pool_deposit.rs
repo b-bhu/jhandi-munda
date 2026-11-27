@@ -15,7 +15,7 @@ use anchor_lang::solana_program::{
 };
 
 use crate::{
-    error::ErrorCode, state::{PayoutQueue, PoolState}, ATA_PROGRAM_ID, INSURANCE_VAULT_SEED, POOL_SEED,
+    error::ErrorCode, state::{PayoutQueue, PoolState, ProgramConfig}, ATA_PROGRAM_ID, CONFIG_SEED, INSURANCE_VAULT_SEED, POOL_SEED,
     POOL_VAULT_SEED, QUEUE_CAPACITY, QUEUE_SEED, SHARE_MINT_SEED, SPL_TOKEN_PROGRAM_ID,
 };
 
@@ -74,6 +74,11 @@ pub struct Deposit<'info> {
     /// orphan sweep leaves it in the vault.
     #[account(seeds = [QUEUE_SEED], bump)]
     pub queue: AccountLoader<'info, PayoutQueue>,
+
+    /// The config. A deposit raises `overflow_mark` by the amount put in, so LP money is never
+    /// counted as a gain by `distribute_overflow` (D48, #125).
+    #[account(mut, seeds = [CONFIG_SEED], bump = config.bump)]
+    pub config: Account<'info, ProgramConfig>,
 
     /// CHECK: verified against SPL_TOKEN_PROGRAM_ID in the handler.
     pub token_program: UncheckedAccount<'info>,
@@ -270,6 +275,10 @@ pub fn handler(ctx: Context<Deposit>, amount: u64) -> Result<()> {
         ],
         &[&[POOL_SEED, &[ctx.bumps.pool]]],
     )?;
+
+    // The deposit is LP money, not a gain: lift the overflow baseline by the same amount (D48, #125).
+    let config = &mut ctx.accounts.config;
+    config.overflow_mark = config.overflow_mark.saturating_add(amount);
 
     msg!("Deposit of {} base MUSD minted {} shares", amount, minted);
     Ok(())
