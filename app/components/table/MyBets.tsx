@@ -1,28 +1,30 @@
 import type { Bet } from "@/lib/types";
 import { SYMBOLS } from "@/lib/symbols";
-import { formatMusd } from "@/lib/format";
+import { formatAmount } from "@/lib/format";
+import { profitFor } from "@/lib/payouts";
+import { CornerBox } from "@/components/ui/CornerBox";
+import { ExampleTag } from "@/components/shell/ExampleTag";
+import { SymbolIcon } from "./SymbolIcon";
+import type { RoundStatus } from "@/lib/types";
 
-const RESULT = { open: "waiting", won: "won", lost: "lost" } as const;
-
-export function MyBets({ bets }: { bets: Bet[] }) {
-  if (bets.length === 0) return <p className="dim">No bets in this round yet.</p>;
+/** "My bets this round": one row each. What the row says depends on whether the dice have rolled. */
+export function MyBets({ bets, status }: { bets: Bet[]; status: RoundStatus }) {
   return (
-    <div className="scroll-x" tabIndex={0} role="region" aria-label="My bets table, scrolls sideways on small screens">
-      <table className="t">
-        <thead><tr><th>Symbol</th><th className="num">Stake</th><th>Road</th><th>Result</th></tr></thead>
-        <tbody>
-          {bets.map((b) => (
-            <tr key={b.id}>
-              <td>{SYMBOLS.find((s) => s.id === b.symbol)?.label}</td>
-              <td className="num">{formatMusd(b.amount, 2)}</td>
-              <td>{b.road === "chips" ? "chips" : "wallet"}</td>
-              <td className={b.result === "won" ? "win" : b.result === "lost" ? "loss" : "dim"}>
-                {RESULT[b.result]}{b.matches !== undefined ? ` · ${b.matches} matches` : ""}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <CornerBox className="panel">
+      <div className="ptitle"><span>My bets this round</span><ExampleTag /></div>
+      {bets.length === 0 && <p className="small">No bets yet. Pick a symbol and place one.</p>}
+      {bets.map((b) => {
+        const sym = SYMBOLS.find((s) => s.id === b.symbol)!;
+        const sub = b.result === "open" ? (status === "open" ? `Placed · ${b.road === "chips" ? "chips" : "no popup"}` : "Locked") : `${b.matches ?? 0} dice matched`;
+        const right = b.result === "won" ? `Won +${formatAmount(profitFor(b.amount, b.matches ?? 0))}` : b.result === "lost" ? `Lost −${formatAmount(b.amount)}` : status === "open" ? "Open" : "Waiting";
+        return (
+          <div className="row" key={b.id}>
+            <span className="mini"><SymbolIcon name={sym.name} /></span>
+            <div><div style={{ fontWeight: 600 }}>{sym.label.split(" ")[0]} · {formatAmount(b.amount)} MUSD</div><div className="s">{sub}</div></div>
+            <span className="a kv"><b className={b.result === "won" ? "g" : b.result === "lost" ? "r" : ""} style={{ border: 0 }}>{right}</b></span>
+          </div>
+        );
+      })}
+    </CornerBox>
   );
 }

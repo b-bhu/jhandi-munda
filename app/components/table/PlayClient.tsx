@@ -1,85 +1,42 @@
 "use client";
-import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { getClient, isMock, type TableState } from "@/lib/game-client";
-import type { Bet, Claim, Round, SessionView } from "@/lib/types";
-import type { SymbolId } from "@/lib/symbols";
-import { Panel } from "@/components/ui/Panel";
-import "@/styles/table.css";
-import { Board } from "./Board";
-import { RoundTimer } from "./RoundTimer";
-import { BetPanel } from "./BetPanel";
-import { SessionBadge } from "./SessionBadge";
-import { MyBets } from "./MyBets";
-import { Bowl } from "./Bowl";
-import { DiceRow } from "./DiceRow";
-import { ClaimCard } from "./ClaimCard";
+import { isMock, type TableState as MockState } from "@/lib/game-client";
+import { SectionRule } from "@/components/ui/SectionRule";
+import { ExampleTag } from "@/components/shell/ExampleTag";
+import "@/styles/app-mock.css";
+import "@/styles/app-extra.css";
+import { TableState } from "./TableState";
 
-const STATES: TableState[] = ["open", "rolling", "win", "loss", "result"];
+const SINGLE: MockState[] = ["open", "rolling", "win", "loss", "result"];
 
-/** ?state= picks the look of the mock table for screenshots. It is ignored against the real program. */
-function useTableState(): TableState | undefined {
-  const raw = useSearchParams().get("state");
-  return isMock() && STATES.includes(raw as TableState) ? (raw as TableState) : undefined;
-}
-
+/**
+ * /play. In mock mode `?state=open|rolling|win|loss|result` shows one example phase, and `?state=all`
+ * stacks A, B and C like the design mock (for screenshots). It is ignored against the real program.
+ */
 export function PlayClient() {
-  const state = useTableState();
-  const client = useMemo(() => getClient(state), [state]);
-  const [round, setRound] = useState<Round | null>(null);
-  const [bets, setBets] = useState<Bet[]>([]);
-  const [selected, setSelected] = useState<SymbolId | null>(null);
-  const [claims, setClaims] = useState<Claim[]>([]);
-  const [session, setSession] = useState<SessionView | null>(null);
-
-  useEffect(() => {
-    let live = true;
-    const off = client.subscribeRound((r) => live && setRound(r));
-    client.getMyBets().then((b) => live && setBets(b));
-    client.getMyClaims().then((c) => live && setClaims(c));
-    client.getSession().then((x) => live && setSession(x));
-    return () => { live = false; off(); };
-  }, [client]);
-
-  const staked: Partial<Record<SymbolId, bigint>> = {};
-  for (const b of bets) staked[b.symbol] = (staked[b.symbol] ?? 0n) + b.amount;
-
-  const place = async (symbol: SymbolId, amount: bigint) => {
-    const bet = await client.placeBet(symbol, amount);
-    setBets((b) => [...b, bet]);
-  };
-
+  const raw = useSearchParams().get("state");
+  const mock = isMock();
+  const all = mock && raw === "all";
+  const one = mock && SINGLE.includes(raw as MockState) ? (raw as MockState) : undefined;
   return (
-    <div className="page">
-      <h1>The table</h1>
-      {round && (
-        <Panel example>
-          <RoundTimer round={round} />
-          <div className="stage">
-            {round.faces ? <DiceRow faces={round.faces} /> : null}
-            <Bowl status={round.status} />
-          </div>
-          <Board selected={selected} onSelect={setSelected} disabled={round.status !== "open"} staked={staked} faces={round.faces} />
-        </Panel>
-      )}
-      {claims.length > 0 && (
-        <Panel title="Your results" example>
-          <div className="claims">
-            {claims.map((c) => (
-              <ClaimCard key={c.id} claim={c} onRedeem={async (id, how) => { const done = await client.redeemClaim(id, how); setClaims((cs) => cs.map((x) => (x.id === id ? done : x))); }} />
-            ))}
-          </div>
-        </Panel>
-      )}
-      <div className="grid-2">
-        <Panel title="Place a bet" example>
-          <SessionBadge session={session} onStart={() => client.startSession().then(setSession)} onRevoke={() => client.revokeSession().then(setSession)} />
-          <BetPanel symbol={selected} open={round?.status === "open"} onPlace={place} />
-        </Panel>
-        <Panel title="My bets" example>
-          <MyBets bets={bets} />
-        </Panel>
+    <div className="app">
+      <div className="ph">
+        <SectionRule n="TABLE 1">Round 13 <ExampleTag /></SectionRule>
+        <h1>Pick a symbol. <em>Watch the bowl.</em></h1>
+        <p className="lead">Public 90-second table on a MagicBlock Ephemeral Rollup. Bets are test MUSD on Solana devnet.</p>
       </div>
+      {all ? (
+        <>
+          {([["A", "Betting open", "open"], ["B", "Bowl covered · rolling", "rolling"], ["C", "Result and claims", "result"]] as const).map(([k, label, st]) => (
+            <section className="state" key={k} aria-label={`State ${k}: ${label}`}>
+              <div className="stlabel"><b>State {k}</b>{label}<span className="x" /></div>
+              <TableState mock={st} preselect={2} />
+            </section>
+          ))}
+        </>
+      ) : (
+        <section className="state" style={{ marginTop: 32 }}><TableState mock={one} preselect={mock ? 2 : undefined} /></section>
+      )}
     </div>
   );
 }

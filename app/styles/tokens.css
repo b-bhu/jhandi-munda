@@ -97,3 +97,10 @@ table.t { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
 .backlink { display: inline-flex; align-items: center; min-height: 44px; }
 .steps a, .docs-list a { display: inline-flex; align-items: center; min-height: 44px; }
 @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+
+/* shared: the numbered section rule and the lead paragraph */
+.rule { font: 500 12px/1 var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--line3); display: flex; align-items: center; gap: 10px; }
+.rule .l { color: var(--t3); }
+.rule b { color: var(--t1); margin-right: 4px; }
+.rule .x { flex: 1; height: 1px; background: var(--line2); }
+.lead { max-width: 640px; color: var(--t3); line-height: 1.55; }

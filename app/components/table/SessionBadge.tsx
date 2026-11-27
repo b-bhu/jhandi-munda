@@ -1,25 +1,21 @@
 "use client";
 import type { SessionView } from "@/lib/types";
-import { formatMusd, formatWait } from "@/lib/format";
+import { formatAmount } from "@/lib/format";
 import { useNow } from "@/components/ui/useNow";
 
-/** Session keys (D12): approve once, then bets go through without a wallet popup, up to a cap. */
+/** Session keys (D12): approve once, then bets need no wallet popup, up to a cap. Start and revoke live here. */
 export function SessionBadge({ session, onStart, onRevoke }: { session: SessionView | null; onStart: () => void; onRevoke: () => void }) {
   const now = useNow();
   if (!session) return null;
   if (!session.active) {
     return (
-      <div className="session off">
-        <span>Session off: every bet asks your wallet.</span>
-        <button type="button" className="btn ghost" onClick={onStart}>Start a 1-hour session</button>
-      </div>
+      <p className="note"><span className="pill2">Session off</span> &nbsp;every bet asks your wallet · <button type="button" className="linkbtn" onClick={onStart}>start a 1-hour session</button></p>
     );
   }
-  const left = now ? session.expiresAt - now : 0;
+  const mins = now ? Math.max(0, Math.round((session.expiresAt - now) / 60)) : null;
   return (
-    <div className="session on">
-      <span>Session on · spent {formatMusd(session.spent, 0)} of {formatMusd(session.cap, 0)} cap · {now ? formatWait(left) : "…"} left</span>
-      <button type="button" className="btn ghost" onClick={onRevoke}>Revoke</button>
-    </div>
+    <p className="note">
+      <span className="pill2 g">Session on</span> &nbsp;{mins === null ? "…" : mins} min left · bets need no wallet popup (cap {formatAmount(session.cap, 0)} MUSD) · <button type="button" className="linkbtn" onClick={onRevoke}>revoke</button>
+    </p>
   );
 }

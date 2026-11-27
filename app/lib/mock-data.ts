@@ -16,20 +16,22 @@ export const TAKE_NOW_BPS = 9_500n; // winners only (D50)
 export const MOCK_WALLET = "7Qe2mock1111111111111111111111111111Wlt9";
 export const MOCK_SIGNER = "9Kx4mock2222222222222222222222222222Ssn3";
 
-/** Faces of the example round: spade shows twice (a 2-match win); club never shows (a loss). */
-export const EXAMPLE_FACES = [2, 2, 5, 6, 1, 3];
-export const OPEN_SECONDS_LEFT = 68;
+/** Faces of the example round: spade and club show twice, crown and flag once; heart and diamond never. */
+export const EXAMPLE_FACES = [2, 2, 4, 4, 5, 6];
+export const OPEN_SECONDS_LEFT = 72;
 export const EXAMPLE_PLAYERS = 4;
-export const ROUND_ID_EXAMPLE = 21;
+export const ROUND_ID_EXAMPLE = 13;
+/** What all players have on each symbol this round (the cloth totals). */
+export const SYMBOL_TOTALS: Record<number, bigint> = { 1: 14n * M, 2: 31n * M, 3: 6n * M, 4: 9n * M, 5: 22n * M, 6: 3n * M };
 
 export const WALLET_MUSD = 100n * M;
-export const SESSION: SessionView = { active: true, signer: MOCK_SIGNER, cap: 15n * M, spent: 4n * M, expiresAt: 0 };
-export const SESSION_SECS_LEFT = 2_460;
+export const SESSION: SessionView = { active: true, signer: MOCK_SIGNER, cap: 50n * M, spent: 7n * M, expiresAt: 0 };
+export const SESSION_SECS_LEFT = 58 * 60;
 
-/** Bets of the example result state: a $10 spade (2 matches, a win) and a $5 club (no match, a loss). */
+/** My two bets: a $5 spade (2 dice match, a win) and a $2 heart (no match, a loss). */
 export const MY_BETS: Bet[] = [
-  { id: "b1", roundId: ROUND_ID_EXAMPLE, symbol: 2, amount: 10n * M, road: "wallet", result: "won", matches: 2, owed: owedFor(10n * M, 2) },
-  { id: "b2", roundId: ROUND_ID_EXAMPLE, symbol: 4, amount: 5n * M, road: "wallet", result: "lost", matches: 0 },
+  { id: "b1", roundId: ROUND_ID_EXAMPLE, symbol: 2, amount: 5n * M, road: "wallet", result: "won", matches: 2, owed: owedFor(5n * M, 2) },
+  { id: "b2", roundId: ROUND_ID_EXAMPLE, symbol: 1, amount: 2n * M, road: "wallet", result: "lost", matches: 0 },
 ];
 /** A loss mints MUNDA at 5x inside the first $1,000 of all losses (D49), Wait only after 24 h (D50). */
 export const LOSS_MUNDA_PER_MUSD = 5n;

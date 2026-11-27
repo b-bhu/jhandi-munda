@@ -18,12 +18,7 @@
 .hint i { width: 7px; height: 7px; border-radius: 50%; background: var(--gold); box-shadow: 0 0 0 1px #f2b84b40; }
 .alt { color: var(--t3); margin-top: 8px; font-size: 14px; padding: 10px 0; }
 section.blk { padding-top: 128px; }
-.rule { font: 500 12px/1 var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--line3); display: flex; align-items: center; gap: 10px; }
-.rule .l { color: var(--t3); }
-.rule b { color: var(--t1); margin-right: 4px; }
-.rule .x { flex: 1; height: 1px; background: var(--line2); }
 .blk h2 { font: 600 52px/1.1 var(--ui); letter-spacing: -0.03em; margin: 28px 0 14px; }
-.lead { max-width: 640px; color: var(--t3); line-height: 1.55; }
 .pipe { display: grid; grid-template-columns: repeat(3, 1fr); margin: 40px 0 0; padding: 0; list-style: none; }
 .pipe li { padding-right: 28px; }
 .pn { font: 700 15px var(--mono); display: flex; align-items: center; gap: 12px; }

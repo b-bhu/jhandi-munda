@@ -9,6 +9,8 @@ export interface Round {
   openedAt: number; // unix seconds, 0 when idle
   closesAt: number; // openedAt + 90
   players: number;
+  /** Everyone's stake on each symbol (the cloth totals), base units. */
+  totals: Partial<Record<SymbolId, bigint>>;
   faces: number[] | null; // six faces 1..6 once rolled
 }
 
