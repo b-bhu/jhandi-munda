@@ -39,7 +39,7 @@ Why: with the fee on wins only, one MUNDA earned about 1.3 cents over its whole 
 Both were found by reading the code, not by a failing test.
 
 ## Before deploying to devnet
-- The config account grew by one byte (the transfer switch). `migrate_config` only handles the oldest layout, so the devnet config needs its own migration.
+- The config account grew by 17 bytes, not one (`transfers_enabled` 1, `overflow_target` 8, `overflow_mark` 8): 74 -> 91. `migrate_config` now takes the 42-byte and the 74-byte layouts, keeping the admin from 74. Check the real size of the devnet config account before running it; any other length is refused.
 - Loss claims opened before the 5x change keep their old amounts (no backfill).
 - Many existing tests were rewritten for the new rules (loss MUNDA now stakes, 5x amounts, new fee totals). Read the test diff in `153a37c`.
 - Per-issue line counts and test counts in the issues came from the agent's log and were not re-measured.
