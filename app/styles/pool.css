@@ -1,6 +1,6 @@
-.pool-note { margin-top: 10px; }
-.bar { height: 10px; border-radius: 999px; background: var(--bg); overflow: hidden; }
-.stats.pos { margin-bottom: 16px; }
-.pool-forms { margin-top: 4px; }
-.chart { width: 100%; height: auto; display: block; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.app .chart { display: block; }
+.app .tabs button { background: none; border: 0; padding: 8px 12px; font: 600 13px var(--ui); color: var(--t3); border-bottom: 2px solid transparent; margin-bottom: -1px; cursor: pointer; min-height: 44px; }
+.app .tabs button.on { color: var(--t1); border-color: var(--t1); }
+.app .tabs { align-items: flex-end; }
+.app .pool-note { margin-top: 10px; }
