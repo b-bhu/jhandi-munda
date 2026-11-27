@@ -17,7 +17,7 @@ export function WinLose() {
           <div className="acts"><span className="b1">Wait · 100%</span><span className="b2">Take now · 95%</span></div>
         </CornerBox>
         <CornerBox className="claim">
-          <span className="tag-l" style={{ color: "var(--tilak)" }}>You lost</span>
+          <span className="tag-l" style={{ color: "var(--tilak-text)" }}>You lost</span>
           <h3>You earned MUNDA</h3>
           <p>MUNDA is a share of house fees. This is not a refund. After 24 hours it is yours; it goes straight into your stake. The first $1,000 of losses earn 5x MUNDA. Chip bets earn it too.</p>
           <div className="acts"><span className="b1">Wait · 24h</span><span className="b2 off">Take now · not for losses</span></div>

@@ -5,7 +5,7 @@ import { formatMusd, shortKey } from "@/lib/format";
 
 export function MatchesTable({ bets }: { bets: FairnessBet[] }) {
   return (
-    <div className="scroll-x">
+    <div className="scroll-x" tabIndex={0} role="region" aria-label="Bets and matches table, scrolls sideways on small screens">
       <table className="t">
         <thead><tr><th>Player</th><th>Symbol</th><th className="num">Stake</th><th className="num">Matches</th><th className="num">Pays</th><th className="num">Owed</th></tr></thead>
         <tbody>

@@ -158,7 +158,7 @@ export default function GetMusdPage() {
   }
 
   return (
-    <main className="center">
+    <div className="center">
       <h1>Get MUSD</h1>
       <p>
         Devnet test chips for the Jhandi Munda Casino. MUSD is our $1 test
@@ -172,9 +172,9 @@ export default function GetMusdPage() {
         Mint: <code>{MUSD_MINT.toBase58()}</code> —{" "}
         <a href={explorer(`address/${MUSD_MINT.toBase58()}`)}>open on Solana Explorer</a>
       </p>
-      <Link href="/">← Back to the casino</Link>
+      <Link href="/" className="backlink">← Back to the casino</Link>
       <p>
-        <button onClick={getMusd} disabled={busy}>
+        <button className="btn" onClick={getMusd} disabled={busy}>
           {busy ? "Working…" : "Get MUSD"}
         </button>
       </p>
@@ -192,6 +192,6 @@ export default function GetMusdPage() {
       )}
       {status !== null && <p>{status}</p>}
       {error !== null && <p role="alert">{error}</p>}
-    </main>
+    </div>
   );
 }

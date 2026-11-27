@@ -14,7 +14,7 @@ export function StakeCard({ stake }: { stake: StakeView }) {
         <div className="stat"><b>{formatAmount(stake.eligible)}</b><span>Earning now (staked 24 h+)</span></div>
         <div className="stat"><b>{formatMusd(stake.pending)}</b><span>Rewards credited</span></div>
       </div>
-      <div className="scroll-x pool-note">
+      <div className="scroll-x pool-note" tabIndex={0} role="region" aria-label="Stake lots table, scrolls sideways on small screens">
         <table className="t">
           <thead><tr><th>Lot</th><th className="num">MUNDA</th><th>Status</th></tr></thead>
           <tbody>

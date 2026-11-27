@@ -15,6 +15,6 @@
 .pill:disabled { opacity: 0.6; cursor: default; }
 button.pill { cursor: pointer; font: 600 13px var(--ui); }
 .pill.on { border-color: var(--green); color: var(--green); }
-.pill.bad { border-color: var(--tilak); color: var(--tilak); }
+.pill.bad { border-color: var(--tilak); color: var(--tilak-text); }
 .wallet-wrap { display: inline-flex; flex-direction: column; align-items: flex-start; gap: 2px; }
 .wallet-msg { font: 11px var(--mono); color: var(--t4); max-width: 220px; }

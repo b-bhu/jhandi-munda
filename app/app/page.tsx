@@ -13,14 +13,14 @@ export default function Home() {
   return (
     <>
       <Hero />
-      <main className="wrap">
+      <div className="wrap">
         <Steps />
         <Payouts />
         <Dealer />
         <WinLose />
         <House />
         <Proof />
-      </main>
+      </div>
     </>
   );
 }

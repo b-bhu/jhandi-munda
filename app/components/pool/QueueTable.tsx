@@ -8,7 +8,7 @@ export function QueueTable({ items }: { items: QueueItem[] }) {
   const now = useNow();
   if (items.length === 0) return <p className="dim">The queue is empty: every win was paid at once.</p>;
   return (
-    <div className="scroll-x">
+    <div className="scroll-x" tabIndex={0} role="region" aria-label="Payout queue table, scrolls sideways on small screens">
       <table className="t">
         <thead><tr><th>#</th><th>Player</th><th className="num">Owed</th><th className="num">Waiting</th></tr></thead>
         <tbody>

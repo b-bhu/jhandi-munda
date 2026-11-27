@@ -19,7 +19,8 @@
   --ink-dim: var(--t3);
   --brass: var(--gold);
   --win: var(--green);
-  --loss: var(--tilak);
+  --tilak-text: #f0776b;
+  --loss: var(--tilak-text);
   --warn: var(--gold);
   --cloth: #e6dabf;
   --cloth-ink: #2a2418;
@@ -44,7 +45,7 @@ code { overflow-wrap: anywhere; }
 .win { color: var(--win); }
 .loss { color: var(--loss); }
 
-main.center { min-height: 100vh; display: grid; place-items: center; }
+.center { min-height: 70vh; display: grid; place-items: center; align-content: center; padding: 16px; gap: 8px; }
 .page { width: 100%; max-width: var(--maxw); margin: 0 auto; padding: 16px; display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--gap); }
 .grid-2 { display: grid; gap: var(--gap); grid-template-columns: minmax(0, 1fr); }
 @media (min-width: 800px) { .grid-2 { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
@@ -88,3 +89,11 @@ table.t { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
 .docs-list li { display: grid; gap: 2px; padding: 12px 0; border-bottom: 1px dashed var(--line); }
 .docs-list li:last-child { border-bottom: 0; }
 .docs-list a { padding: 6px 0; }
+
+/* accessibility */
+:focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; border-radius: 2px; }
+.skip { position: absolute; left: 8px; top: -60px; z-index: 50; background: var(--gold); color: var(--on-gold); padding: 10px 16px; border-radius: 4px; font: 700 14px var(--ui); }
+.skip:focus { top: 8px; }
+.backlink { display: inline-flex; align-items: center; min-height: 44px; }
+.steps a, .docs-list a { display: inline-flex; align-items: center; min-height: 44px; }
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }

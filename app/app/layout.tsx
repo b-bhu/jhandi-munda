@@ -23,9 +23,10 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html lang="en" className={`${serif.variable} ${ui.variable} ${sans.variable} ${mono.variable}`}>
       <body>
+        <a className="skip" href="#main">Skip to content</a>
         <MockStrip />
         <TopBar />
-        {children}
+        <main id="main">{children}</main>
         <Footer />
       </body>
     </html>

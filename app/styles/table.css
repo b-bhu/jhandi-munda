@@ -15,7 +15,8 @@
 .session .btn { padding: 6px 12px; min-height: 36px; }
 .stage { display: grid; justify-items: center; gap: 10px; padding: 10px 0 14px; }
 .bowl { display: grid; justify-items: center; gap: 4px; }
-.bowl.rolled { opacity: 0.55; transform: scale(0.7); margin-top: -20px; }
+.bowl.rolled { margin-top: -20px; }
+.bowl.rolled svg { opacity: 0.55; transform: scale(0.7); }
 .bowl.rolled .bowl-lid { transform: translate(40px, -26px) rotate(14deg); transition: transform 0.5s; }
 .bowl.rolling svg { animation: shake 0.35s infinite; }
 @keyframes shake { 0%, 100% { transform: translateX(0) rotate(0); } 25% { transform: translateX(-5px) rotate(-3deg); } 75% { transform: translateX(5px) rotate(3deg); } }
