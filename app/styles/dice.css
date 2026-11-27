@@ -1,0 +1,5 @@
+/* Dice shared by the table, the fairness page and the replay. */
+.dice { list-style: none; display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; margin: 0; padding: 0; width: 100%; max-width: 360px; }
+.die { display: grid; place-items: center; aspect-ratio: 1; background: var(--cloth); color: var(--cloth-ink); border-radius: 8px; box-shadow: 0 2px 0 rgba(0, 0, 0, 0.4); animation: drop 0.4s both; }
+@keyframes drop { from { transform: translateY(-14px) rotate(-12deg); opacity: 0; } to { transform: none; opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .die { animation: none; } }

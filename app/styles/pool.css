@@ -1,0 +1,6 @@
+.pool-note { margin-top: 10px; }
+.bar { height: 10px; border-radius: 999px; background: var(--bg); overflow: hidden; }
+.stats.pos { margin-bottom: 16px; }
+.pool-forms { margin-top: 4px; }
+.chart { width: 100%; height: auto; display: block; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }

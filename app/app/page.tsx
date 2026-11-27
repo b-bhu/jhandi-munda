@@ -1,10 +1,26 @@
+import { Hero } from "@/components/landing/Hero";
+import { Steps } from "@/components/landing/Steps";
+import { Payouts } from "@/components/landing/Payouts";
+import { Dealer } from "@/components/landing/Dealer";
+import { WinLose } from "@/components/landing/WinLose";
+import { House } from "@/components/landing/House";
+import { Proof } from "@/components/landing/Proof";
+import "@/styles/landing.css";
+
+export const metadata = { title: "Jhandi Munda Casino · devnet" };
+
 export default function Home() {
   return (
-    <main>
-      <h1>Jhandi Munda Casino - devnet</h1>
-      <p>
-        <a href="/get-musd">Get MUSD</a> (devnet faucet, 100 MUSD per click)
-      </p>
-    </main>
+    <>
+      <Hero />
+      <div className="wrap">
+        <Steps />
+        <Payouts />
+        <Dealer />
+        <WinLose />
+        <House />
+        <Proof />
+      </div>
+    </>
   );
 }
