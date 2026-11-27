@@ -139,7 +139,7 @@ Do the game on Solana devnet first, then wrap the live round in a normal ER, the
 
 **What.** Every result becomes one claim: asset (MUSD for a win, MUNDA for a loss), unlock time, and early-exit fee (decision 13). A win unlocks in full after 90 seconds, or 95% now from the insurance fund, which later collects 100% and keeps 5% (decision 7). A loss becomes MUNDA after 24 hours at 1 MUNDA per 1 MUSD lost (decisions 23, 26); a loss claim has Wait only, no Take now (decision 50). The first $1,000 of cumulative losses mints 5x; the bonus is stored in the claim when it opens, not at redeem (decision 49). MUNDA is minted only when the loss claim is redeemed, and it is minted straight into the player's stake, merged into the newest lot and dated from the loss (decision 47). Insurance does not advance MUSD for losses.
 **Why.** One primitive, two uses, and the "losers become owners" story.
-**Done-when.** Tests redeem a win both ways (full after 90s, 95% instantly) and a loss both ways (full MUNDA after 24h, 90% now), the mint supply only rises on redeem, no loose MUNDA appears in the wallet, and a loss inside the first $1,000 mints 5x while one after it mints 1x.
+**Done-when.** Tests redeem a win both ways (full after 90s, 95% instantly) a loss redeems by Wait only (full MUNDA after 24h; Take now is refused, D50), the mint supply only rises on redeem, no loose MUNDA appears in the wallet, and a loss inside the first $1,000 mints 5x while one after it mints 1x.
 
 ### 8. FIFO payout queue
 
