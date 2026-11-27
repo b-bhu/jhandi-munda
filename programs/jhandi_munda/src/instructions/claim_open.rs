@@ -53,8 +53,9 @@ pub struct OpenClaim<'info> {
 pub fn handle_open_claim(ctx: Context<OpenClaim>) -> Result<()> {
     let bet = &ctx.accounts.bet;
     require!(bet.settled, ErrorCode::BetNotSettled);
-    // A chip bet is paid into chips at settle (D39); it has no claim.
-    require!(!bet.paid_with_chips, ErrorCode::ChipBetSettledToChips);
+    // A winning chip bet is paid into chips at settle (D39), or queued by chip stack, so it has no
+    // claim. A losing chip bet earns MUNDA like any loss (D51): same tally, same 5x bonus.
+    require!(!(bet.paid_with_chips && bet.owed > 0), ErrorCode::ChipBetSettledToChips);
 
     // A win pays its owed MUSD after one round (D7). A loss pays MUNDA after 24 hours (D23), Wait
     // only (D50): its early-exit rate is 0 and `redeem_take_now` refuses a MUNDA claim.

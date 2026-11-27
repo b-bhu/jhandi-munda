@@ -29,7 +29,7 @@ Why: with the fee on wins only, one MUNDA earned about 1.3 cents over its whole 
 1. Bet and roll: stakes go to the table, six dice roll after the 90-second window.
 2. Settle (`settle.rs`): each stake moves into the pool vault. A win is owed stake plus 98% of profit (fee 2% of profit). A loss is owed nothing and books a fee of 2% of the stake from pool money. Fees go into three pots (insurance, devs, stakers) that still sit in the pool vault until `distribute_fees`.
 3. Winner: a chip bet is paid at once if the queue is empty and the pool can pay, otherwise it joins the FIFO queue. A normal bet gets a claim with two buttons: Wait (full after 90 s) or Take now (95% from insurance). Take now is for winners only (D50).
-4. Loser: a claim is opened (anyone can open it). The MUNDA amount is fixed then (5 per $1 on the first $1,000 of losses, then 1 per $1) and unlocks 24 hours after the loss.
+4. Loser: a claim is opened (anyone can open it), for a wallet bet or a chip bet (D51). The MUNDA amount is fixed then (5 per $1 on the first $1,000 of losses, then 1 per $1, one tally for both roads) and unlocks 24 hours after the loss. A winning chip bet has no claim: it was paid or queued at settle.
 5. Redeem: a win pays by Wait (100%) or Take now (95%). A loss has Wait only (D50, `redeem_take_now` refuses a MUNDA claim with `LossClaimWaitOnly`), 100% of its MUNDA after the 24 hours. The MUNDA goes straight into the stake, dated from the loss.
 6. Unstake is refused while `transfers_enabled` is off.
 7. Value to stakers, only for stakes older than 24 hours and only while the payout queue is empty: `distribute_fees` (70% slice) and `distribute_overflow` (half of assets above $10,000).

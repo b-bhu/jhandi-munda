@@ -122,3 +122,4 @@ Answers from the planning Q&A, in order.
 51. **Chip-road losers get MUNDA too (decided 27 Nov, not coded yet).** A losing chip bet earns MUNDA exactly like a wallet bet: same loss tally, same 5x early bonus (D49), minted straight into the stake (D47) after 24 hours (D50).
    - *Why:* today `claim_open.rs` refuses every chip bet (`ChipBetSettledToChips`), so a chip loser gets nothing while a wallet loser gets MUNDA. The fast lane is the main demo path, so it must not quietly pay losers less. (Bibhu, "Go with your view".)
    - *Code:* in `claim_open.rs`, refuse only winning chip bets (they are already paid in chips at settle, D39); allow losing chip bets to open a MUNDA claim. Tests: a chip loss opens a claim, gets the right MUNDA (5x inside the first $1,000), and a chip win still cannot open a claim.
+   - *Done (Step 18.9, #126):* coded as above (`bet.paid_with_chips && bet.owed > 0` is refused). Test: `test_chip_loser_gets_munda_like_a_wallet_loser`.
