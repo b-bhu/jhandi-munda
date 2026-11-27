@@ -32,7 +32,17 @@ Phase 1 (plan) is already done: 32 decisions are locked in `docs/decisions.md`. 
 source scripts/env.sh
 anchor build
 anchor test          # runs `cargo test` (LiteSVM); needs the .so from `anchor build`
-cd app && pnpm build # when the change touches the frontend
 ```
+
+For a change under `app/` (the same steps CI runs, in `.github/workflows/app-ci.yml`):
+
+```bash
+cd app
+pnpm install --frozen-lockfile
+pnpm lint && pnpm typecheck && pnpm test && pnpm build
+node --test ../scripts/gen-sim.test.mjs   # the simulation fixture parser
+```
+
+`pnpm typecheck` runs `next typegen` first, because `PageProps` and `LayoutProps` are generated types.
 
 A sub-issue is only done when its **Done when** and **Acceptance checks** all pass, not merely when the code compiles.
