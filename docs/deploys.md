@@ -57,9 +57,17 @@ Devnet only. Program `4nsQ6ntZgpBhsDJt4bN5nu4bBvyqXtD4ReQdhAdSRhtH`, upgrade aut
   - A winning chip bet (face 4, 2 matches, 2.96 MUSD paid into chips at settle) still has no claim: open_claim refused with `ChipBetSettledToChips` (6044): [5xgC2L5h…](https://explorer.solana.com/tx/5xgC2L5h9Yq4wwSrWpMRqZKLeFAyDpx9W3WaTmt3x6yogHQTNvVHNZVii3pd76yxWLfRaNZyWYgF7jhAY4zWEhy5?cluster=devnet)
   - Round 14, faces [2, 5, 5, 1, 3, 1]: request_roll [5DuBfq6J…](https://explorer.solana.com/tx/5DuBfq6JzUr6npQrQgC3qrfLGigEHQ3JiQhGjjLteUDQQ81iW7HanrV6JMiJ4dWv7h55em5BMyk3RafhwRpLN1Aj?cluster=devnet), settle_chip_bets [5Rqjdspf…](https://explorer.solana.com/tx/5RqjdspfbtW2YbjusKAUju3GBsmEcBMHH1gZSk3H5HBE6q7CkLvFL9Ry5FQT2C9Y5sJx5jZE637vdL6FbHwftCLS?cluster=devnet), settle_bets [55ynF3oz…](https://explorer.solana.com/tx/55ynF3ozbJB8gQSbeLPiSJokYtg2KinSYCVsNgxNu8j9P2jB3rD26y781etU44YqfN7ZJRWZGU78VnUcRjXbDHC6?cluster=devnet), finish_round [4Wu4rYus…](https://explorer.solana.com/tx/4Wu4rYusk2ZFfkMom3b5oApu9ogyYtPLuxoyywKYTF5ACnymvZmdnmUBJgyVXWoc7YvzvQfFTPeeD2a8dC1ca1z1?cluster=devnet).
   - Wallet (MUSD) win, face 1 (2 matches, owed 2.960000): open_claim [5mwcJntb…](https://explorer.solana.com/tx/5mwcJntb3Sm98vyvZpyUVJ856wmog57DD4cpvQwi7mpTjb8d4cJJLa8b4QpV6NXkiQwipwKcAV1FCeZXs1ZizFaR?cluster=devnet) (early_exit_bps 500), then Take now [2fD9emSZ…](https://explorer.solana.com/tx/2fD9emSZFUVfATSQEsjPTMUqKv5anWLBHM4iXiYSXqAudH4A8aGufiyyS7AJfXavcDHx1v4xSjpeXBabKaW1m7TG?cluster=devnet) paid 2.812000 (95%).
-- Not tested: Wait redeem of a loss claim (needs 24h; claims unlock at +24h from settle, ~28 Nov 2026 ~17:00 IST). The loss MUNDA stake credit and the stake account creation therefore are covered by unit tests only so far.
+- (Now tested, see the 28 Nov entry below.) Wait redeem of a loss claim (needed 24h; claims unlock at +24h from settle, ~28 Nov 2026 ~17:00 IST). The loss MUNDA stake credit and the stake account creation therefore are covered by unit tests only so far.
 - State after: loss tally 2.000000 MUSD; pool vault 47.08 MUSD; this wallet holds the 2 loss claims (bets `4Vh99mf8…`, `8dKM68VD…`) to redeem by Wait after 24h.
 - Script note: `scripts/devnet-loss-claims-126.mjs` is a standalone proof script (does not use session keys, so the #130 rerun bug does not affect it).
+
+## 28 Nov 2026, ~17:05 IST: Wait redeem of the two round-13 loss claims (devnet)
+- Script: `node scripts/devnet-redeem-wait-loss.mjs` (reuses helpers from the #126 proof script; admin/test wallet, devnet only).
+- Wallet (MUSD) loss claim, bet `4Vh99mf8…`: redeem_wait [d4ZkEfYC…](https://explorer.solana.com/tx/d4ZkEfYC23xys1LupkFXp8MkZpgX4C8Sv5pntQVBsMR3eAyMnyEmB4ByELc7zJ8yy2xSydV7MCdgeVdQ5gWLwu8?cluster=devnet) paid the full 5.000000 MUNDA into the stake. Stake account created (5.000000 staked), stake vault +5.000000.
+- Chip-bet loss claim, bet `8dKM68VD…`: redeem_wait [2QAxJJQp…](https://explorer.solana.com/tx/2QAxJJQpVAE6K5j9qGHu7Qddb6gSZct1JdAB7T1dsuRzEEmuUa25zB7m6Td1BcnMfM356gffj3gE8LF1AQ9ECnqG?cluster=devnet) paid the full 5.000000 MUNDA, merged into the existing stake (now 10.000000 staked), stake vault +5.000000.
+- The stake start date is the loss date (settle time, ~27 Nov 2026 17:00 IST), not the redeem date.
+- Unstake of 1 MUNDA is refused with `TransfersDisabled` (6064) while transfers_enabled is off: [4rCqpAPp…](https://explorer.solana.com/tx/4rCqpAPpk7wPVdGA3hW3FVWgHBNJG1pXEiQvqvBNxm4kCN5dU52DqJpKNua5oFN16m4fqJcmG1t6qz4ZLHUu5vnZ?cluster=devnet).
+
 
 ## Earlier records (20 to 26 Nov 2026): first deploy, MUSD mint, pool, first VRF roll
 Moved here from the README. These are the first devnet transactions; later deploys are listed above.
