@@ -1,0 +1,46 @@
+name: app
+
+# Lint, type-check, test and build the Next.js app on every pull request and on main.
+# Devnet and mock data only: no keys, no deploys, no secrets are used here.
+on:
+  pull_request:
+    paths: ["app/**", "scripts/gen-sim.mjs", "scripts/gen-sim.test.mjs", ".github/workflows/app-ci.yml"]
+  push:
+    branches: [main]
+    paths: ["app/**", "scripts/gen-sim.mjs", "scripts/gen-sim.test.mjs", ".github/workflows/app-ci.yml"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: app-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  app:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+      # pnpm's version comes from "packageManager" in app/package.json.
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: app/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: app/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      # `next typegen` writes the PageProps/LayoutProps types that `tsc` needs.
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm build
+      - name: Simulation fixture parser
+        run: node --test ../scripts/gen-sim.test.mjs
